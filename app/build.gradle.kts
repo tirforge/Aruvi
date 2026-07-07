@@ -24,20 +24,20 @@ android {
         create("tv") {
             dimension = "device"
             targetSdk = 30
-            versionCode = 9
-            versionName = "3.0.0"
+            versionCode = 10
+            versionName = "1.0.0"
         }
         create("mobile") {
             dimension = "device"
             targetSdk = 36
-            versionCode = 12
-            versionName = "0.2.2"
+            versionCode = 13
+            versionName = "1.0.0"
         }
     }
 
     defaultConfig {
         applicationId = "com.aruvi.tir"
-        minSdk = 29
+        minSdk = 28
 
         val serverUrl = localProperties.getProperty("TELEGRAM_TV_SERVER_URL", "https://movie.aaruvi.space")
         buildConfigField("String", "DEFAULT_SERVER_URL", "\"$serverUrl\"")

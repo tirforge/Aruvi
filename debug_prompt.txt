@@ -1,0 +1,19 @@
+I'm getting HTTP 500 errors from the Android app at `/api/stream/{file_id}` but the web frontend works fine with the same URL. Both use `?token=<token>`.
+
+The server runs FastAPI on uvicorn with 14 Telegram clients. The streaming endpoint uses `parallel_stream_generator` with multi-client parallel downloads.
+
+Also experiencing random buffering during playback — the video pauses and rebuffers even though chunks are being fetched in parallel. The 100MB lookahead cushion (PREBUFFER_CHUNKS=100 in streaming.py) should absorb Telegram latency spikes, but it's depleting. This suggests workers are stalling.
+
+Please investigate:
+
+1. Read `/api/status` — show the ring buffer logs for any "Stream failed", "BATCH ABORT", "BATCH SLOW", "FETCH ONE", "BATCH TINY", "BATCH EMPTY", or "LOOKAHEAD timeout" entries
+2. Check if there are any recent crashed or OOM events
+3. Read `backend/app/routers/streaming.py` — look at the `stream_file` endpoint and `file_streamer` generator
+4. Read `backend/app/streaming.py` — look at `parallel_stream_generator`, `_fetch_batch`, and `_byte_accurate_file_stream` for any exception that could produce a 500 that only affects Android (not web)
+5. Check the `parse_range_header` function — does Android send a Range header format that breaks parsing?
+6. Read `backend/app/auth.py` — check `get_current_user_opt` and `verify_token_payload` for token type mismatches when Android sends both `Authorization: Bearer` header AND `?token=` query param
+7. The key difference: Android uses OkHttp + AuthInterceptor (sends `Authorization` header), web uses browser fetch (sends `?token=` query param only). Is there a code path where the Bearer token succeeds auth but causes a downstream 500?
+8. Check `_fetch_batch` and `_fetch_one` failure rates — how many batches are aborting vs completing? A high abort rate means workers spend most time in retry/fallback instead of fetching data, causing the lookahead to drain.
+9. Check `_retry_chunk_with_alt_client` — how often is it called? Each call has up to 5 cycles of exponential backoff (31 seconds total) — one stuck retry can drain the 100MB buffer.
+
+Return the full traceback of any 500 errors found, the exact line in the code where the crash occurs, and counts of batch failures vs successes from the logs.

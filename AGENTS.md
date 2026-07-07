@@ -45,9 +45,14 @@ Default: `https://movie.aaruvi.space`. Override in `local.properties` (`TELEGRAM
 - **gradle.properties**: `-Xmx8g -XX:MaxMetaspaceSize=512m`, parallel + caching, 4 workers
 - **TV targetSdk 30** — `RenderEffect` (requires API 31+) not used; brightness lift via alpha dim (0.88→1.0)
 - **No bouncy springs** on TV — use `DampingRatioNoBouncy` + `StiffnessHigh`
-- **Double-tap seek** — mobile only, left half rewind 10s, right half forward 10s
+- **Double-tap seek** — mobile only, left half rewind 10s, right half forward 10s (accelerates: 10→30→60→120→300s on rapid repeats within 1.5s)
 - **Subtitles default off** — `PlayerViewModel` init disables `C.TRACK_TYPE_TEXT`
 - **Move picker dialog** — self-contained, uses `loadFolderTree` suspend lambda; internal navigation stack
+- **ExoPlayer buffer config** at `di/PlayerModule.kt:78-82` — `setBufferDurationsMs(min=32000, max=64000, playback=10000, rebuffer=10000)`
+- **3 OkHttp clients** in `NetworkModule.kt` — API (30s timeout), streaming (no timeout), download (120s); modify the right one
+- **AuthInterceptor** (`data/api/AuthInterceptor.kt`) — adds Bearer token from session, retries on 401 with token refresh
+- **Coil pre-configured** — `TelePlayApp.kt` registers an `ImageLoaderFactory`; all `AsyncImage` usage uses it automatically
+- **Chromecast crash history** in `docs/cast.md` — `CastContext` must init on main thread; `PendingIntent.FLAG_MUTABLE` required for API 31+
 
 ## Entrypoints
 - TV: `ui/MainActivity.kt` → `ui/navigation/NavGraph.kt`

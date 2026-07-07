@@ -17,6 +17,7 @@ import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import com.aruvi.tir.BuildConfig
 import com.aruvi.tir.download.FileDownloader
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
@@ -89,8 +90,11 @@ object NetworkModule {
         gson: Gson,
         settingsRepository: SettingsRepository
     ): Retrofit {
-        val serverUrl = runBlocking {
-            settingsRepository.getServerUrl()
+        val defaultUrl = BuildConfig.DEFAULT_SERVER_URL.ifBlank { "https://movie.aaruvi.space" }
+        val serverUrl = try {
+            runBlocking { settingsRepository.getServerUrl() }
+        } catch (e: Exception) {
+            defaultUrl
         }
         val baseUrl = if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/"
 

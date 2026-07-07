@@ -281,7 +281,14 @@ class MobileHomeViewModel @Inject constructor(
         viewModelScope.launch {
             val serverUrl = settingsRepository.getServerUrl()
             val publicLinkResult = filesRepository.getPublicLink(file.id, serverUrl)
-            val streamUrl = publicLinkResult.getOrElse { "$serverUrl/api/stream/${file.id}" }
+            val streamUrl = publicLinkResult.getOrElse {
+                val token = authRepository.getAccessToken()
+                if (token != null) {
+                    "$serverUrl/api/stream/${file.id}?token=$token"
+                } else {
+                    "$serverUrl/api/stream/${file.id}"
+                }
+            }
             
             try {
                 val intent = Intent(Intent.ACTION_VIEW).apply {

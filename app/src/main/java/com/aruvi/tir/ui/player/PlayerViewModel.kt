@@ -562,11 +562,13 @@ class PlayerViewModel @Inject constructor(
                         mediaSourceFactory = DefaultMediaSourceFactory(context)
                     } else {
                         val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
+                        val token = authRepository.getAccessToken()
 
-                        // Note: Authentication is already handled by AuthInterceptor in OkHttp,
-                        // which is used by the DefaultDataSource.Factory provided via Hilt.
-                        
-                        val streamUrl = "$serverUrl/api/stream/$currentFileId"
+                        val streamUrl = if (token != null) {
+                            "$serverUrl/api/stream/$currentFileId?token=$token"
+                        } else {
+                            "$serverUrl/api/stream/$currentFileId"
+                        }
                         mediaItem = MediaItem.Builder()
                             .setUri(streamUrl)
                             .setMediaId(currentFileId.toString())
@@ -637,7 +639,12 @@ class PlayerViewModel @Inject constructor(
             val publicLinkResult = filesRepository.getPublicLink(file.id, serverUrl)
             
             val streamUrl = publicLinkResult.getOrElse {
-                "$serverUrl/api/stream/${file.id}"
+                val token = authRepository.getAccessToken()
+                if (token != null) {
+                    "$serverUrl/api/stream/${file.id}?token=$token"
+                } else {
+                    "$serverUrl/api/stream/${file.id}"
+                }
             }
             
             try {

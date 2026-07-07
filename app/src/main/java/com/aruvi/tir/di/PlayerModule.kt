@@ -4,17 +4,18 @@ import android.content.Context
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DefaultLoadControl
-import com.aruvi.tir.data.repository.AuthRepository
+import com.aruvi.tir.data.api.AuthInterceptor
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
-import kotlinx.coroutines.runBlocking
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
 /**
@@ -42,26 +43,22 @@ object PlayerModule {
     }
 
     /**
-     * Provide HTTP data source factory with auth header.
+     * Provide HTTP data source factory using OkHttp with AuthInterceptor.
+     * Uses its own OkHttpClient (no body-level logging — that would OOM on large streams).
      */
     @OptIn(UnstableApi::class)
     @Provides
     @Singleton
     fun provideDataSourceFactory(
         @ApplicationContext context: Context,
-        authRepository: AuthRepository
+        authInterceptor: AuthInterceptor
     ): DefaultDataSource.Factory {
-        val httpFactory = DefaultHttpDataSource.Factory().apply {
-            val headers = runBlocking {
-                val token = authRepository.getAccessToken()
-                if (token != null) mapOf("Authorization" to "Bearer $token") else emptyMap()
-            }
-            setDefaultRequestProperties(headers)
-            setConnectTimeoutMs(30_000)
-            setReadTimeoutMs(60_000)
-            setAllowCrossProtocolRedirects(true)
-        }
-        
+        val streamingClient = OkHttpClient.Builder()
+            .addInterceptor(authInterceptor)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .build()
+        val httpFactory = OkHttpDataSource.Factory(streamingClient)
         return DefaultDataSource.Factory(context, httpFactory)
     }
 
@@ -80,8 +77,8 @@ object PlayerModule {
             .setBufferDurationsMs(
                 32_000, // min buffer
                 64_000, // max buffer
-                2_500,  // buffer for playback
-                5_000   // buffer for rebuffering
+                10_000, // buffer for playback
+                10_000  // buffer for rebuffering
             )
             .build()
 

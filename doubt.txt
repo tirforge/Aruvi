@@ -1,0 +1,81 @@
+HidenCloud Pre-Setup Doubts — v3 (final)
+==========================================================
+
+[ ] STORAGE PERSISTENCE — Does /root and /home survive container restarts?
+    Test: echo test > /root/test && reboot && cat /root/test
+    Risk: All sessions/config lost on restart if not persistent
+
+[ ] SWAP — Claimed "1.5GB SWAP" — verify:
+    Test: swapon --show
+    Risk: OOM kills if SWAP missing and RAM spikes (unlikely but worth checking)
+
+[ ] STORAGE TYPE — NVMe or network block?
+    Test: lsblk -d -o name,rota (0=SSD, 1=HDD)
+    Risk: SQLite performs poorly on network block storage
+
+[ ] CRON @REBOOT — Does cron run @reboot jobs in tini-based container?
+    Test: crontab -e → "@reboot touch /root/cron-test" → reboot → check
+    Risk: tmux sessions + services won't auto-start after restart
+
+[ ] LLM API OUTBOUND — Can it reach OpenAI/Anthropic/OpenRouter APIs?
+    Test: curl -s -o /dev/null -w "%{http_code}" https://api.openai.com
+    Risk: Free hosts sometimes block external LLM API calls
+
+[ ] TELEGRAM API OUTBOUND — Can it reach Telegram's Bot API?
+    Test: curl -s -o /dev/null -w "%{http_code}" https://api.telegram.org
+    Risk: Bot won't start if Telegram is blocked
+
+[ ] RESOURCE ABUSE POLICY — HidenCloud says >25% shared resources = deletion
+    Risk: opencode during heavy sessions could trigger this
+    Mitigation: Monitor usage, throttle if needed
+
+[ ] SINGLE FREE SERVICE LIMIT — Only 1 free service per user
+    Risk: If you already have another HidenCloud free service, this gets deleted
+
+[ ] MULTI-ACCOUNT DETECTION — System detects multiple accounts
+    Risk: Using throwaway accounts = all banned
+
+==========================================================
+SELENIUM RENEWAL (kanezikii/hidencloud-renew)
+==========================================================
+
+[ ] COOKIE EXPIRY ON GH ACTIONS — Cookies invalidated by runner IP changes
+    Risk: Auto-renewal fails silently — check logs weekly
+
+[ ] DASHBOARD UI CHANGES — Selenium relies on DOM selectors
+    Risk: If HidenCloud changes their dashboard HTML, renewal breaks
+    Mitigation: Star the repo, watch for updates
+
+[ ] CAPTCHA — Does HidenCloud dashboard ever show captcha during renewal?
+    Risk: Selenium can't solve captchas -> hard blocker
+
+[ ] RENEWAL TIMING — Schedule renewal 1-2 days BEFORE expiry, not same day
+    Risk: GH Actions cron delays could cause suspension if cutting it close
+
+==========================================================
+CF TUNNEL
+==========================================================
+
+[ ] CLOUDFLARED INSTALL — Is cloudflared available for aarch64 Debian?
+    Likely yes — verify: cloudflared has arm64 Debian packages
+    Check: apt policy cloudflared
+
+[ ] SSH VIA CF TUNNEL LATENCY — SSH over CF Tunnel adds ~50-200ms
+    Impact: opencode TUI might feel slightly laggy — acceptable for occasional use
+
+[ ] WEB UI VIA CF TUNNEL — opencode web works behind CF Tunnel
+    Note: WebSockets needed for live updates — CF Tunnel supports WS natively
+
+==========================================================
+OPencode + TELEGRAM BOT
+==========================================================
+
+[ ] NODE VERSION — What Node.js is available on the server?
+    Check: node --version
+    Need: Node 18+ for opencode / Node 20+ recommended for telegram bot
+
+[ ] TMUX SESSION SURVIVAL — If @reboot cron doesn't work, use HidenCloud panel
+    "startup command" feature (if available) as fallback
+
+[ ] BACKUP RECOVERY — If container IS terminated (missed renewal), how to restore?
+    Need: Automated backup of SQLite DB to GitHub daily
