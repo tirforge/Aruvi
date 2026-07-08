@@ -32,10 +32,13 @@ No workflow files in Aruvi. All CI lives in `Thirupathi-pirate/Aruvi-workflow`.
 git push origin main          # Aruvi dev repo
 git push workflow main        # trigger release build on Aruvi-workflow
 ```
-Remote: `git remote add workflow https://github.com/Thirupathi-pirate/Aruvi-workflow.git` (already configured).
+Add the workflow remote if missing:
+```bash
+git remote add workflow https://github.com/Thirupathi-pirate/Aruvi-workflow.git
+```
 
 ## Signing
-Passwords via env vars (`RELEASE_STORE_PASSWORD`, `RELEASE_KEY_PASSWORD`) or `local.properties`. Keystore: `../my-release-key.jks` (relative to `app/`).
+Passwords via env vars (`RELEASE_STORE_PASSWORD`, `RELEASE_KEY_PASSWORD`) or `local.properties`. Keystore: `../my-release-key.jks` (relative to `app/`). Env vars override `local.properties`.
 
 ## Server URL
 Default: `https://movie.aaruvi.space`. Override in `local.properties` (`TELEGRAM_TV_SERVER_URL`) or in-app settings.
@@ -47,12 +50,12 @@ Default: `https://movie.aaruvi.space`. Override in `local.properties` (`TELEGRAM
 - **No bouncy springs** on TV — use `DampingRatioNoBouncy` + `StiffnessHigh`
 - **Double-tap seek** — mobile only, left half rewind 10s, right half forward 10s (accelerates: 10→30→60→120→300s on rapid repeats within 1.5s)
 - **Subtitles default off** — `PlayerViewModel` init disables `C.TRACK_TYPE_TEXT`
-- **Move picker dialog** — self-contained, uses `loadFolderTree` suspend lambda; internal navigation stack
-- **ExoPlayer buffer config** at `di/PlayerModule.kt:78-82` — `setBufferDurationsMs(min=32000, max=64000, playback=10000, rebuffer=10000)`
-- **3 OkHttp clients** in `NetworkModule.kt` — API (30s timeout), streaming (no timeout), download (120s); modify the right one
+- **Move picker dialog** — self-contained, uses `loadFolderTree` suspend lambda; internal navigation stack; defined in `ui/mobile/components/MobileComponents.kt`
+- **ExoPlayer buffer config** at `di/PlayerModule.kt:77-82` — `setBufferDurationsMs(min=32000, max=64000, playback=10000, rebuffer=10000)`
+- **3 OkHttp clients** — `NetworkModule.kt` (API 30s timeout + download 5min read), `PlayerModule.kt` (streaming, no body logging); modify the right one
 - **AuthInterceptor** (`data/api/AuthInterceptor.kt`) — adds Bearer token from session, retries on 401 with token refresh
 - **Coil pre-configured** — `TelePlayApp.kt` registers an `ImageLoaderFactory`; all `AsyncImage` usage uses it automatically
-- **Chromecast crash history** in `docs/cast.md` — `CastContext` must init on main thread; `PendingIntent.FLAG_MUTABLE` required for API 31+
+- **Chromecast crash history** in `docs/cast.md` — `CastContext` must init on main thread; `PendingIntent.FLAG_MUTABLE` required for API 31+; proguard keep rules in `proguard-rules.pro`
 
 ## Entrypoints
 - TV: `ui/MainActivity.kt` → `ui/navigation/NavGraph.kt`
