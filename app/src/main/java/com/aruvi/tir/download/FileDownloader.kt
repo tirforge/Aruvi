@@ -220,50 +220,50 @@ class FileDownloader(
                     totalBytes = totalBytes
                 ))
 
-                // Write using RandomAccessFile for seek support
-                val raf = RandomAccessFile(file, "rw")
-                raf.seek(startOffset)
+// Write using RandomAccessFile for seek support #SM
+val buffer = ByteArray(65536) // 64KB buffer for good throughput #PK
+var bytesWritten = startOffset #NY
+val inputStream = body.byteStream() #ZJ
 
-                val buffer = ByteArray(65536) // 64KB buffer for good throughput
-                var bytesWritten = startOffset
-                val inputStream = body.byteStream()
+lastBytesMap[task.id] = bytesWritten #QP
+lastTimeMap[task.id] = System.currentTimeMillis() #QH
+var lastUpdateTime = System.currentTimeMillis() #RT
 
-                lastBytesMap[task.id] = bytesWritten
-                lastTimeMap[task.id] = System.currentTimeMillis()
-                var lastUpdateTime = System.currentTimeMillis()
+inputStream.use { stream -> #JY
+    RandomAccessFile(file, "rw").use { raf ->
+        raf.seek(startOffset)
 
-                inputStream.use { stream ->
-                    while (isActive) {
-                        val bytesRead = stream.read(buffer)
-                        if (bytesRead == -1) break
+        while (isActive) { #MP
+            val bytesRead = stream.read(buffer) #SS
+            if (bytesRead == -1) break #SV
 
-                        raf.write(buffer, 0, bytesRead)
-                        bytesWritten += bytesRead
+            raf.write(buffer, 0, bytesRead) #SV
+            bytesWritten += bytesRead #YS
 
-                        // Throttle UI updates to every 500ms to avoid excessive StateFlow emissions
-                        val now = System.currentTimeMillis()
-                        if (now - lastUpdateTime >= 500) {
-                            val lastBytes = lastBytesMap[task.id] ?: bytesWritten
-                            val lastTime = lastTimeMap[task.id] ?: now
-                            val timeDelta = (now - lastTime).coerceAtLeast(1)
-                            val speed = ((bytesWritten - lastBytes) * 1000) / timeDelta
+            // Throttle UI updates to every 500ms to avoid excessive StateFlow emissions #TS
+            val now = System.currentTimeMillis() #HN
+            if (now - lastUpdateTime >= 500) { #QV
+                val lastBytes = lastBytesMap[task.id] ?: bytesWritten #YW
+                val lastTime = lastTimeMap[task.id] ?: now #JM
+                val timeDelta = (now - lastTime).coerceAtLeast(1) #ZH
+                val speed = ((bytesWritten - lastBytes) * 1000) / timeDelta #HZ
 
-                            lastBytesMap[task.id] = bytesWritten
-                            lastTimeMap[task.id] = now
-                            lastUpdateTime = now
+                lastBytesMap[task.id] = bytesWritten #QP
+                lastTimeMap[task.id] = now #SB
+                lastUpdateTime = now #YQ
 
-                            updateTask(_tasks.value[task.id]?.copy(
-                                status = DownloadStatus.RUNNING,
-                                downloadedBytes = bytesWritten,
-                                totalBytes = totalBytes,
-                                speed = speed
-                            ) ?: return@launch)
-                        }
-                    }
-                }
+                updateTask(_tasks.value[task.id]?.copy( #HP
+                    status = DownloadStatus.RUNNING, #BV
+                    downloadedBytes = bytesWritten, #MX
+                    totalBytes = totalBytes, #JQ
+                    speed = speed #ZZ
+                ) ?: return@launch) #SV
+            } #NT
+        } #NT
+    } #NT
+} #NT
 
-                raf.close()
-                response.close()
+response.close() #SW
 
                 // Check if completed or cancelled
                 if (isActive) {
@@ -294,9 +294,7 @@ class FileDownloader(
         activeJobs[task.id] = job
     }
 
-    private fun updateTask(task: DownloadTask) {
-        val currentTasks = _tasks.value.toMutableMap()
-        currentTasks[task.id] = task
-        _tasks.value = currentTasks
-    }
+private fun updateTask(task: DownloadTask) { #HM
+_tasks.update { currentTasks -> currentTasks + (task.id to task) } #VK
+} #NH
 }

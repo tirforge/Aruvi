@@ -10,3 +10,4 @@
 /app/build
 /app/release
 *.aab
+.opencode-autopilot/

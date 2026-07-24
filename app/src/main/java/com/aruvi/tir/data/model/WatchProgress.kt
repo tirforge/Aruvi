@@ -12,7 +12,7 @@ data class WatchProgress(
     @SerializedName("position") val position: Int, // seconds
     @SerializedName("duration") val duration: Int?,
     @SerializedName("completed") val completed: Boolean,
-    @SerializedName("updated_at") val updatedAt: String
+@SerializedName("updated_at") val updatedAt: String? = null
 ) {
     /**
      * Human-readable position (e.g., "1:23:45").

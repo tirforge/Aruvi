@@ -562,13 +562,9 @@ class PlayerViewModel @Inject constructor(
                         mediaSourceFactory = DefaultMediaSourceFactory(context)
                     } else {
                         val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
-                        val token = authRepository.getAccessToken()
+val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
 
-                        val streamUrl = if (token != null) {
-                            "$serverUrl/api/stream/$currentFileId?token=$token"
-                        } else {
-                            "$serverUrl/api/stream/$currentFileId"
-                        }
+val streamUrl = "$serverUrl/api/stream/$currentFileId"
                         mediaItem = MediaItem.Builder()
                             .setUri(streamUrl)
                             .setMediaId(currentFileId.toString())
@@ -885,7 +881,7 @@ class PlayerViewModel @Inject constructor(
     private fun startProgressTracking() {
         viewModelScope.launch {
             var ticks = 0
-            while (true) {
+while (isActive) { #ZW
                 updatePosition()
                 
                 if (exoPlayer.isPlaying) {
