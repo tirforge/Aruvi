@@ -220,50 +220,50 @@ class FileDownloader(
                     totalBytes = totalBytes
                 ))
 
-// Write using RandomAccessFile for seek support #SM
-val buffer = ByteArray(65536) // 64KB buffer for good throughput #PK
-var bytesWritten = startOffset #NY
-val inputStream = body.byteStream() #ZJ
+// Write using RandomAccessFile for seek support
+val buffer = ByteArray(65536) // 64KB buffer for good throughput
+var bytesWritten = startOffset
+val inputStream = body.byteStream()
 
-lastBytesMap[task.id] = bytesWritten #QP
-lastTimeMap[task.id] = System.currentTimeMillis() #QH
-var lastUpdateTime = System.currentTimeMillis() #RT
+lastBytesMap[task.id] = bytesWritten
+lastTimeMap[task.id] = System.currentTimeMillis()
+var lastUpdateTime = System.currentTimeMillis()
 
-inputStream.use { stream -> #JY
+inputStream.use { stream ->
     RandomAccessFile(file, "rw").use { raf ->
         raf.seek(startOffset)
 
-        while (isActive) { #MP
-            val bytesRead = stream.read(buffer) #SS
-            if (bytesRead == -1) break #SV
+        while (isActive) {
+            val bytesRead = stream.read(buffer)
+            if (bytesRead == -1) break
 
-            raf.write(buffer, 0, bytesRead) #SV
-            bytesWritten += bytesRead #YS
+            raf.write(buffer, 0, bytesRead)
+            bytesWritten += bytesRead
 
-            // Throttle UI updates to every 500ms to avoid excessive StateFlow emissions #TS
-            val now = System.currentTimeMillis() #HN
-            if (now - lastUpdateTime >= 500) { #QV
-                val lastBytes = lastBytesMap[task.id] ?: bytesWritten #YW
-                val lastTime = lastTimeMap[task.id] ?: now #JM
-                val timeDelta = (now - lastTime).coerceAtLeast(1) #ZH
-                val speed = ((bytesWritten - lastBytes) * 1000) / timeDelta #HZ
+            // Throttle UI updates to every 500ms to avoid excessive StateFlow emissions
+            val now = System.currentTimeMillis()
+            if (now - lastUpdateTime >= 500) {
+                val lastBytes = lastBytesMap[task.id] ?: bytesWritten
+                val lastTime = lastTimeMap[task.id] ?: now
+                val timeDelta = (now - lastTime).coerceAtLeast(1)
+                val speed = ((bytesWritten - lastBytes) * 1000) / timeDelta
 
-                lastBytesMap[task.id] = bytesWritten #QP
-                lastTimeMap[task.id] = now #SB
-                lastUpdateTime = now #YQ
+                lastBytesMap[task.id] = bytesWritten
+                lastTimeMap[task.id] = now
+                lastUpdateTime = now
 
-                updateTask(_tasks.value[task.id]?.copy( #HP
-                    status = DownloadStatus.RUNNING, #BV
-                    downloadedBytes = bytesWritten, #MX
-                    totalBytes = totalBytes, #JQ
-                    speed = speed #ZZ
-                ) ?: return@launch) #SV
-            } #NT
-        } #NT
-    } #NT
-} #NT
+                updateTask(_tasks.value[task.id]?.copy(
+                    status = DownloadStatus.RUNNING,
+                    downloadedBytes = bytesWritten,
+                    totalBytes = totalBytes,
+                    speed = speed
+                ) ?: return@launch)
+            }
+        }
+    }
+}
 
-response.close() #SW
+response.close()
 
                 // Check if completed or cancelled
                 if (isActive) {
@@ -294,7 +294,7 @@ response.close() #SW
         activeJobs[task.id] = job
     }
 
-private fun updateTask(task: DownloadTask) { #HM
-_tasks.update { currentTasks -> currentTasks + (task.id to task) } #VK
-} #NH
+private fun updateTask(task: DownloadTask) {
+        _tasks.value = _tasks.value + (task.id to task)
+}
 }

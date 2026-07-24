@@ -30,7 +30,7 @@ class DownloadService : Service() {
     @Inject
     lateinit var fileDownloader: FileDownloader
 
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+private var serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var observerJob: Job? = null
 
     companion object {
@@ -59,20 +59,25 @@ class DownloadService : Service() {
         ensureNotificationChannel()
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Must call startForeground immediately
-        startForeground(SUMMARY_NOTIFICATION_ID, buildSummaryNotification("Preparing downloads..."))
+override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    // Must call startForeground immediately
+    startForeground(SUMMARY_NOTIFICATION_ID, buildSummaryNotification("Preparing downloads..."))
 
-        // Start observing download tasks
-        observerJob?.cancel()
-        observerJob = serviceScope.launch {
-            fileDownloader.tasks.collect { tasks ->
-                updateNotifications(tasks)
-            }
+    // Cancel previous scope and recreate to prevent coroutine leaks on restart
+    serviceScope.cancel()
+    serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    // Start observing download tasks
+    observerJob?.cancel()
+    observerJob = serviceScope.launch {
+        fileDownloader.tasks.collect { tasks ->
+            updateNotifications(tasks)
         }
-
-        return START_STICKY
     }
+
+    return START_STICKY
+}
+
 
     private fun updateNotifications(tasks: Map<Long, DownloadTask>) {
         val notificationManager = getSystemService(NotificationManager::class.java)
@@ -204,9 +209,10 @@ class DownloadService : Service() {
         }
     }
 
-    override fun onDestroy() {
-        observerJob?.cancel()
-        serviceScope.cancel()
-        super.onDestroy()
-    }
+override fun onDestroy() {
+    observerJob?.cancel()
+    serviceScope.cancel()
+    super.onDestroy()
 }
+}
+

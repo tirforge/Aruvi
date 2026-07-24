@@ -37,6 +37,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -562,7 +563,6 @@ class PlayerViewModel @Inject constructor(
                         mediaSourceFactory = DefaultMediaSourceFactory(context)
                     } else {
                         val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
-val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
 
 val streamUrl = "$serverUrl/api/stream/$currentFileId"
                         mediaItem = MediaItem.Builder()
@@ -881,7 +881,7 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
     private fun startProgressTracking() {
         viewModelScope.launch {
             var ticks = 0
-while (isActive) { #ZW
+while (isActive) {
                 updatePosition()
                 
                 if (exoPlayer.isPlaying) {

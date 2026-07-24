@@ -183,15 +183,22 @@ class LoginViewModel @Inject constructor(
                         )
                         return@launch
                     },
-                    onFailure = { e ->
-                        if (e.message?.contains("expired") == true) {
-                            _uiState.value = _uiState.value.copy(
-                                isPolling = false,
-                                error = "Code expired. Please generate a new one."
-                            )
-                            return@launch
+            onFailure = { e ->
+                val msg = e.message.orEmpty()
+                if (msg.contains("expired") || msg.contains("already used")) {
+                    _uiState.value = _uiState.value.copy(
+                        isPolling = false,
+                        error = if (msg.contains("already used")) {
+                            "This code was already used on another device. Generate a new one."
+                        } else {
+                            "Code expired. Please generate a new one."
                         }
-                    }
+                    )
+                    return@launch
+                }
+            }
+
+
                 )
 
                 delay(2000)

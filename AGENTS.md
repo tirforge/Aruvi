@@ -1,63 +1,84 @@
-# Aruvi — Agent Guide
+# context-mode — MANDATORY routing rules
 
-## Never touch
-`data/`, `di/`, `download/`, `service/`, `TelePlayApp.kt` — upstream `subinps/TelePlay` code. Backend changes break sync. Safe directories: `ui/` (TV), `ui/mobile/` (phone), `ui/player/` (shared).
+context-mode MCP tools available. Rules protect context window from flooding. One unrouted command dumps 56 KB into context.
 
-## Build commands
-```bash
-# Debug session (compile only, never full APK during dev)
-GRADLE_USER_HOME=/tmp/.gradle ./gradlew kaptTvDebugKotlin compileTvDebugKotlin     # TV
-GRADLE_USER_HOME=/tmp/.gradle ./gradlew kaptMobileDebugKotlin compileMobileDebugKotlin  # Mobile
+## Think in Code — MANDATORY
 
-# Full APK (final verification only)
-GRADLE_USER_HOME=/tmp/.gradle ./gradlew assembleMobileRelease    # 6-8min (R8)
-GRADLE_USER_HOME=/tmp/.gradle ./gradlew assembleMobileDebug      # ~2min
-```
+Analyze/count/filter/compare/search/parse/transform data: **write code** via `context-mode_ctx_execute(language, code)`, `console.log()` only the answer. Do NOT read raw data into context. PROGRAM the analysis, not COMPUTE it. Pure JavaScript — Node.js built-ins only (`fs`, `path`, `child_process`). `try/catch`, handle `null`/`undefined`. One script replaces ten tool calls.
 
-Always prefix with `GRADLE_USER_HOME=/tmp/.gradle` to avoid filling disk. Debug session = compile check only. Release APKs use R8 minification.
+## BLOCKED — do NOT attempt
 
-## Product flavors
-Both flavors share all `.kt` source. Different AndroidManifest only:
-- **mobile**: `targetSdk=36`, `touchscreen required="true"`, launcher = `MobileMainActivity`
-- **tv**: `targetSdk=30` (broader TV compatibility), `leanback required="true"`, launcher = `MainActivity`
+### curl / wget — BLOCKED
+Shell `curl`/`wget` intercepted and blocked. Do NOT retry.
+Use: `context-mode_ctx_fetch_and_index(url, source)` or `context-mode_ctx_execute(language: "javascript", code: "const r = await fetch(...)")`
 
-ABI splits: `armeabi-v7a`, `arm64-v8a`, `x86`, `x86_64` + universal APK.
+### Inline HTTP — BLOCKED
+`fetch('http`, `requests.get(`, `requests.post(`, `http.get(`, `http.request(` — intercepted. Do NOT retry.
+Use: `context-mode_ctx_execute(language, code)` — only stdout enters context
 
-## TV animation rule
-Always use `Modifier.graphicsLayer { scaleX; scaleY; alpha }` — NEVER `Modifier.scale()`. The latter triggers layout pass and causes jank on leanback hardware.
+### Direct web fetching — BLOCKED
+Use: `context-mode_ctx_fetch_and_index(url, source)` then `context-mode_ctx_search(queries)`
 
-## CI/CD (separate repo)
-No workflow files in Aruvi. All CI lives in `Thirupathi-pirate/Aruvi-workflow`.
-```bash
-git push origin main          # Aruvi dev repo
-git push workflow main        # trigger release build on Aruvi-workflow
-```
-Add the workflow remote if missing:
-```bash
-git remote add workflow https://github.com/Thirupathi-pirate/Aruvi-workflow.git
-```
+## REDIRECTED — use sandbox
 
-## Signing
-Passwords via env vars (`RELEASE_STORE_PASSWORD`, `RELEASE_KEY_PASSWORD`) or `local.properties`. Keystore: `../my-release-key.jks` (relative to `app/`). Env vars override `local.properties`.
+### Shell (>20 lines output)
+Shell ONLY for: `git`, `mkdir`, `rm`, `mv`, `cd`, `ls`, `npm install`, `pip install`.
+Otherwise: `context-mode_ctx_batch_execute(commands, queries)` or `context-mode_ctx_execute(language: "javascript", code: "...")`. Use `language: "shell"` only when code matches the host shell.
 
-## Server URL
-Default: `https://movie.aaruvi.space`. Override in `local.properties` (`TELEGRAM_TV_SERVER_URL`) or in-app settings.
+### File reading (for analysis)
+Reading to **edit** → reading correct. Reading to **analyze/explore/summarize** → `context-mode_ctx_execute_file(path, language, code)`.
 
-## Key conventions
-- **R8 full mode disabled** — `android.enableR8.fullMode=false` in `gradle.properties` (breaks Retrofit/Gson)
-- **gradle.properties**: `-Xmx8g -XX:MaxMetaspaceSize=512m`, parallel + caching, 4 workers
-- **TV targetSdk 30** — `RenderEffect` (requires API 31+) not used; brightness lift via alpha dim (0.88→1.0)
-- **No bouncy springs** on TV — use `DampingRatioNoBouncy` + `StiffnessHigh`
-- **Double-tap seek** — mobile only, left half rewind 10s, right half forward 10s (accelerates: 10→30→60→120→300s on rapid repeats within 1.5s)
-- **Subtitles default off** — `PlayerViewModel` init disables `C.TRACK_TYPE_TEXT`
-- **Move picker dialog** — self-contained, uses `loadFolderTree` suspend lambda; internal navigation stack; defined in `ui/mobile/components/MobileComponents.kt`
-- **ExoPlayer buffer config** at `di/PlayerModule.kt:77-82` — `setBufferDurationsMs(min=32000, max=64000, playback=10000, rebuffer=10000)`
-- **3 OkHttp clients** — `NetworkModule.kt` (API 30s timeout + download 5min read), `PlayerModule.kt` (streaming, no body logging); modify the right one
-- **AuthInterceptor** (`data/api/AuthInterceptor.kt`) — adds Bearer token from session, retries on 401 with token refresh
-- **Coil pre-configured** — `TelePlayApp.kt` registers an `ImageLoaderFactory`; all `AsyncImage` usage uses it automatically
-- **Chromecast crash history** in `docs/cast.md` — `CastContext` must init on main thread; `PendingIntent.FLAG_MUTABLE` required for API 31+; proguard keep rules in `proguard-rules.pro`
+### grep / search (large results)
+Use `context-mode_ctx_execute(language: "javascript", code: "...")` in sandbox for portable filtering/counting.
 
-## Entrypoints
-- TV: `ui/MainActivity.kt` → `ui/navigation/NavGraph.kt`
-- Mobile: `ui/mobile/MobileMainActivity.kt` → `ui/mobile/MobileNavigation.kt`
-- Player ViewModel (shared): `ui/player/PlayerViewModel.kt`
+## Tool selection
+
+0. **MEMORY**: `context-mode_ctx_search(sort: "timeline")` — after resume, check prior context before asking user.
+1. **GATHER**: `context-mode_ctx_batch_execute(commands, queries)` — runs all commands, auto-indexes, returns search. ONE call replaces 30+. Each command: `{label: "header", command: "..."}`.
+2. **FOLLOW-UP**: `context-mode_ctx_search(queries: ["q1", "q2", ...])` — all questions as array, ONE call (default relevance mode).
+3. **PROCESSING**: `context-mode_ctx_execute(language, code)` | `context-mode_ctx_execute_file(path, language, code)` — sandbox, only stdout enters context.
+4. **WEB**: `context-mode_ctx_fetch_and_index(url, source)` then `context-mode_ctx_search(queries)` — raw HTML never enters context.
+5. **INDEX**: `context-mode_ctx_index(content, source)` — store in FTS5 for later search.
+
+## Parallel I/O batches
+
+For multi-URL fetches or multi-API calls, **always** include `concurrency: N` (1-8):
+
+- `context-mode_ctx_batch_execute(commands: [3+ network commands], concurrency: 5)` — gh, curl, dig, docker inspect, multi-region cloud queries
+- `context-mode_ctx_fetch_and_index(requests: [{url, source}, ...], concurrency: 5)` — multi-URL batch fetch
+
+**Use concurrency 4-8** for I/O-bound work (network calls, API queries). **Keep concurrency 1** for CPU-bound (npm test, build, lint) or commands sharing state (ports, lock files, same-repo writes).
+
+GitHub API rate-limit: cap at 4 for `gh` calls.
+
+## Output
+
+Write artifacts to FILES — never inline. Return: file path + 1-line description.
+Descriptive source labels for `search(source: "label")`.
+
+## Session Continuity
+
+Skills, roles, and decisions persist for the entire session. Do not abandon them as the conversation grows.
+
+## Memory
+
+Session history is persistent and searchable. On resume, search BEFORE asking the user:
+
+| Need | Command |
+|------|---------|
+| What did we decide? | `context-mode_ctx_search(queries: ["decision"], source: "decision", sort: "timeline")` |
+| What constraints exist? | `context-mode_ctx_search(queries: ["constraint"], source: "constraint")` |
+
+DO NOT ask "what were we working on?" — SEARCH FIRST.
+If search returns 0 results, proceed as a fresh session.
+
+## ctx commands
+
+| Command | Action |
+|---------|--------|
+| `ctx stats` | Call `stats` MCP tool, display full output verbatim |
+| `ctx doctor` | Call `doctor` MCP tool, run returned shell command, display as checklist |
+| `ctx upgrade` | Call `upgrade` MCP tool, run returned shell command, display as checklist |
+| `ctx purge` | Call `purge` MCP tool with confirm: true. Warns before wiping knowledge base. |
+
+After /clear or /compact: knowledge base and session stats preserved. Use `ctx purge` to start fresh.

@@ -138,19 +138,19 @@ class AuthRepository @Inject constructor(
     suspend fun verifyLoginCode(code: String): Result<AuthResponse> {
         return try {
             val response = api.verifyCode(VerifyCodeRequest(code))
-            if (response.isSuccessful) {
+        when (response.code()) {
+            200 -> {
                 val auth = response.body()!!
                 saveTokens(auth.accessToken, auth.refreshToken)
                 saveUser(auth.user)
                 Result.success(auth)
-            } else {
-                when (response.code()) {
-                    404 -> Result.failure(Exception("Code not yet confirmed"))
-                    410 -> Result.failure(Exception("Code expired"))
-                    429 -> Result.failure(Exception("Too many requests. Please wait a moment."))
-                    else -> Result.failure(Exception("Verification failed"))
-                }
             }
+            202 -> Result.failure(Exception("Code not yet confirmed"))
+            404 -> Result.failure(Exception("Code not yet confirmed"))
+            410 -> Result.failure(Exception("Code expired or already used on another device"))
+            429 -> Result.failure(Exception("Too many requests. Please wait a moment."))
+            else -> Result.failure(Exception("Verification failed"))
+        }
         } catch (e: Exception) {
             Result.failure(e)
         }
