@@ -158,6 +158,7 @@ class DetailsViewModel @Inject constructor(
      */
     fun getLocalFileUri(): Uri? {
         val path = _uiState.value.localFilePath ?: return null
+        if (path.startsWith("content://")) return Uri.parse(path)
         val file = File(path)
         return if (file.exists()) Uri.fromFile(file) else null
     }
@@ -171,7 +172,12 @@ class DetailsViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                if (file.exists() && file.delete()) {
+                val deleted = if (path.startsWith("content://")) {
+                    context.contentResolver.delete(Uri.parse(path), null, null) > 0
+                } else {
+                    file.exists() && file.delete()
+                }
+                if (deleted) {
                     _uiState.value = _uiState.value.copy(
                         isFileLocal = false,
                         localFilePath = null,

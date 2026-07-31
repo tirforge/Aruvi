@@ -181,7 +181,7 @@ if (state.query.isNotEmpty()) {
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    items(state.results, key = { "${it.row}-${it.col}" }) { item ->
+items(state.results, key = { it.msgId }) { item ->
                         GrabMovieCard(
                             item = item,
                             isGrabbing = state.grabbingIdx == item.row * 100 + item.col,
@@ -269,7 +269,7 @@ if (state.query.isNotEmpty()) {
                                         .setPrimaryClip(clip)
                                     Toast.makeText(context, "Copied!", Toast.LENGTH_SHORT).show()
                                 },
-                                modifier = Modifier.size(32.dp)
+modifier = Modifier.size(48.dp)
                             ) {
                                 Icon(Icons.Default.ContentCopy, "Copy", Modifier.size(18.dp), tint = MobilePrimary)
                             }

@@ -234,14 +234,25 @@ fun DownloadItemCard(
             if (item.status == DownloadStatus.COMPLETED) {
                 IconButton(onClick = {
                     try {
-                        val file = item.localPath?.let { java.io.File(it) }
-                        
-                        if (file != null && file.exists()) {
-                            val contentUri = androidx.core.content.FileProvider.getUriForFile(
-                                context,
-                                "${context.packageName}.provider",
-                                file
-                            )
+                        val path = item.localPath
+                        val contentUri = if (path != null && path.startsWith("content://")) {
+                            android.net.Uri.parse(path)
+                        } else if (path != null) {
+                            val file = java.io.File(path)
+                            if (file.exists()) {
+                                androidx.core.content.FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.provider",
+                                    file
+                                )
+                            } else {
+                                null
+                            }
+                        } else {
+                            null
+                        }
+
+                        if (contentUri != null) {
                             val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
                                 setDataAndType(contentUri, item.mimeType ?: "video/*")
                                 addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)

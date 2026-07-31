@@ -37,6 +37,7 @@ class TvGrabViewModel @Inject constructor(
     private val _state = MutableStateFlow(TvGrabUiState())
     val state: StateFlow<TvGrabUiState> = _state.asStateFlow()
     private var searchJob: Job? = null
+    private var grabJob: Job? = null
 
     init { loadServerUrl() }
 
@@ -88,7 +89,8 @@ fun search() {
     fun grabItem(item: GrabSearchResult) {
         val idx = item.row * 100 + item.col
         _state.value = _state.value.copy(grabbingIdx = idx, grabResult = null)
-        viewModelScope.launch {
+        grabJob?.cancel()
+        grabJob = viewModelScope.launch {
             try {
                 val resp = api.grabSelect(GrabSelectRequest(
                     query = _state.value.query,
@@ -106,6 +108,8 @@ fun search() {
                 } else {
                     _state.value = _state.value.copy(error = "Grab failed (${resp.code()})", grabbingIdx = -1)
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _state.value = _state.value.copy(error = e.message ?: "Network error", grabbingIdx = -1)
             }

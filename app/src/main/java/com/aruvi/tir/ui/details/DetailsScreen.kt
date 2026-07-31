@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
@@ -240,8 +241,18 @@ fun DetailsScreen(
                                         filePath = uiState.localFilePath ?: "",
                                         fileSize = viewModel.formatBytes(
                                             uiState.totalBytes.takeIf { it > 0 }
-                                                ?: File(uiState.localFilePath ?: "").let { f ->
-                                                    if (f.exists()) f.length() else 0L
+                                                ?: run {
+                                                    val localPath = uiState.localFilePath ?: ""
+                                                    if (localPath.startsWith("content://")) {
+                                                        try {
+                                                            context.contentResolver.openFileDescriptor(android.net.Uri.parse(localPath), "r")?.use { it.statSize } ?: 0L
+                                                        } catch (e: Exception) {
+                                                            0L
+                                                        }
+                                                    } else {
+                                                        val f = File(localPath)
+                                                        if (f.exists()) f.length() else 0L
+                                                    }
                                                 }
                                         ),
                                         onPlayOffline = { onPlayClick(fileId, 0L) },
@@ -391,7 +402,10 @@ private fun FocusablePlayButton(
         },
         shape = RoundedCornerShape(14.dp),
         modifier = Modifier
-            .scale(scale)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .onFocusChanged { isFocused = it.isFocused }
             .then(
                 if (isFocused && isPrimary) Modifier.shadow(
