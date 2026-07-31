@@ -124,7 +124,8 @@ class FileDownloader(
 
     /** Bytes already on disk for resume support, for either destination kind. */
     private fun existingBytes(task: DownloadTask): Long {
-        return when {
+        return try {
+            when {
             isContentUri(task) -> {
                 context.contentResolver
                     .openFileDescriptor(Uri.parse(task.localPath), "r")
@@ -136,6 +137,9 @@ class FileDownloader(
                 if (file.exists()) file.length() else 0L
             }
         }
+    } catch (_: Exception) {
+        0L // Stale/phantom MediaStore row or unreadable file - treat as fresh start
+    }
     }
 
     /** Delete the destination row/file, if any. */
@@ -274,7 +278,7 @@ class FileDownloader(
                 // otherwise the raw file. RandomAccessFile supports both paths.
 val output: java.nio.channels.FileChannel = if (contentUri != null) {
 val pfd = context.contentResolver.openFileDescriptor(
-Uri.parse(contentUri), "rw"
+Uri.parse(contentUri), if (startOffset > 0) "rw" else "w"
 ) ?: return@launch
 java.io.FileOutputStream(pfd.fileDescriptor).channel
 } else {
