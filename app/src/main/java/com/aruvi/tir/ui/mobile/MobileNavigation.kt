@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Person
@@ -43,7 +44,8 @@ sealed class BottomNavItem(
 ) {
     object Home : BottomNavItem("home", "Home", Icons.Filled.Home, Icons.Outlined.Home)
     object Search : BottomNavItem("search", "Search", Icons.Filled.Search, Icons.Outlined.Search)
-    object Downloads : BottomNavItem("downloads", "Downloads", Icons.Filled.Download, Icons.Outlined.Download)
+object Downloads : BottomNavItem("downloads", "Downloads", Icons.Filled.Download, Icons.Outlined.Download)
+object Grab : BottomNavItem("grab", "Search Movies", Icons.Filled.Movie, Icons.Filled.Movie)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -165,6 +167,11 @@ fun MainAppScreen(
             composable(BottomNavItem.Downloads.route) {
                 com.aruvi.tir.ui.mobile.downloads.MobileDownloadsScreen()
             }
+            composable(BottomNavItem.Grab.route) {
+                com.aruvi.tir.ui.mobile.grab.MobileGrabScreen(
+                    onBackClick = { tabNavController.popBackStack() }
+                )
+            }
         }
     }
 }
@@ -182,6 +189,7 @@ fun GlassmorphismBottomNavigation(
         val items = listOf(
             BottomNavItem.Home,
             BottomNavItem.Search,
+            BottomNavItem.Grab,
             BottomNavItem.Downloads
         )
 
