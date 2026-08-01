@@ -172,7 +172,7 @@ color = TVPrimary,
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
-items(state.results, key = { it.msgId }) { item ->
+items(state.results, key = { "${it.msgId}-${it.row}-${it.col}-${it.label}" }) { item ->
                             TvGrabCard(
                                 item = item,
                                 isGrabbing = state.grabbingIdx == item.row * 100 + item.col,

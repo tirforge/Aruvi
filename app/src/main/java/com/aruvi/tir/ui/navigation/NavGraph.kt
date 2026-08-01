@@ -16,6 +16,9 @@ import com.aruvi.tir.ui.home.HomeScreen
 import com.aruvi.tir.ui.player.PlayerScreen
 import com.aruvi.tir.ui.search.SearchScreen
 import com.aruvi.tir.ui.settings.SettingsScreen
+import com.aruvi.tir.BuildConfig
+import com.aruvi.tir.ui.grab.TvGrabScreen
+import com.aruvi.tir.ui.mobile.grab.MobileGrabScreen
 
 /**
  * Main navigation graph for the app.
@@ -44,23 +47,26 @@ fun NavGraph(
             )
         }
 
-        // Home Screen
-        composable(Screen.Home.route) {
-            HomeScreen(
-                onFileClick = { fileId ->
-                    navController.navigate(Screen.Details.createRoute(fileId))
-                },
-                onFolderClick = { folderId ->
-                    navController.navigate(Screen.Folder.createRoute(folderId))
-                },
-                onSearchClick = {
-                    navController.navigate(Screen.Search.route)
-                },
-                onSettingsClick = {
-                    navController.navigate(Screen.Settings.route)
-                }
-            )
+// Home Screen
+composable(Screen.Home.route) {
+    HomeScreen(
+        onFileClick = { fileId ->
+            navController.navigate(Screen.Details.createRoute(fileId))
+        },
+        onFolderClick = { folderId ->
+            navController.navigate(Screen.Folder.createRoute(folderId))
+        },
+        onSearchClick = {
+            navController.navigate(Screen.Search.route)
+        },
+        onSettingsClick = {
+            navController.navigate(Screen.Settings.route)
+        },
+        onGrabClick = {
+            navController.navigate(Screen.Grab.route)
         }
+    )
+}
 
         // Folder Screen
         composable(
@@ -106,7 +112,8 @@ fun NavGraph(
             route = Screen.Player.route,
             arguments = listOf(
                 navArgument("fileId") { type = NavType.IntType },
-                navArgument("startPosition") { type = NavType.LongType; defaultValue = 0L }
+                navArgument("startPosition") { type = NavType.LongType; defaultValue = 0L },
+                navArgument("directUrl") { type = NavType.StringType; defaultValue = "" }
             )
         ) {
             PlayerScreen(
@@ -141,5 +148,23 @@ fun NavGraph(
                 }
             )
         }
+// Grab Screen
+composable(Screen.Grab.route) {
+    if (BuildConfig.FLAVOR == "tv") {
+        TvGrabScreen(
+            onBackClick = { navController.popBackStack() },
+            onPlayStream = { url ->
+                navController.navigate(Screen.Player.createRoute(0, 0L, url))
+            }
+        )
+    } else {
+MobileGrabScreen(
+onBackClick = { navController.popBackStack() },
+onPlayStream = { url ->
+navController.navigate(Screen.Player.createRoute(0, 0L, url))
+}
+)
+    }
+}
     }
 }

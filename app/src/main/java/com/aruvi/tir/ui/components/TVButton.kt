@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Button
 import androidx.tv.material3.ButtonDefaults
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import com.aruvi.tir.ui.theme.*
 
@@ -40,7 +41,10 @@ fun TVButton(
         onClick = onClick,
         enabled = enabled,
         modifier = modifier
-            .scale(scale)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .onFocusChanged { isFocused = it.isFocused },
         colors = ButtonDefaults.colors(
             containerColor = if (isPrimary) TVPrimary else Color.White.copy(alpha = 0.08f),
@@ -83,7 +87,10 @@ fun TVIconButton(
         enabled = enabled,
         modifier = modifier
             .size(64.dp)
-            .scale(scale)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .onFocusChanged { isFocused = it.isFocused },
         colors = ButtonDefaults.colors(
             containerColor = if (isFocused) TVCardFocused else TVSurface.copy(alpha = 0.6f),

@@ -160,6 +160,7 @@ class PlayerViewModel @Inject constructor(
     }
 
     private var currentFileId: Int = savedStateHandle.get<Int>("fileId") ?: 0
+private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.takeIf { it.isNotEmpty() }
 
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
@@ -511,6 +512,20 @@ class PlayerViewModel @Inject constructor(
     fun loadAndPlay() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+
+            val directStreamUrl = directUrl
+            if (directStreamUrl != null) {
+                val mediaItem = MediaItem.Builder()
+                    .setUri(directStreamUrl)
+                    .setMediaId("stream")
+                    .build()
+                val srcFactory = DefaultMediaSourceFactory(dataSourceFactory)
+                exoPlayer.setMediaSource(srcFactory.createMediaSource(mediaItem))
+                exoPlayer.prepare()
+                exoPlayer.playWhenReady = true
+                // isLoading stays true until the player's listener sets it to false on STATE_READY
+                return@launch
+            }
 
             val fileResult = filesRepository.getFile(currentFileId)
             fileResult.fold(
@@ -912,6 +927,7 @@ while (isActive) {
         val duration = (exoPlayer.duration / 1000).toInt().takeIf { it > 0 }
 
         if (position <= 0 && !completed) return
+        if (currentFileId <= 0) return
 
         progressSaveJob?.cancel()
         progressSaveJob = viewModelScope.launch {

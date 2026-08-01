@@ -12,9 +12,14 @@ sealed class Screen(val route: String) {
     object Details : Screen("details/{fileId}") {
         fun createRoute(fileId: Int) = "details/$fileId"
     }
-    object Player : Screen("player/{fileId}?startPosition={startPosition}") {
-        fun createRoute(fileId: Int, startPosition: Long = 0L) = "player/$fileId?startPosition=$startPosition"
+    object Player : Screen("player/{fileId}?startPosition={startPosition}&directUrl={directUrl}") {
+        fun createRoute(fileId: Int, startPosition: Long = 0L, directUrl: String? = null) =
+            buildString {
+                append("player/$fileId?startPosition=$startPosition")
+                if (directUrl != null) append("&directUrl=").append(java.net.URLEncoder.encode(directUrl, "UTF-8"))
+            }
     }
     object Search : Screen("search")
     object Settings : Screen("settings")
+    object Grab : Screen("grab")
 }

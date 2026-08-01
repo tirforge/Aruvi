@@ -203,4 +203,12 @@ interface TelePlayApi {
         @Query("q") query: String,
         @Query("limit") limit: Int = 30
     ): Response<SearchResponse>
+
+@POST("grab/search")
+suspend fun grabSearch(@Body request: GrabSearchRequest): Response<GrabSearchResponse>
+
+@POST("grab/select")
+suspend fun grabSelect(@Body request: GrabSelectRequest): Response<GrabSelectResponse>
+
+
 }

@@ -68,6 +68,7 @@ val TVDownloadComplete = Color(0xFF69F0AE)
 val MobileBackground = Color(0xFF050505)
 val MobileSurface = Color(0xFF101010)
 val MobileSurfaceTransparent = Color(0xCC101010)
+val MobileSurfaceVariant = Color(0xFF1A1A2E) // Card/placeholder variant
 
 // Accents (Neon/Vibrant)
 val MobilePrimary = Color(0xFF6C63FF) // Modern Purple-Blue

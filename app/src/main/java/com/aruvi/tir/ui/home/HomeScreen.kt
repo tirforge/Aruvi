@@ -36,11 +36,12 @@ import com.aruvi.tir.ui.theme.*
  */
 @Composable
 fun HomeScreen(
-    onFileClick: (Int) -> Unit,
-    onFolderClick: (Int) -> Unit,
-    onSearchClick: () -> Unit,
-    onSettingsClick: () -> Unit,
-    viewModel: HomeViewModel = hiltViewModel()
+onFileClick: (Int) -> Unit,
+onFolderClick: (Int) -> Unit,
+onSearchClick: () -> Unit,
+onGrabClick: () -> Unit,
+onSettingsClick: () -> Unit,
+viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val focusRequester = remember { FocusRequester() }
@@ -74,10 +75,11 @@ fun HomeScreen(
             else -> {
                 Column(modifier = Modifier.fillMaxSize()) {
                     // Modern top bar
-                    ModernTopBar(
-                        onSearchClick = onSearchClick,
-                        onSettingsClick = onSettingsClick
-                    )
+    ModernTopBar(
+        onSearchClick = onSearchClick,
+        onGrabClick = onGrabClick,
+        onSettingsClick = onSettingsClick
+    )
 
                     // Content rows
                     TvLazyColumn(
@@ -173,8 +175,9 @@ fun HomeScreen(
  */
 @Composable
 private fun ModernTopBar(
-    onSearchClick: () -> Unit,
-    onSettingsClick: () -> Unit
+onSearchClick: () -> Unit,
+onGrabClick: () -> Unit,
+onSettingsClick: () -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -234,20 +237,27 @@ private fun ModernTopBar(
                 }
             }
 
-            // Action buttons
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ModernActionButton(
-                    icon = Icons.Outlined.Search,
-                    label = "Search",
-                    onClick = onSearchClick
-                )
+        // Action buttons
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ModernActionButton(
+                icon = Icons.Outlined.Search,
+                label = "Search",
+                onClick = onSearchClick
+            )
 
-                ModernActionButton(
-                    icon = Icons.Outlined.Settings,
-                    label = "Settings",
-                    onClick = onSettingsClick
-                )
-            }
+            ModernActionButton(
+                icon = Icons.Outlined.Movie,
+                label = "Movies",
+                onClick = onGrabClick
+            )
+
+            ModernActionButton(
+                icon = Icons.Outlined.Settings,
+                label = "Settings",
+                onClick = onSettingsClick
+            )
+        }
+            
         }
     }
 }

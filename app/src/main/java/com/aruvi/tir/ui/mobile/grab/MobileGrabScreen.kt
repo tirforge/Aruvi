@@ -181,7 +181,7 @@ if (state.query.isNotEmpty()) {
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-items(state.results, key = { it.msgId }) { item ->
+items(state.results, key = { "${it.msgId}-${it.row}-${it.col}-${it.label}" }) { item ->
                         GrabMovieCard(
                             item = item,
                             isGrabbing = state.grabbingIdx == item.row * 100 + item.col,
@@ -300,15 +300,15 @@ modifier = Modifier.size(48.dp)
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        OutlinedButton(
-                            onClick = playInVlc,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("VLC")
-                        }
+FilledTonalButton(
+onClick = playInVlc,
+modifier = Modifier.weight(1f),
+shape = RoundedCornerShape(8.dp)
+) {
+Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp))
+Spacer(Modifier.width(8.dp))
+Text("VLC")
+}
                         FilledTonalButton(
                             onClick = {
                                 viewModel.download(result)
