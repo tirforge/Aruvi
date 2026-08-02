@@ -56,20 +56,29 @@ class MobileHomeViewModel @Inject constructor(
     private val folderStack = ArrayDeque<Pair<Int?, String>>()
 
     init {
-        // Observe folderId and folderName from SavedStateHandle to handle deep links and navigation arguments
+        // Observe folderId and folderName from SavedStateHandle to handle deep links
+        // and navigation arguments (e.g. "Go to Folder" from Search).
         viewModelScope.launch {
             savedStateHandle.getStateFlow<Int?>("folderId", null).collect { folderId ->
                 val id = if (folderId == -1) null else folderId
                 val name = savedStateHandle.get<String>("folderName") ?: "Home"
-                
+
                 // If the folderId changed and it's not the current one, load it
                 if (id != _uiState.value.currentFolderId) {
+                    if (id == null) {
+                        // Back at root - clear the back stack
+                        folderStack.clear()
+                    } else {
+                        // Descending into a folder via nav arguments (external navigation).
+                        // Remember the current context so system back navigation works.
+                        folderStack.addLast(_uiState.value.currentFolderId to _uiState.value.currentFolderName)
+                    }
                     loadContent(id, name)
                 }
             }
         }
-        
-        // Initial load for things that don't depend on folderId (like serverUrl)
+
+        // Initial load for the root (and things that don't depend on folderId like serverUrl)
         refresh()
 
         // Load user name
@@ -98,7 +107,7 @@ class MobileHomeViewModel @Inject constructor(
             if (folderId == null) {
                 // Root
                 val foldersResult = foldersRepository.getFolders(parentId = null)
-                val filesResult = filesRepository.getFiles(folderId = null)
+                val filesResult = filesRepository.getFiles(folderId = null, perPage = 200)
                 
                 // Fetch extra home content
                 val continueResult = filesRepository.getContinueWatching()

@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -72,7 +73,7 @@ fun PlayerScreen(
             .background(Color.Black)
             .focusRequester(focusRequester)
             .focusable()
-            .onKeyEvent { event ->
+            .onPreviewKeyEvent { event ->
                 if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
                     when (event.nativeKeyEvent.keyCode) {
                         KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
@@ -80,6 +81,7 @@ fun PlayerScreen(
                                 uiState.showJumpDialog -> false // dialog handles it
                                 uiState.showSettings -> false   // settings handles it
                                 uiState.error != null -> false  // error overlay handles it
+                                uiState.showControls -> false   // focused control button handles it
                                 else -> {
                                     viewModel.togglePlayback()
                                     true
@@ -87,19 +89,19 @@ fun PlayerScreen(
                             }
                         }
                         KeyEvent.KEYCODE_DPAD_LEFT -> {
-                            if (!uiState.showSettings && !uiState.showJumpDialog && uiState.error == null) {
+                            if (!uiState.showSettings && !uiState.showJumpDialog && uiState.error == null && !uiState.showControls) {
                                 viewModel.seekBackward()
                                 true
                             } else false
                         }
                         KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                            if (!uiState.showSettings && !uiState.showJumpDialog && uiState.error == null) {
+                            if (!uiState.showSettings && !uiState.showJumpDialog && uiState.error == null && !uiState.showControls) {
                                 viewModel.seekForward()
                                 true
                             } else false
                         }
                         KeyEvent.KEYCODE_DPAD_UP -> {
-                            if (uiState.showSettings || uiState.showJumpDialog || uiState.error != null) {
+                            if (uiState.showSettings || uiState.showJumpDialog || uiState.error != null || uiState.showControls) {
                                 false
                             } else {
                                 viewModel.toggleSettings()
@@ -107,7 +109,7 @@ fun PlayerScreen(
                             }
                         }
                         KeyEvent.KEYCODE_DPAD_DOWN -> {
-                            if (uiState.showSettings || uiState.showJumpDialog || uiState.error != null) {
+                            if (uiState.showSettings || uiState.showJumpDialog || uiState.error != null || uiState.showControls) {
                                 false
                             } else {
                                 viewModel.showControls()
@@ -205,7 +207,7 @@ fun PlayerScreen(
             },
             update = { playerView ->
                 playerView.player = viewModel.exoPlayer
-                playerView.keepScreenOn = uiState.isPlaying
+                playerView.keepScreenOn = true
                 playerView.resizeMode = uiState.toggleResizeMode
             },
             modifier = Modifier.fillMaxSize()
@@ -807,6 +809,11 @@ private fun EnhancedSeekBar(
     // progress calculation removed as it was unused
     val bufferedProgress = (bufferedPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
 
+    // Local drag position so the thumb tracks the finger without firing a
+    // seek on every drag delta; the actual seek happens once on release.
+    var dragPosition by remember { mutableStateOf<Long?>(null) }
+    val sliderValue = (dragPosition ?: currentPosition).toFloat()
+
     Column {
         Box(modifier = Modifier.fillMaxWidth()) {
             // Track background
@@ -853,10 +860,19 @@ private fun EnhancedSeekBar(
 
             // Playback slider
             Slider(
-                value = currentPosition.toFloat(),
-                onValueChange = { onSeek(it.toLong()) },
+                value = sliderValue,
+                onValueChange = { dragPosition = it.toLong() },
+                onValueChangeFinished = {
+                    dragPosition?.let {
+                        dragPosition = null
+                        onSeek(it)
+                    }
+                },
                 valueRange = 0f..duration.toFloat(),
-                modifier = Modifier.fillMaxWidth(),
+                steps = (duration / 10_000L).toInt().coerceAtLeast(0),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusable(),
                 colors = SliderDefaults.colors(
                     thumbColor = TVPrimary,
                     activeTrackColor = TVPrimary,

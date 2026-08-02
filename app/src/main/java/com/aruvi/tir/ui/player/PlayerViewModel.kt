@@ -5,6 +5,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.MediaStore
+import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -559,17 +561,47 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                         }
                     }
 
-                    val downloadsDir = Environment.getExternalStoragePublicDirectory(
-                        Environment.DIRECTORY_DOWNLOADS
-                    )
-                    val localFile = File(downloadsDir, file.fileName)
-                    val useLocalFile = localFile.exists() && localFile.length() > 0
+                    val downloadsDir = if (Build.VERSION.SDK_INT < 29) {
+                        Environment.getExternalStoragePublicDirectory(
+                            Environment.DIRECTORY_DOWNLOADS
+                        )
+                    } else {
+                        null
+                    }
+                    var localUri: Uri? = null
+                    val legacyFile = downloadsDir?.let { File(it, file.fileName) }
+                    if (legacyFile != null && legacyFile.exists() && legacyFile.length() > 0) {
+                        localUri = Uri.fromFile(legacyFile)
+                    } else if (Build.VERSION.SDK_INT >= 29) {
+                        // Scoped storage: downloads are stored as MediaStore.Downloads rows,
+                        // not raw files at the public Downloads path.
+                        val selection = "${MediaStore.Downloads.DISPLAY_NAME} = ?"
+                        val selectionArgs = arrayOf(file.fileName)
+                        context.contentResolver.query(
+                            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                            arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.IS_PENDING),
+                            selection,
+                            selectionArgs,
+                            null
+                        )?.use { cursor ->
+                            if (cursor.moveToFirst()) {
+                                val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID))
+                                val isPending = cursor.getInt(
+                                    cursor.getColumnIndexOrThrow(MediaStore.Downloads.IS_PENDING)
+                                ) == 1
+                                if (!isPending) {
+                                    localUri = Uri.withAppendedPath(MediaStore.Downloads.EXTERNAL_CONTENT_URI, id.toString())
+                                }
+                            }
+                        }
+                    }
+
+                    val useLocalFile = localUri != null
 
                     val mediaItem: MediaItem
                     val mediaSourceFactory: DefaultMediaSourceFactory
 
                     if (useLocalFile) {
-                        val localUri = Uri.fromFile(localFile)
                         mediaItem = MediaItem.Builder()
                             .setUri(localUri)
                             .setMediaId(currentFileId.toString())
@@ -644,26 +676,38 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
 
     fun openInExternalPlayer(context: Context) {
         viewModelScope.launch {
-            val file = _uiState.value.file ?: return@launch
-            val serverUrl = settingsRepository.getServerUrl()
-            
-            val publicLinkResult = filesRepository.getPublicLink(file.id, serverUrl)
-            
-            val streamUrl = publicLinkResult.getOrElse {
-                val token = authRepository.getAccessToken()
-                if (token != null) {
-                    "$serverUrl/api/stream/${file.id}?token=$token"
-                } else {
-                    "$serverUrl/api/stream/${file.id}"
+            val file = _uiState.value.file
+            val streamUrl = when {
+                directUrl != null -> directUrl
+                file != null -> {
+                    val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
+                    val publicLinkResult = filesRepository.getPublicLink(file.id, serverUrl)
+                    publicLinkResult.getOrElse {
+                        val token = authRepository.getAccessToken()
+                        if (token != null) {
+                            "$serverUrl/api/stream/${file.id}?token=$token"
+                        } else {
+                            "$serverUrl/api/stream/${file.id}"
+                        }
+                    }
                 }
+                else -> return@launch
             }
-            
+
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(Uri.parse(streamUrl), "video/*")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+
+            if (context.packageManager.resolveActivity(intent, 0) == null) {
+                Toast.makeText(context, "No external player found", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+
             try {
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(Uri.parse(streamUrl), "video/*")
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                }
                 context.startActivity(intent)
+            } catch (e: android.content.ActivityNotFoundException) {
+                Toast.makeText(context, "No external player found", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -675,17 +719,21 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
         viewModelScope.launch {
             val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
             val token = authRepository.getAccessToken()
-            
-            // For Cast, we MUST use a query parameter as CastPlayer doesn't support headers easily
-            val url = if (token != null) {
-                "$serverUrl/api/stream/$currentFileId?token=$token"
+
+            val url = if (directUrl != null) {
+                directUrl!!
             } else {
-                "$serverUrl/api/stream/$currentFileId"
+                // For Cast, we MUST use a query parameter as CastPlayer doesn't support headers easily
+                if (token != null) {
+                    "$serverUrl/api/stream/$currentFileId?token=$token"
+                } else {
+                    "$serverUrl/api/stream/$currentFileId"
+                }
             }
-            
+
             val file = _uiState.value.file
             val title = file?.fileName ?: "Aruvi"
-            
+
             // Use query param for thumbnail as well for the cast device
             val thumbnailUrl = if (file?.thumbnailFileId != null) {
                 "$serverUrl/api/stream/$currentFileId/thumbnail" + (if (token != null) "?token=$token" else "")
@@ -727,7 +775,8 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
     fun seekTo(positionMs: Long) {
         val state = exoPlayer.playbackState
         if (state != Player.STATE_READY && state != Player.STATE_BUFFERING) return
-        val clampedPosition = positionMs.coerceIn(0, exoPlayer.duration)
+        val duration = exoPlayer.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
+        val clampedPosition = positionMs.coerceIn(0, duration)
         exoPlayer.seekTo(clampedPosition)
         updatePosition()
         showControls()
@@ -819,6 +868,7 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
         val posMs = ((hours * 3600L) + (minutes * 60L) + seconds) * 1000L
         seekTo(posMs)
         _uiState.value = _uiState.value.copy(showJumpDialog = false)
+        if (_uiState.value.isPlaying) scheduleControlsHide()
     }
 
     fun toggleJumpDialog() {
@@ -827,6 +877,8 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
         )
         if (_uiState.value.showJumpDialog) {
             controlHideJob?.cancel()
+        } else if (_uiState.value.isPlaying) {
+            scheduleControlsHide()
         }
     }
 

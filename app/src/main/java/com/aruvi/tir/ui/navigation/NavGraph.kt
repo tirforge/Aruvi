@@ -113,7 +113,7 @@ composable(Screen.Home.route) {
             arguments = listOf(
                 navArgument("fileId") { type = NavType.IntType },
                 navArgument("startPosition") { type = NavType.LongType; defaultValue = 0L },
-                navArgument("directUrl") { type = NavType.StringType; defaultValue = "" }
+                navArgument("directUrl") { type = NavType.StringType; nullable = true; defaultValue = null }
             )
         ) {
             PlayerScreen(

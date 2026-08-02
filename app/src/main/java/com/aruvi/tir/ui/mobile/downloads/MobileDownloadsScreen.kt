@@ -206,7 +206,7 @@ fun DownloadItemCard(
                             DownloadStatus.PENDING -> "Pending"
                             DownloadStatus.PAUSED -> "Paused"
                             DownloadStatus.COMPLETED -> "Completed • ${Formatter.formatFileSize(context, item.totalSize)}"
-                            DownloadStatus.FAILED -> "Failed${item.title.let { "" }}"
+                            DownloadStatus.FAILED -> "Failed"
                             DownloadStatus.CANCELLED -> "Cancelled"
                             else -> ""
                         },

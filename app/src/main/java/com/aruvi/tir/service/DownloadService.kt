@@ -30,8 +30,9 @@ class DownloadService : Service() {
     @Inject
     lateinit var fileDownloader: FileDownloader
 
-private var serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var observerJob: Job? = null
+    private val activeNotifIds = mutableSetOf<Int>()
 
     companion object {
         private const val CHANNEL_ID = "download_channel"
@@ -86,6 +87,14 @@ override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
             it.status == DownloadStatus.RUNNING || it.status == DownloadStatus.PENDING
         }
         val pausedDownloads = tasks.values.filter { it.status == DownloadStatus.PAUSED }
+
+        // Clear notifications for tasks that are no longer active/paused
+        val visibleIds = (activeDownloads + pausedDownloads).map { (NOTIFICATION_ID_BASE + it.id).toInt() }.toSet()
+        activeNotifIds.filterNot { it in visibleIds }.forEach {
+            notificationManager.cancel(it)
+        }
+        activeNotifIds.clear()
+        activeNotifIds.addAll(visibleIds)
 
         // If no active or paused downloads, stop the service
         if (activeDownloads.isEmpty() && pausedDownloads.isEmpty()) {
@@ -159,10 +168,6 @@ override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
                 .build()
             notificationManager.notify(notifId, notification)
         }
-
-        // Clear notifications for completed/failed/cancelled tasks
-        val activeIds = (activeDownloads + pausedDownloads).map { (NOTIFICATION_ID_BASE + it.id).toInt() }.toSet()
-        // We can't easily enumerate all existing notifications, so completed ones will auto-clear when service stops
     }
 
     private fun buildSummaryNotification(text: String): Notification {

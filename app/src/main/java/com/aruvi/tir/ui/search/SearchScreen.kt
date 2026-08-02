@@ -1,6 +1,7 @@
 package com.aruvi.tir.ui.search
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -14,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -137,7 +139,23 @@ fun SearchScreen(
 
     // Focus search field on launch
     LaunchedEffect(Unit) {
-        searchFieldFocus.requestFocus()
+        try {
+            searchFieldFocus.requestFocus()
+        } catch (e: IllegalStateException) {
+            // Ignore
+        }
+    }
+
+    // Move focus to the results grid once search completes with results
+    LaunchedEffect(uiState.hasSearched, uiState.results) {
+        if (uiState.hasSearched && uiState.results.isNotEmpty()) {
+            kotlinx.coroutines.delay(100)
+            try {
+                gridFocus.requestFocus()
+            } catch (e: IllegalStateException) {
+                // Ignore
+            }
+        }
     }
 }
 
@@ -175,11 +193,18 @@ private fun SearchHeader(
         Spacer(modifier = Modifier.width(24.dp))
 
         // Search input
+        var searchFocused by remember { mutableStateOf(false) }
         Box(
             modifier = Modifier
                 .weight(1f)
                 .height(56.dp)
+                .border(
+                    width = if (searchFocused) 3.dp else 1.dp,
+                    color = if (searchFocused) TVFocusRing else TVTextSecondary.copy(alpha = 0.15f),
+                    shape = MaterialTheme.shapes.medium
+                )
                 .background(TVSurfaceVariant, MaterialTheme.shapes.medium)
+                .onFocusChanged { searchFocused = it.isFocused }
                 .padding(horizontal = 16.dp),
             contentAlignment = Alignment.CenterStart
         ) {
@@ -224,13 +249,17 @@ private fun SearchHeader(
                 )
 
                 if (query.isNotEmpty()) {
-                    IconButton(onClick = onClear) {
-                        Icon(
-                            imageVector = Icons.Default.Clear,
-                            contentDescription = "Clear",
-                            tint = TVTextSecondary
-                        )
-                    }
+                    TVIconButton(
+                        icon = {
+                            Icon(
+                                imageVector = Icons.Default.Clear,
+                                contentDescription = "Clear",
+                                tint = TVTextSecondary
+                            )
+                        },
+                        onClick = onClear,
+                        modifier = Modifier.size(48.dp)
+                    )
                 }
             }
         }

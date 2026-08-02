@@ -1,5 +1,8 @@
 package com.aruvi.tir.ui.settings
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,9 +16,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -84,15 +89,31 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(32.dp))
 
                 // Logout button - raw Box to avoid Material/TV button theming issues
+                var logoutFocused by remember { mutableStateOf(false) }
+                val logoutScale by animateFloatAsState(
+                    targetValue = if (logoutFocused) 1.03f else 1f,
+                    animationSpec = spring(stiffness = Spring.StiffnessMedium),
+                    label = "logoutScale"
+                )
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(52.dp)
+                        .graphicsLayer {
+                            scaleX = logoutScale
+                            scaleY = logoutScale
+                        }
+                        .border(
+                            width = if (logoutFocused) 2.dp else 1.dp,
+                            color = if (logoutFocused) TVFocusRing else TVTextSecondary.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(8.dp)
+                        )
                         .background(
-                            color = Color(0xFF333333),
+                            color = if (logoutFocused) Color(0xFF444444) else Color(0xFF333333),
                             shape = RoundedCornerShape(8.dp)
                         )
                         .focusable()
+                        .onFocusChanged { logoutFocused = it.isFocused }
                         .clickable { viewModel.showLogoutConfirm() },
                     contentAlignment = Alignment.Center
                 ) {
@@ -226,10 +247,32 @@ private fun SettingsToggle(
     checked: Boolean,
     onCheckedChange: () -> Unit
 ) {
+    var toggleFocused by remember { mutableStateOf(false) }
+    val toggleScale by animateFloatAsState(
+        targetValue = if (toggleFocused) 1.03f else 1f,
+        animationSpec = spring(stiffness = Spring.StiffnessMedium),
+        label = "toggleScale"
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = toggleScale
+                scaleY = toggleScale
+            }
+            .border(
+                width = if (toggleFocused) 2.dp else 1.dp,
+                color = if (toggleFocused) TVFocusRing else TVTextSecondary.copy(alpha = 0.15f),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                if (toggleFocused) TVCardFocused else Color.Transparent,
+                RoundedCornerShape(12.dp)
+            )
+            .padding(horizontal = 16.dp, vertical = 12.dp)
             .focusable()
+            .onFocusChanged { toggleFocused = it.isFocused }
             .clickable { onCheckedChange() },
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -242,7 +285,7 @@ private fun SettingsToggle(
 
         Switch(
             checked = checked,
-            onCheckedChange = { onCheckedChange() },
+            onCheckedChange = null,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = TVPrimary,
                 checkedTrackColor = TVPrimary.copy(alpha = 0.5f),

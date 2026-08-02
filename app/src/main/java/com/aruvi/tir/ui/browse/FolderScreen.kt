@@ -19,6 +19,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.tv.foundation.lazy.grid.TvGridCells
 import androidx.tv.foundation.lazy.grid.TvLazyVerticalGrid
 import androidx.tv.foundation.lazy.grid.items
+import androidx.tv.foundation.lazy.grid.rememberTvLazyGridState
 import com.aruvi.tir.ui.components.*
 import com.aruvi.tir.ui.theme.*
 
@@ -61,9 +62,10 @@ fun FolderScreen(
                         onBackClick = onBackClick
                     )
 
-                    // Content grid
+                    // Content grid (state is saveable so scroll+focus survive back nav)
                     TvLazyVerticalGrid(
                         columns = TvGridCells.Adaptive(200.dp),
+                        state = rememberTvLazyGridState(),
                         modifier = Modifier
                             .fillMaxSize()
                             .focusRequester(focusRequester),

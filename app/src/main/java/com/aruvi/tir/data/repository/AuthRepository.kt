@@ -12,6 +12,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -82,7 +84,8 @@ class AuthRepository @Inject constructor(
      * Check if user is logged in.
      */
     val isLoggedIn: Flow<Boolean> = context.dataStore.data.map { prefs ->
-        !prefs[PreferencesKeys.ACCESS_TOKEN].isNullOrBlank()
+        !prefs[PreferencesKeys.ACCESS_TOKEN].isNullOrBlank() &&
+            !prefs[PreferencesKeys.REFRESH_TOKEN].isNullOrBlank()
     }
 
     /**
@@ -92,26 +95,41 @@ class AuthRepository @Inject constructor(
         prefs[PreferencesKeys.USER_NAME]
     }
 
+    // Serializes concurrent 401-triggered refreshes so a rotated (single-use)
+    // refresh token is never used by two callers at once (one would 4xx and
+    // spuriously clear the freshly-issued tokens).
+    private val refreshMutex = Mutex()
+
     /**
      * Refresh the access token using stored refresh token.
      * Returns the new access token or null if refresh failed.
      */
     suspend fun refreshAccessToken(): String? {
-        val refreshToken = getRefreshToken() ?: return null
-        
-        return try {
-            val response = api.refreshToken(RefreshRequest(refreshToken))
-            if (response.isSuccessful) {
-                val body = response.body()!!
-                saveTokens(body.accessToken, body.refreshToken)
-                body.accessToken
-            } else {
-                // Refresh failed, clear auth
-                clearAuth()
+        return refreshMutex.withLock {
+            val refreshToken = getRefreshToken() ?: return@withLock null
+
+            try {
+                val response = api.refreshToken(RefreshRequest(refreshToken))
+                if (response.isSuccessful) {
+                    val body = response.body()
+                    if (body != null) {
+                        saveTokens(body.accessToken, body.refreshToken)
+                        body.accessToken
+                    } else {
+                        clearAuth()
+                        null
+                    }
+                } else {
+                    // Refresh rejected (invalid/expired session) - clear auth
+                    clearAuth()
+                    null
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Transient network failure - keep tokens so a later refresh can retry
                 null
             }
-        } catch (e: Exception) {
-            null
         }
     }
 
@@ -122,11 +140,14 @@ class AuthRepository @Inject constructor(
         return try {
             val response = api.generateLoginCode()
             if (response.isSuccessful) {
-                Result.success(response.body()!!)
+                val body = response.body()
+                if (body != null) Result.success(body) else Result.failure(Exception("Empty response from server"))
             } else {
                 val errorMsg = response.errorBody()?.string() ?: "Unknown error"
                 Result.failure(Exception("HTTP ${response.code()}: $errorMsg"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -138,19 +159,25 @@ class AuthRepository @Inject constructor(
     suspend fun verifyLoginCode(code: String): Result<AuthResponse> {
         return try {
             val response = api.verifyCode(VerifyCodeRequest(code))
-        when (response.code()) {
-            200 -> {
-                val auth = response.body()!!
-                saveTokens(auth.accessToken, auth.refreshToken)
-                saveUser(auth.user)
-                Result.success(auth)
+            when (response.code()) {
+                200 -> {
+                    val auth = response.body()
+                    if (auth != null) {
+                        saveTokens(auth.accessToken, auth.refreshToken)
+                        saveUser(auth.user)
+                        Result.success(auth)
+                    } else {
+                        Result.failure(Exception("Empty response from server"))
+                    }
+                }
+                202 -> Result.failure(Exception("Code not yet confirmed"))
+                404 -> Result.failure(Exception("Code invalid or expired. Please generate a new one."))
+                410 -> Result.failure(Exception("Code expired or already used on another device"))
+                429 -> Result.failure(Exception("Too many requests. Please wait a moment."))
+                else -> Result.failure(Exception("Verification failed"))
             }
-            202 -> Result.failure(Exception("Code not yet confirmed"))
-            404 -> Result.failure(Exception("Code not yet confirmed"))
-            410 -> Result.failure(Exception("Code expired or already used on another device"))
-            429 -> Result.failure(Exception("Too many requests. Please wait a moment."))
-            else -> Result.failure(Exception("Verification failed"))
-        }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -175,10 +202,13 @@ class AuthRepository @Inject constructor(
         return try {
             val response = api.getBotInfo()
             if (response.isSuccessful) {
-                Result.success(response.body()!!)
+                val body = response.body()
+                if (body != null) Result.success(body) else Result.failure(Exception("Empty response from server"))
             } else {
                 Result.failure(Exception("Failed to fetch bot info"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }

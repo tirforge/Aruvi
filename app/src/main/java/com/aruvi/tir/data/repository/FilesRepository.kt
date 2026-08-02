@@ -25,10 +25,17 @@ class FilesRepository @Inject constructor(
         return try {
             val response = api.getFiles(folderId, page, perPage, fileType, includeAll = true)
             if (response.isSuccessful) {
-                Result.success(response.body()!!)
+                val body = response.body()
+                if (body != null) {
+                    Result.success(body)
+                } else {
+                    Result.failure(Exception("Empty response from server"))
+                }
             } else {
                 Result.failure(Exception("Failed to fetch files: ${response.code()}"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -41,10 +48,13 @@ class FilesRepository @Inject constructor(
         return try {
             val response = api.getFile(fileId)
             if (response.isSuccessful) {
-                Result.success(response.body()!!)
+                val body = response.body()
+                if (body != null) Result.success(body) else Result.failure(Exception("Empty response from server"))
             } else {
                 Result.failure(Exception("File not found"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -61,6 +71,8 @@ class FilesRepository @Inject constructor(
             } else {
                 Result.failure(Exception("Search failed: ${response.code()}"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -74,10 +86,13 @@ class FilesRepository @Inject constructor(
             val update = FileUpdate(fileName = name, folderId = folderId)
             val response = api.updateFile(fileId, update)
             if (response.isSuccessful) {
-                Result.success(response.body()!!)
+                val body = response.body()
+                if (body != null) Result.success(body) else Result.failure(Exception("Empty response from server"))
             } else {
                 Result.failure(Exception("Failed to update file"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -94,6 +109,8 @@ class FilesRepository @Inject constructor(
             } else {
                 Result.failure(Exception("Failed to delete file"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -112,6 +129,8 @@ class FilesRepository @Inject constructor(
             } else {
                 Result.failure(Exception("Failed to get progress"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -130,10 +149,13 @@ class FilesRepository @Inject constructor(
             val update = WatchProgressUpdate(position, duration, completed)
             val response = api.updateWatchProgress(fileId, update)
             if (response.isSuccessful) {
-                Result.success(response.body()!!)
+                val body = response.body()
+                if (body != null) Result.success(body) else Result.failure(Exception("Empty response from server"))
             } else {
                 Result.failure(Exception("Failed to update progress"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -146,10 +168,13 @@ class FilesRepository @Inject constructor(
         return try {
             val response = api.getTVBrowse()
             if (response.isSuccessful) {
-                Result.success(response.body()!!)
+                val body = response.body()
+                if (body != null) Result.success(body) else Result.failure(Exception("Empty response from server"))
             } else {
                 Result.failure(Exception("Failed to load home data"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -162,10 +187,12 @@ class FilesRepository @Inject constructor(
         return try {
             val response = api.getContinueWatching()
             if (response.isSuccessful) {
-                Result.success(response.body()!!)
+                Result.success(response.body() ?: emptyList())
             } else {
                 Result.failure(Exception("Failed to load continue watching"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -178,10 +205,12 @@ class FilesRepository @Inject constructor(
         return try {
             val response = api.getRecentFiles(limit)
             if (response.isSuccessful) {
-                Result.success(response.body()!!)
+                Result.success(response.body() ?: emptyList())
             } else {
                 Result.failure(Exception("Failed to load recent files"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -194,10 +223,13 @@ class FilesRepository @Inject constructor(
         return try {
             val response = api.searchTV(query)
             if (response.isSuccessful) {
-                Result.success(response.body()!!)
+                val body = response.body()
+                if (body != null) Result.success(body) else Result.failure(Exception("Empty response from server"))
             } else {
                 Result.failure(Exception("Search failed"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -207,7 +239,7 @@ class FilesRepository @Inject constructor(
      * Build streaming URL for a file.
      */
     fun getStreamUrl(fileId: Int, serverUrl: String): String {
-        return "${serverUrl}/api/stream/$fileId"
+        return "${serverUrl.trimEnd('/')}/api/stream/$fileId"
     }
 
     /**
@@ -218,15 +250,17 @@ class FilesRepository @Inject constructor(
         return try {
             val response = api.shareFile(fileId)
             if (response.isSuccessful) {
-                val file = response.body()!!
-                if (file.publicHash != null) {
-                    Result.success("${serverUrl}/api/stream/s/${file.publicHash}")
+                val file = response.body()
+                if (file?.publicHash != null) {
+                    Result.success("${serverUrl.trimEnd('/')}/api/stream/s/${file.publicHash}")
                 } else {
                     Result.failure(Exception("Failed to generate public hash"))
                 }
             } else {
                 Result.failure(Exception("Failed to share file: ${response.code()}"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -239,10 +273,13 @@ class FilesRepository @Inject constructor(
         return try {
             val response = api.revokeShare(fileId)
             if (response.isSuccessful) {
-                Result.success(response.body()!!)
+                val body = response.body()
+                if (body != null) Result.success(body) else Result.failure(Exception("Empty response from server"))
             } else {
                 Result.failure(Exception("Failed to revoke share"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -252,6 +289,6 @@ class FilesRepository @Inject constructor(
      * Build thumbnail URL for a file.
      */
     fun getThumbnailUrl(fileId: Int, serverUrl: String): String {
-        return "${serverUrl}/api/stream/$fileId/thumbnail"
+        return "${serverUrl.trimEnd('/')}/api/stream/$fileId/thumbnail"
     }
 }

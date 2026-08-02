@@ -23,7 +23,7 @@ android {
     productFlavors {
         create("tv") {
             dimension = "device"
-            targetSdk = 30
+            targetSdk = 36
             versionCode = 10
             versionName = "1.0.0"
         }
@@ -95,10 +95,10 @@ android {
         }
     }
 
-    // Split APKs by ABI to reduce size (FFmpeg adds ~50MB per architecture)
+    // Single universal APK build (decoder AARs are small, so ABI splits are not needed)
     splits {
         abi {
-            isEnable = true
+            isEnable = false
             reset()
             include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
             isUniversalApk = true
@@ -151,6 +151,9 @@ dependencies {
     // Chromecast - Media3 Cast extension
     implementation("androidx.media3:media3-cast:1.2.1")
     implementation("com.google.android.gms:play-services-cast-framework:21.5.0")
+
+    // Software decoder extensions (AV1 video, FFmpeg audio) - version-matched to media3 1.2.1
+    implementation(fileTree("libs") { include("*.aar") })
     implementation("androidx.mediarouter:mediarouter:1.6.0")
 
     // Note: Standard ExoPlayer supports HEVC, VP9, Opus, AAC, and most common formats

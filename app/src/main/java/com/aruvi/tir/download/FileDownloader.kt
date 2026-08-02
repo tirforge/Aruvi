@@ -97,10 +97,9 @@ class FileDownloader(
         )
 
         updateTask(task)
-        startDownload(task)
-
         // Start foreground service to keep downloads alive in background
         try { DownloadService.start(context) } catch (_: Exception) {}
+        startDownload(task)
 
         return id
     }
@@ -351,7 +350,11 @@ class FileDownloader(
             } else {
                 val file = File(task.localPath ?: return false)
                 file.parentFile?.mkdirs()
-                RandomAccessFile(file, "rw").channel
+                val channel = RandomAccessFile(file, "rw").channel
+                // A full 200 response overwrites from the start - truncate any stale
+                // trailing bytes left from a larger partial file.
+                if (startOffset == 0L) channel.truncate(0)
+                channel
             }
 
             // Write using RandomAccessFile for seek support

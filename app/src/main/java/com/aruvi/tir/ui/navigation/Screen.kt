@@ -16,7 +16,7 @@ sealed class Screen(val route: String) {
         fun createRoute(fileId: Int, startPosition: Long = 0L, directUrl: String? = null) =
             buildString {
                 append("player/$fileId?startPosition=$startPosition")
-                if (directUrl != null) append("&directUrl=").append(java.net.URLEncoder.encode(directUrl, "UTF-8"))
+                if (directUrl != null) append("&directUrl=").append(android.net.Uri.encode(directUrl))
             }
     }
     object Search : Screen("search")

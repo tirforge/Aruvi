@@ -44,6 +44,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.TelegramTV"
         android:usesCleartextTraffic="true"
+        android:largeHeap="true"
         tools:targetApi="31">
 
         <!-- Main Activity - TV Launcher (intent-filter in tv/AndroidManifest.xml) -->
@@ -53,8 +54,9 @@
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
             android:banner="@drawable/app_banner"
-            android:configChanges="keyboard|keyboardHidden|navigation"
-            android:screenOrientation="landscape">
+            android:configChanges="keyboard|keyboardHidden|navigation|screenSize|screenLayout|uiMode"
+            android:screenOrientation="landscape"
+            android:windowSoftInputMode="stateHidden|adjustNothing">
         </activity>
 
         <!-- Mobile Activity - Mobile Launcher (intent-filter in mobile/AndroidManifest.xml) -->

@@ -24,10 +24,12 @@ class FoldersRepository @Inject constructor(
         return try {
             val response = api.getFolders(parentId)
             if (response.isSuccessful) {
-                Result.success(response.body()!!)
+                Result.success(response.body() ?: emptyList())
             } else {
-                Result.failure(Exception("Failed to fetch folders"))
+                Result.failure(Exception("Failed to fetch folders: ${response.code()}"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -40,10 +42,13 @@ class FoldersRepository @Inject constructor(
         return try {
             val response = api.getFolder(folderId)
             if (response.isSuccessful) {
-                Result.success(response.body()!!)
+                val body = response.body()
+                if (body != null) Result.success(body) else Result.failure(Exception("Empty response from server"))
             } else {
                 Result.failure(Exception("Folder not found"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -57,10 +62,13 @@ class FoldersRepository @Inject constructor(
             val create = FolderCreate(name, parentId)
             val response = api.createFolder(create)
             if (response.isSuccessful) {
-                Result.success(response.body()!!)
+                val body = response.body()
+                if (body != null) Result.success(body) else Result.failure(Exception("Empty response from server"))
             } else {
                 Result.failure(Exception("Failed to create folder"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -74,10 +82,13 @@ class FoldersRepository @Inject constructor(
             val update = FolderUpdate(name, parentId)
             val response = api.updateFolder(folderId, update)
             if (response.isSuccessful) {
-                Result.success(response.body()!!)
+                val body = response.body()
+                if (body != null) Result.success(body) else Result.failure(Exception("Empty response from server"))
             } else {
                 Result.failure(Exception("Failed to update folder"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -94,6 +105,8 @@ class FoldersRepository @Inject constructor(
             } else {
                 Result.failure(Exception("Failed to delete folder"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -106,10 +119,12 @@ class FoldersRepository @Inject constructor(
         return try {
             val response = api.getFolderTree()
             if (response.isSuccessful) {
-                Result.success(response.body()!!)
+                Result.success(response.body() ?: emptyList())
             } else {
                 Result.failure(Exception("Failed to fetch folder tree"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }

@@ -19,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -46,6 +48,19 @@ fun DetailsScreen(
     viewModel: DetailsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val playButtonFocus = remember { FocusRequester() }
+
+    // Give the primary play button initial focus once details are loaded
+    LaunchedEffect(uiState.file) {
+        if (uiState.file != null) {
+            kotlinx.coroutines.delay(150)
+            try {
+                playButtonFocus.requestFocus()
+            } catch (e: IllegalStateException) {
+                // Ignore
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -197,7 +212,8 @@ fun DetailsScreen(
                                         text = "Resume from ${watchProgress.formattedPosition}",
                                         icon = Icons.Default.PlayArrow,
                                         isPrimary = true,
-                                        onClick = { onPlayClick(fileId, watchProgress.position * 1000L) }
+                                        onClick = { onPlayClick(fileId, watchProgress.position * 1000L) },
+                                        modifier = Modifier.focusRequester(playButtonFocus)
                                     )
 
                                     FocusablePlayButton(
@@ -211,7 +227,8 @@ fun DetailsScreen(
                                         text = "Play",
                                         icon = Icons.Default.PlayArrow,
                                         isPrimary = true,
-                                        onClick = { onPlayClick(fileId, 0L) }
+                                        onClick = { onPlayClick(fileId, 0L) },
+                                        modifier = Modifier.focusRequester(playButtonFocus)
                                     )
                                 }
                             }
@@ -381,7 +398,8 @@ private fun FocusablePlayButton(
     icon: ImageVector,
     isPrimary: Boolean,
     onClick: () -> Unit,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
@@ -401,7 +419,7 @@ private fun FocusablePlayButton(
             else -> Color.Transparent
         },
         shape = RoundedCornerShape(14.dp),
-        modifier = Modifier
+        modifier = modifier
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale

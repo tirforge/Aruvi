@@ -225,8 +225,32 @@ fun MobileHomeScreen(
                 )
             }
             
+            // Error State
+            if (uiState.error != null) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = uiState.error ?: "Failed to load content",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            TextButton(onClick = { viewModel.refresh() }) {
+                                Text("Retry", color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
+                }
+            }
+
             // Empty State
-            if (uiState.folders.isEmpty() && uiState.files.isEmpty() && !uiState.isLoading) {
+            if (uiState.error == null && uiState.folders.isEmpty() && uiState.files.isEmpty() && !uiState.isLoading) {
                 item {
                     Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                         Text("No files here", color = MaterialTheme.colorScheme.onSurfaceVariant)

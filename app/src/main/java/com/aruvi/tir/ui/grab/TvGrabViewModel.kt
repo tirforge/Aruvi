@@ -50,7 +50,8 @@ class TvGrabViewModel @Inject constructor(
 fun onQueryChange(q: String) {
     _state.value = _state.value.copy(query = q, grabResult = null)
     if (q.length < 2) {
-        _state.value = _state.value.copy(results = emptyList(), hasSearched = false)
+        searchJob?.cancel()
+        _state.value = _state.value.copy(results = emptyList(), hasSearched = false, isSearching = false, error = null)
     }
 }
 
@@ -78,6 +79,8 @@ fun search() {
                     error = "Search failed (${resp.code()})", isSearching = false, hasSearched = true
                 )
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             _state.value = _state.value.copy(
                 error = e.message ?: "Network error", isSearching = false, hasSearched = true

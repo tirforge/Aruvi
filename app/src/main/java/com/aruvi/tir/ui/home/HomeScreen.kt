@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.tv.foundation.lazy.list.TvLazyColumn
+import androidx.tv.foundation.lazy.list.rememberTvLazyListState
 import com.aruvi.tir.ui.components.*
 import com.aruvi.tir.ui.theme.*
 
@@ -83,6 +84,7 @@ viewModel: HomeViewModel = hiltViewModel()
 
                     // Content rows
                     TvLazyColumn(
+                        state = rememberTvLazyListState(),
                         modifier = Modifier
                             .fillMaxSize()
                             .focusRequester(focusRequester),

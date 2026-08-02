@@ -158,20 +158,23 @@ restoreState = true
 }
 )
 }
-composable(BottomNavItem.Search.route) {
-com.aruvi.tir.ui.mobile.search.MobileSearchScreen(
-onPlayFile = { id -> onNavigateToPlayer(id, null) },
-onGoToFolder = { folderId, folderName ->
-tabNavController.navigate(BottomNavItem.Home.route + "?folderId=$folderId&folderName=$folderName") {
-popUpTo(tabNavController.graph.findStartDestination().id) {
-saveState = true
-}
-launchSingleTop = true
-restoreState = true
-}
-}
-)
-}
+                composable(BottomNavItem.Search.route) {
+                    com.aruvi.tir.ui.mobile.search.MobileSearchScreen(
+                        onPlayFile = { id -> onNavigateToPlayer(id, null) },
+                        onGoToFolder = { folderId, folderName ->
+                            tabNavController.navigate(
+                                BottomNavItem.Home.route +
+                                    "?folderId=$folderId&folderName=${android.net.Uri.encode(folderName)}"
+                            ) {
+                                popUpTo(tabNavController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        }
+                    )
+                }
 composable(BottomNavItem.Downloads.route) {
 com.aruvi.tir.ui.mobile.downloads.MobileDownloadsScreen()
 }

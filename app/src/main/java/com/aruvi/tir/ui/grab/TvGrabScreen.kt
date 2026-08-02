@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -48,15 +49,15 @@ fun TvGrabScreen(
     val searchFieldFocus = remember { FocusRequester() }
     val gridFocus = remember { FocusRequester() }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(TVBackground, TVSurface, TVBackground)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(TVBackground, TVSurface, TVBackground)
+                    )
                 )
-            )
-    ) {
+        ) {
         Column(modifier = Modifier.fillMaxSize()) {
             TvGrabSearchHeader(
                 query = state.query,
@@ -216,7 +217,25 @@ items(state.results, key = { "${it.msgId}-${it.row}-${it.col}-${it.label}" }) { 
         }
     }
 
-    LaunchedEffect(Unit) { searchFieldFocus.requestFocus() }
+    LaunchedEffect(Unit) {
+        try {
+            searchFieldFocus.requestFocus()
+        } catch (e: IllegalStateException) {
+            // Ignore - focus requester not yet attached
+        }
+    }
+
+    // Move focus to the results grid once search completes with results
+    LaunchedEffect(state.hasSearched, state.results) {
+        if (state.hasSearched && state.results.isNotEmpty()) {
+            kotlinx.coroutines.delay(100)
+            try {
+                gridFocus.requestFocus()
+            } catch (e: IllegalStateException) {
+                // Ignore
+            }
+        }
+    }
 
     if (state.grabResult != null) {
         val result = state.grabResult!!
@@ -303,12 +322,19 @@ onSearch: () -> Unit,
         }
         Spacer(Modifier.width(24.dp))
 
+        var searchFocused by remember { mutableStateOf(false) }
         Box(
             modifier = Modifier
                 .weight(1f)
                 .height(56.dp)
                 .shadow(4.dp, MaterialTheme.shapes.medium)
+                .border(
+                    width = if (searchFocused) 3.dp else 1.dp,
+                    color = if (searchFocused) TVFocusRing else TVTextSecondary.copy(alpha = 0.15f),
+                    shape = MaterialTheme.shapes.medium
+                )
                 .background(TVSurfaceVariant, MaterialTheme.shapes.medium)
+                .onFocusChanged { searchFocused = it.isFocused }
                 .padding(horizontal = 16.dp),
             contentAlignment = Alignment.CenterStart,
         ) {
@@ -414,7 +440,8 @@ private fun TvGrabCard(
                         )
                 )
 
-                // Grab overlay button
+                // Grab overlay button (decorative - card handles the click so this
+                // stays a single D-pad focus target)
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -427,23 +454,13 @@ private fun TvGrabCard(
                             color = TVPrimary
                         )
                     } else {
-                        var grabBtnFocused by remember { mutableStateOf(false) }
-                        val grabBtnScale by animateFloatAsState(
-                            targetValue = if (grabBtnFocused) 1.15f else 1f,
-                            label = "grabBtnScale"
-                        )
-                        Surface(
-                            onClick = onGrab,
-                            color = if (grabBtnFocused) TVPrimaryVariant else TVPrimary,
-                            shape = CircleShape,
+                        Box(
                             modifier = Modifier
                                 .size(40.dp)
-                                .graphicsLayer { scaleX = grabBtnScale; scaleY = grabBtnScale }
-                                .onFocusChanged { grabBtnFocused = it.isFocused },
+                                .background(TVPrimary, CircleShape),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.Download, "Grab", tint = Color.White, modifier = Modifier.size(20.dp))
-                            }
+                            Icon(Icons.Default.Download, "Grab", tint = Color.White, modifier = Modifier.size(20.dp))
                         }
                     }
                 }
