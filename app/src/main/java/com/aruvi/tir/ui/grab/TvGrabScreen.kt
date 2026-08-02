@@ -13,7 +13,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -33,9 +32,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.tv.foundation.lazy.grid.TvGridCells
-import androidx.tv.foundation.lazy.grid.TvLazyVerticalGrid
-import androidx.tv.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import com.aruvi.tir.data.model.GrabSearchResult
 import com.aruvi.tir.ui.theme.*
 
@@ -64,7 +63,6 @@ fun TvGrabScreen(
 onQueryChange = { viewModel.onQueryChange(it) },
 onSearch = { viewModel.search() },
                 onClear = { viewModel.onQueryChange("") },
-                onBack = onBackClick,
                 focusRequester = searchFieldFocus,
             )
 
@@ -164,8 +162,8 @@ color = TVPrimary,
                         color = TVTextSecondary,
                         modifier = Modifier.padding(horizontal = 48.dp, vertical = 8.dp),
                     )
-                    TvLazyVerticalGrid(
-                        columns = TvGridCells.Adaptive(200.dp),
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(200.dp),
                         modifier = Modifier
                             .fillMaxSize()
                             .focusRequester(gridFocus),
@@ -292,7 +290,7 @@ private fun TvGrabSearchHeader(
 query: String, onQueryChange: (String) -> Unit,
 onSearch: () -> Unit,
 
-    onClear: () -> Unit, onBack: () -> Unit,
+    onClear: () -> Unit,
     focusRequester: FocusRequester,
 ) {
     Row(
@@ -301,27 +299,6 @@ onSearch: () -> Unit,
             .padding(horizontal = 48.dp, vertical = 24.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        var backFocused by remember { mutableStateOf(false) }
-        val backScale by animateFloatAsState(
-            targetValue = if (backFocused) 1.1f else 1f,
-            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessHigh),
-            label = "backScale"
-        )
-        Surface(
-            onClick = onBack,
-            color = if (backFocused) TVCardFocused else TVSurface.copy(alpha = 0.6f),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier
-                .size(48.dp)
-                .graphicsLayer { scaleX = backScale; scaleY = backScale }
-                .onFocusChanged { backFocused = it.isFocused },
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = TVTextPrimary, modifier = Modifier.size(24.dp))
-            }
-        }
-        Spacer(Modifier.width(24.dp))
-
         var searchFocused by remember { mutableStateOf(false) }
         Box(
             modifier = Modifier

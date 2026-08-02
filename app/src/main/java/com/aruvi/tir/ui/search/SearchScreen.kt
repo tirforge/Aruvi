@@ -20,9 +20,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.tv.foundation.lazy.grid.TvGridCells
-import androidx.tv.foundation.lazy.grid.TvLazyVerticalGrid
-import androidx.tv.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import com.aruvi.tir.ui.components.*
 import com.aruvi.tir.ui.theme.*
 
@@ -50,7 +50,6 @@ fun SearchScreen(
                 query = uiState.query,
                 onQueryChange = { viewModel.onQueryChange(it) },
                 onClear = { viewModel.clearSearch() },
-                onBack = onBackClick,
                 focusRequester = searchFieldFocus
             )
 
@@ -89,8 +88,8 @@ fun SearchScreen(
                     )
 
                     // Results grid
-                    TvLazyVerticalGrid(
-                        columns = TvGridCells.Adaptive(200.dp),
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(200.dp),
                         modifier = Modifier
                             .fillMaxSize()
                             .focusRequester(gridFocus),
@@ -167,7 +166,6 @@ private fun SearchHeader(
     query: String,
     onQueryChange: (String) -> Unit,
     onClear: () -> Unit,
-    onBack: () -> Unit,
     focusRequester: FocusRequester
 ) {
     Row(
@@ -176,22 +174,6 @@ private fun SearchHeader(
             .padding(horizontal = 48.dp, vertical = 24.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Back button
-        TVIconButton(
-            icon = {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = TVTextPrimary,
-                    modifier = Modifier.size(24.dp)
-                )
-            },
-            onClick = onBack,
-            modifier = Modifier.size(48.dp)
-        )
-
-        Spacer(modifier = Modifier.width(24.dp))
-
         // Search input
         var searchFocused by remember { mutableStateOf(false) }
         Box(

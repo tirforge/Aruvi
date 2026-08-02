@@ -3,8 +3,6 @@ package com.aruvi.tir.ui.browse
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -16,10 +14,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.tv.foundation.lazy.grid.TvGridCells
-import androidx.tv.foundation.lazy.grid.TvLazyVerticalGrid
-import androidx.tv.foundation.lazy.grid.items
-import androidx.tv.foundation.lazy.grid.rememberTvLazyGridState
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import com.aruvi.tir.ui.components.*
 import com.aruvi.tir.ui.theme.*
 
@@ -63,9 +61,9 @@ fun FolderScreen(
                     )
 
                     // Content grid (state is saveable so scroll+focus survive back nav)
-                    TvLazyVerticalGrid(
-                        columns = TvGridCells.Adaptive(200.dp),
-                        state = rememberTvLazyGridState(),
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(200.dp),
+                        state = rememberLazyGridState(),
                         modifier = Modifier
                             .fillMaxSize()
                             .focusRequester(focusRequester),
@@ -119,7 +117,7 @@ fun FolderScreen(
 }
 
 /**
- * Folder header with back button and breadcrumb path.
+ * Folder header with breadcrumb path.
  */
 @Composable
 private fun FolderHeader(
@@ -133,22 +131,6 @@ private fun FolderHeader(
             .padding(horizontal = 48.dp, vertical = 24.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Back button
-        TVIconButton(
-            icon = {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = TVTextPrimary,
-                    modifier = Modifier.size(24.dp)
-                )
-            },
-            onClick = onBackClick,
-            modifier = Modifier.size(48.dp)
-        )
-
-        Spacer(modifier = Modifier.width(16.dp))
-
         // Folder icon
         Icon(
             imageVector = Icons.Default.Folder,

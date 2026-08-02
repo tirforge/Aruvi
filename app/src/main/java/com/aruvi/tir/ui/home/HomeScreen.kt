@@ -1,9 +1,13 @@
 package com.aruvi.tir.ui.home
 
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -14,21 +18,22 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
-import androidx.compose.foundation.Image
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.tv.foundation.lazy.list.TvLazyColumn
-import androidx.tv.foundation.lazy.list.rememberTvLazyListState
+import coil.compose.AsyncImage
 import com.aruvi.tir.ui.components.*
 import com.aruvi.tir.ui.theme.*
 
@@ -83,14 +88,27 @@ viewModel: HomeViewModel = hiltViewModel()
     )
 
                     // Content rows
-                    TvLazyColumn(
-                        state = rememberTvLazyListState(),
+                    LazyColumn(
+                        state = rememberLazyListState(),
                         modifier = Modifier
                             .fillMaxSize()
                             .focusRequester(focusRequester),
                         contentPadding = PaddingValues(bottom = 48.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        // Hero banner (featured content)
+                        val featured = uiState.continueWatching.firstOrNull()
+                            ?: uiState.recentFiles.firstOrNull()
+                        if (featured != null && uiState.serverUrl.isNotEmpty()) {
+                            item {
+                                HeroBanner(
+                                    file = featured,
+                                    thumbnailUrl = "${uiState.serverUrl}/api/stream/${featured.id}/thumbnail",
+                                    onPlay = { onFileClick(featured.id) }
+                                )
+                            }
+                        }
+
                         // Continue Watching section
                         if (uiState.continueWatching.isNotEmpty()) {
                             item {
@@ -370,6 +388,170 @@ private fun ContentSection(
         Spacer(modifier = Modifier.height(8.dp))
         
         content()
+    }
+}
+
+/**
+ * Full-width hero banner for featured content.
+ */
+@Composable
+private fun HeroBanner(
+    file: com.aruvi.tir.data.model.FileItem,
+    thumbnailUrl: String,
+    onPlay: () -> Unit
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (isFocused) 1.02f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "heroScale"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(320.dp)
+            .padding(horizontal = 40.dp, vertical = 12.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(24.dp))
+            .background(TVCardBackground)
+            .then(
+                if (isFocused) Modifier.shadow(
+                    elevation = 20.dp,
+                    shape = RoundedCornerShape(24.dp),
+                    ambientColor = TVAccentGlow,
+                    spotColor = TVPrimary.copy(alpha = 0.5f)
+                ) else Modifier
+            )
+            .clickable(onClick = onPlay)
+            .onFocusChanged { isFocused = it.isFocused }
+    ) {
+        // Backdrop image with placeholder layer
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(TVCardBackground),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Movie,
+                contentDescription = null,
+                modifier = Modifier.size(72.dp),
+                tint = TVTextDisabled.copy(alpha = 0.5f)
+            )
+        }
+        AsyncImage(
+            model = thumbnailUrl,
+            contentDescription = file.fileName,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
+
+        // Scrim for readability
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Color.Black.copy(alpha = 0.85f),
+                            Color.Black.copy(alpha = 0.25f),
+                            Color.Transparent
+                        )
+                    )
+                )
+        )
+
+        // Content overlay
+        Column(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .padding(horizontal = 40.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(TVPrimary)
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (file.progressPercent > 0f) "RESUME" else "FEATURED",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Color.Black,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 2.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+                text = file.fileName,
+                style = MaterialTheme.typography.headlineLarge,
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(
+                    text = file.formattedSize,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.8f)
+                )
+                file.formattedDuration?.let { duration ->
+                    Text(
+                        text = duration,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.8f)
+                    )
+                }
+                file.resolution?.let { res ->
+                    Text(
+                        text = res,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TVPrimaryLight
+                    )
+                }
+            }
+        }
+
+        // Play affordance
+        Row(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(horizontal = 48.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color.Black.copy(alpha = 0.55f))
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.PlayArrow,
+                contentDescription = null,
+                modifier = Modifier.size(28.dp),
+                tint = Color.White
+            )
+            Text(
+                text = if (file.progressPercent > 0f) "Continue" else "Play",
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
     }
 }
 

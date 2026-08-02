@@ -19,8 +19,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
-import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,23 +51,6 @@ fun MobileHomeScreen(
     onSearchClick: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    
-    // Pull to Refresh State
-    val pullToRefreshState = rememberPullToRefreshState()
-    if (pullToRefreshState.isRefreshing) {
-        LaunchedEffect(true) {
-            viewModel.refresh()
-        }
-    }
-    
-    // Sync refreshing state from UI state
-    LaunchedEffect(uiState.isLoading) {
-        if (uiState.isLoading) {
-            pullToRefreshState.startRefresh()
-        } else {
-            pullToRefreshState.endRefresh()
-        }
-    }
 
     // Dialog States
     var showCreateFolderDialog by remember { mutableStateOf(false) }
@@ -87,11 +69,12 @@ fun MobileHomeScreen(
         viewModel.navigateBack()
     }
 
-    Box(
+    PullToRefreshBox(
+        isRefreshing = uiState.isLoading,
+        onRefresh = { viewModel.refresh() },
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .nestedScroll(pullToRefreshState.nestedScrollConnection)
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -268,13 +251,6 @@ fun MobileHomeScreen(
                 onMove = { showMoveSelectedDialog = true }
             )
         }
-        
-        PullToRefreshContainer(
-            state = pullToRefreshState,
-            modifier = Modifier.align(Alignment.TopCenter),
-            containerColor = MaterialTheme.colorScheme.surface,
-            contentColor = MobilePrimary
-        )
     }
     
     // --- DIALOGS ---

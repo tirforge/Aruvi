@@ -31,8 +31,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.foundation.lazy.LazyColumn
 import coil.compose.AsyncImage
-import androidx.tv.foundation.lazy.list.TvLazyColumn
 import com.aruvi.tir.ui.components.*
 import com.aruvi.tir.ui.theme.*
 import java.io.File
@@ -129,28 +129,13 @@ fun DetailsScreen(
                         .padding(48.dp)
                 ) {
                     // Left side - Info
-                    TvLazyColumn(
+                    LazyColumn(
                         modifier = Modifier
                             .weight(0.6f)
                             .fillMaxHeight()
                     ) {
                         item {
                             Spacer(modifier = Modifier.height(32.dp))
-                        }
-                        item {
-                            // Back button
-                            TVIconButton(
-                                icon = {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                        contentDescription = "Back",
-                                        tint = TVTextPrimary,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                },
-                                onClick = onBackClick,
-                                modifier = Modifier.size(48.dp)
-                            )
                         }
 
                         item {

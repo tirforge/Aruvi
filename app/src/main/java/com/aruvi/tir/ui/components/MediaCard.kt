@@ -88,6 +88,22 @@ fun MediaCard(
         shape = CardDefaults.shape(shape = RoundedCornerShape(12.dp))
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
+            // Placeholder layer (visible while loading or on image error)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .background(TVCardBackground),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Movie,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                    tint = TVTextDisabled.copy(alpha = 0.5f)
+                )
+            }
+
             // Thumbnail
             AsyncImage(
                 model = thumbnailUrl,
@@ -121,6 +137,15 @@ fun MediaCard(
                     .align(Alignment.TopEnd)
                     .padding(8.dp)
             )
+
+            // Resume badge (top-left) for in-progress content
+            if (file.progressPercent > 0f) {
+                ResumeBadge(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp)
+                )
+            }
 
             // File info
             Column(
@@ -239,6 +264,33 @@ private fun FileTypeBadge(
 }
 
 /**
+ * Resume badge shown on in-progress content.
+ */
+@Composable
+private fun ResumeBadge(modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.Black.copy(alpha = 0.7f))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.PlayArrow,
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            tint = TVPrimaryLight
+        )
+        Text(
+            text = "Resume",
+            style = MaterialTheme.typography.labelMedium,
+            color = TVTextPrimary
+        )
+    }
+}
+
+/**
  * Large media card variant for featured content.
  */
 @OptIn(ExperimentalTvMaterial3Api::class)
@@ -292,6 +344,21 @@ fun LargeMediaCard(
         shape = CardDefaults.shape(shape = RoundedCornerShape(16.dp))
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
+            // Placeholder layer (visible while loading or on image error)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(TVCardBackground),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Movie,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = TVTextDisabled.copy(alpha = 0.5f)
+                )
+            }
+
             AsyncImage(
                 model = thumbnailUrl,
                 contentDescription = file.fileName,
@@ -322,6 +389,15 @@ fun LargeMediaCard(
                     .align(Alignment.TopEnd)
                     .padding(10.dp)
             )
+
+            // Resume badge (top-left) for in-progress content
+            if (file.progressPercent > 0f) {
+                ResumeBadge(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(10.dp)
+                )
+            }
 
             // File info
             Column(

@@ -1,13 +1,13 @@
 package com.aruvi.tir.ui.components
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.tv.foundation.lazy.list.TvLazyRow
-import androidx.tv.foundation.lazy.list.items
 import com.aruvi.tir.data.model.FileItem
 import com.aruvi.tir.data.model.Folder
 import com.aruvi.tir.ui.theme.TVTextPrimary
@@ -35,7 +35,7 @@ fun ContentRow(
         )
 
         // Horizontal scrollable items
-        TvLazyRow(
+        LazyRow(
             contentPadding = PaddingValues(horizontal = 48.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -80,7 +80,7 @@ fun FolderRow(
         )
 
         // Horizontal scrollable folders
-        TvLazyRow(
+        LazyRow(
             contentPadding = PaddingValues(horizontal = 48.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
