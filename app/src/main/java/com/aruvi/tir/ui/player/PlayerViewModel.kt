@@ -541,7 +541,7 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                         filesRepository.getFiles(
                             folderId = file.folderId,
                             page = 1,
-                            perPage = 200,
+                            perPage = 100,
                             fileType = "audio"
                         ).onSuccess { response ->
                             val audioFiles = response.items.sortedBy { it.fileName }

@@ -107,7 +107,7 @@ class MobileHomeViewModel @Inject constructor(
             if (folderId == null) {
                 // Root
                 val foldersResult = foldersRepository.getFolders(parentId = null)
-                val filesResult = filesRepository.getFiles(folderId = null, perPage = 200)
+                val filesResult = filesRepository.getFiles(folderId = null, perPage = 100)
                 
                 // Fetch extra home content
                 val continueResult = filesRepository.getContinueWatching()
