@@ -299,7 +299,6 @@ fun PlayerScreen(
                 onSeekBackward = { viewModel.seekBackward() },
                 onSeekForward = { viewModel.seekForward() },
                 onSeek = { viewModel.seekTo(it) },
-                onBack = onBackClick,
                 onSettings = { viewModel.toggleSettings() },
                 onJumpTo = { viewModel.toggleJumpDialog() }
             )
@@ -643,7 +642,6 @@ private fun PlayerControls(
     onSeekBackward: () -> Unit,
     onSeekForward: () -> Unit,
     onSeek: (Long) -> Unit,
-    onBack: () -> Unit,
     onSettings: () -> Unit,
     onJumpTo: () -> Unit
 ) {
