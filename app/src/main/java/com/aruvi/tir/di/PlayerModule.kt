@@ -9,6 +9,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DefaultLoadControl
 import com.aruvi.tir.data.api.AuthInterceptor
+import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -38,7 +39,7 @@ object PlayerModule {
     fun provideRenderersFactory(
         @ApplicationContext context: Context
     ): DefaultRenderersFactory {
-        return DefaultRenderersFactory(context)
+        return NextRenderersFactory(context)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
     }
 

@@ -11,3 +11,11 @@
 /app/release
 *.aab
 .opencode-autopilot/
+/release
+.opencode/
+.agents/
+Aruvi-backend/
+ivy/
+mirrorbot-clean/
+mirrorbot-work/
+/data

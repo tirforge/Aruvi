@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -18,15 +19,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -39,6 +40,9 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import coil.compose.AsyncImage
 import com.aruvi.tir.ui.components.*
 import com.aruvi.tir.ui.theme.*
+import dev.holtchas.focustrail.compose.FocusTrailBox
+import dev.holtchas.focustrail.compose.FocusTrailDefaults
+import dev.holtchas.focustrail.compose.FocusTrailShape
 
 /**
  * Modern home screen with enhanced aesthetics for TV.
@@ -419,37 +423,55 @@ private fun HeroBanner(
     onPlay: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.02f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
-        label = "heroScale"
+    val context = LocalContext.current
+
+    val heroStyle = FocusTrailDefaults.tvCardStyle(
+        shape = FocusTrailShape.ROUND_RECT,
+        durationMs = 10_000L,
+        startDelayMs = 1_000L,
+        cornerRadius = 24.dp,
+        borderWidth = 3.dp,
+        staticBorderWidth = 3.dp,
+        trailPadding = 14.dp,
+        glowWidth = 16.dp,
+        staticColor = TVFocusRing.toArgb(),
+        trailColor = TVFocusRing.toArgb(),
+        baseAlpha = 150,
+        glowAlpha = 60,
+        highlightAlpha = 255,
+        trailLengthRatio = 0.16f,
+        minTrailLength = 48.dp,
+        drawOppositeTrail = true,
+        focusScale = 1.02f
     )
 
-    Box(
+    FocusTrailBox(
         modifier = Modifier
             .fillMaxWidth()
             .height(320.dp)
             .padding(horizontal = 40.dp, vertical = 12.dp)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .clip(RoundedCornerShape(24.dp))
-            .background(TVCardBackground)
-            .then(
-                if (isFocused) Modifier.shadow(
-                    elevation = 20.dp,
-                    shape = RoundedCornerShape(24.dp),
-                    ambientColor = TVAccentGlow,
-                    spotColor = TVPrimary.copy(alpha = 0.5f)
-                ) else Modifier
-            )
-            .clickable(onClick = onPlay)
-            .onFocusChanged { isFocused = it.isFocused }
+            .tiltOnFocus(isFocused, maxDegrees = 2f),
+        active = isFocused,
+        style = heroStyle
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(24.dp))
+                .background(TVCardBackground)
+                .clickable(
+                    onClick = {
+                        TvSound.click(context)
+                        onPlay()
+                    }
+                )
+                .onFocusChanged { state ->
+                    if (state.isFocused && !isFocused) {
+                        TvSound.navigate(context)
+                    }
+                    isFocused = state.isFocused
+                }
+        ) {
         // Backdrop image with placeholder layer
         Box(
             modifier = Modifier
@@ -517,8 +539,9 @@ private fun HeroBanner(
                 style = MaterialTheme.typography.headlineLarge,
                 color = Color.White,
                 fontWeight = FontWeight.Bold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
+                maxLines = if (isFocused) 1 else 2,
+                overflow = if (isFocused) TextOverflow.Clip else TextOverflow.Ellipsis,
+                modifier = if (isFocused) Modifier.basicMarquee() else Modifier
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -569,6 +592,7 @@ private fun HeroBanner(
                 color = Color.White,
                 fontWeight = FontWeight.SemiBold
             )
+        }
         }
     }
 }

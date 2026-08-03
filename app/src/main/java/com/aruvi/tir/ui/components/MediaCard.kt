@@ -1,43 +1,33 @@
 package com.aruvi.tir.ui.components
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.tv.material3.Card
-import androidx.tv.material3.CardDefaults
-import androidx.tv.material3.ExperimentalTvMaterial3Api
 import coil.compose.AsyncImage
 import com.aruvi.tir.data.model.FileItem
 import com.aruvi.tir.ui.theme.*
 
 /**
- * TV-optimized media card with focus glow, spring animation, and type badges.
+ * TV-optimized media card with focus-trail glow, 3D tilt, and type badges.
  */
-@OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun MediaCard(
     file: FileItem,
@@ -45,48 +35,14 @@ fun MediaCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var isFocused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.08f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessHigh
-        ),
-        label = "cardScale"
-    )
-    val cardAlpha by animateFloatAsState(
-        targetValue = if (isFocused) 1f else 0.88f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessHigh
-        ),
-        label = "cardAlpha"
-    )
-
-    Card(
+    FocusedCard(
         onClick = onClick,
         modifier = modifier
             .width(220.dp)
-            .height(180.dp)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                alpha = cardAlpha
-            }
-            .onFocusChanged { isFocused = it.isFocused }
-            .then(
-                if (isFocused) Modifier.shadow(
-                    elevation = 16.dp,
-                    shape = RoundedCornerShape(12.dp),
-                    ambientColor = TVAccentGlow,
-                    spotColor = TVPrimary.copy(alpha = 0.4f)
-                ) else Modifier
-            ),
-        colors = CardDefaults.colors(
-            containerColor = if (isFocused) TVCardFocused else TVCardBackground
-        ),
-        shape = CardDefaults.shape(shape = RoundedCornerShape(12.dp))
-    ) {
+            .height(180.dp),
+        cornerRadius = 16.dp,
+        focusScale = 1.08f
+    ) { isFocused ->
         Box(modifier = Modifier.fillMaxSize()) {
             // Placeholder layer (visible while loading or on image error)
             Box(
@@ -158,8 +114,9 @@ fun MediaCard(
                     style = MaterialTheme.typography.bodyMedium,
                     color = TVTextPrimary,
                     fontWeight = if (isFocused) FontWeight.SemiBold else FontWeight.Normal,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    maxLines = if (isFocused) 1 else 2,
+                    overflow = if (isFocused) TextOverflow.Clip else TextOverflow.Ellipsis,
+                    modifier = if (isFocused) Modifier.basicMarquee() else Modifier
                 )
 
                 Spacer(modifier = Modifier.height(4.dp))
@@ -194,31 +151,6 @@ fun MediaCard(
                     color = TVPrimary,
                     trackColor = TVProgressBackground
                 )
-            }
-
-            // Focus glow border
-            if (isFocused) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color.Transparent)
-                        .padding(1.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(11.dp))
-                            .background(
-                                brush = Brush.linearGradient(
-                                    colors = listOf(
-                                        TVGradientStart.copy(alpha = 0.2f),
-                                        TVGradientEnd.copy(alpha = 0.2f)
-                                    )
-                                )
-                            )
-                    )
-                }
             }
         }
     }
@@ -293,7 +225,6 @@ private fun ResumeBadge(modifier: Modifier = Modifier) {
 /**
  * Large media card variant for featured content.
  */
-@OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun LargeMediaCard(
     file: FileItem,
@@ -301,48 +232,14 @@ fun LargeMediaCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var isFocused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.05f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessHigh
-        ),
-        label = "cardScale"
-    )
-    val cardAlpha by animateFloatAsState(
-        targetValue = if (isFocused) 1f else 0.88f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessHigh
-        ),
-        label = "cardAlpha"
-    )
-
-    Card(
+    FocusedCard(
         onClick = onClick,
         modifier = modifier
             .width(320.dp)
-            .height(220.dp)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                alpha = cardAlpha
-            }
-            .onFocusChanged { isFocused = it.isFocused }
-            .then(
-                if (isFocused) Modifier.shadow(
-                    elevation = 16.dp,
-                    shape = RoundedCornerShape(16.dp),
-                    ambientColor = TVAccentGlow,
-                    spotColor = TVPrimary.copy(alpha = 0.45f)
-                ) else Modifier
-            ),
-        colors = CardDefaults.colors(
-            containerColor = if (isFocused) TVCardFocused else TVCardBackground
-        ),
-        shape = CardDefaults.shape(shape = RoundedCornerShape(16.dp))
-    ) {
+            .height(220.dp),
+        cornerRadius = 16.dp,
+        focusScale = 1.05f
+    ) { isFocused ->
         Box(modifier = Modifier.fillMaxSize()) {
             // Placeholder layer (visible while loading or on image error)
             Box(
@@ -410,8 +307,9 @@ fun LargeMediaCard(
                     style = MaterialTheme.typography.titleMedium,
                     color = TVTextPrimary,
                     fontWeight = if (isFocused) FontWeight.Bold else FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    maxLines = if (isFocused) 1 else 2,
+                    overflow = if (isFocused) TextOverflow.Clip else TextOverflow.Ellipsis,
+                    modifier = if (isFocused) Modifier.basicMarquee() else Modifier
                 )
 
                 Spacer(modifier = Modifier.height(6.dp))

@@ -24,14 +24,14 @@ android {
         create("tv") {
             dimension = "device"
             targetSdk = 36
-            versionCode = 10
-            versionName = "1.0.0"
+            versionCode = 12
+            versionName = "1.0.5"
         }
         create("mobile") {
             dimension = "device"
             targetSdk = 36
-            versionCode = 13
-            versionName = "1.0.0"
+            versionCode = 14
+            versionName = "1.0.5"
         }
     }
 
@@ -151,8 +151,9 @@ dependencies {
     implementation("androidx.media3:media3-cast:1.2.1")
     implementation("com.google.android.gms:play-services-cast-framework:21.5.0")
 
-    // Software decoder extensions (AV1 video, FFmpeg audio) - version-matched to media3 1.2.1
-    implementation(fileTree("libs") { include("*.aar") })
+    // Software decoder extensions (AV1 video via local AAR, HEVC/H.264/VP8/VP9 + full audio via nextlib FFmpeg) - version-matched to media3 1.2.1
+    implementation("com.github.anilbeesetti.nextlib:nextlib-media3ext:0.6.0")
+    implementation(files("libs/lib-decoder-av1-release.aar"))
     implementation("androidx.mediarouter:mediarouter:1.6.0")
 
     // Note: Standard ExoPlayer supports HEVC, VP9, Opus, AAC, and most common formats
