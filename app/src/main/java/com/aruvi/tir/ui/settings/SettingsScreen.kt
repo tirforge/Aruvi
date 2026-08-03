@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import com.aruvi.tir.ui.components.TVButton
+import com.aruvi.tir.ui.components.TvAnimatedBackground
 import com.aruvi.tir.ui.theme.*
 
 /**
@@ -39,15 +40,8 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(TVBackground, TVSurface, TVBackground)
-                )
-            )
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        TvAnimatedBackground(modifier = Modifier.fillMaxSize())
         Column(
             modifier = Modifier
                 .fillMaxSize()

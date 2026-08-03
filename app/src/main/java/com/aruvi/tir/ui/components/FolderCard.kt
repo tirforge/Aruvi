@@ -33,7 +33,7 @@ fun FolderCard(
         modifier = modifier
             .width(180.dp)
             .height(120.dp),
-        cornerRadius = 12.dp,
+        cornerRadius = 16.dp,
         focusScale = 1.08f
     ) { isFocused ->
         Box(
@@ -104,10 +104,10 @@ fun FolderListItem(
         modifier = modifier
             .fillMaxWidth()
             .height(64.dp),
-        cornerRadius = 8.dp,
+        cornerRadius = 12.dp,
         focusScale = 1.03f,
-        trailPadding = 8.dp,
-        tiltDegrees = 2f
+        contentPadding = 8.dp,
+        trailPadding = 8.dp
     ) { isFocused ->
         Row(
             modifier = Modifier

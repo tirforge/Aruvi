@@ -39,11 +39,8 @@ fun SearchScreen(
     val searchFieldFocus = remember { FocusRequester() }
     val gridFocus = remember { FocusRequester() }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(TVBackground)
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        TvAnimatedBackground(modifier = Modifier.fillMaxSize())
         Column(modifier = Modifier.fillMaxSize()) {
             // Search header
             SearchHeader(

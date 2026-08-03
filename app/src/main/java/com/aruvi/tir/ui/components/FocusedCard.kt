@@ -1,34 +1,36 @@
 package com.aruvi.tir.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.aruvi.tir.ui.theme.TVCardBackground
+import com.aruvi.tir.ui.theme.TVFocusRing
 import dev.holtchas.focustrail.compose.FocusTrailBox
 import dev.holtchas.focustrail.compose.FocusTrailDefaults
 import dev.holtchas.focustrail.compose.FocusTrailShape
 
 /**
- * TV card wrapper matching the HoltChas focus-trail demo style:
- * white moving highlight trail + white resting border + soft outer glow
- * + scale, applied by the library itself.
- *
- * Deliberately NO tv-material3 Card (it draws its own white focus border +
- * glow), NO 3D tilt (extreme `cameraDistance` caused screen shake), and NO
- * alpha dim — the demo does none of these.
+ * TV card wrapper: blue focus-trail (moving highlight + resting border +
+ * soft glow) from the HoltChas library, 3D tilt, and a material3 Card whose
+ * border lights up in [TVFocusRing] while focused.
  */
 @Composable
 fun FocusedCard(
@@ -39,6 +41,8 @@ fun FocusedCard(
     contentPadding: Dp = 16.dp,
     focusScale: Float = 1.08f,
     trailPadding: Dp = 12.dp,
+    tiltDegrees: Float = 2f,
+    trailColor: Color = TVFocusRing,
     cardContent: @Composable BoxScope.(isFocused: Boolean) -> Unit
 ) {
     val context = LocalContext.current
@@ -53,8 +57,8 @@ fun FocusedCard(
         staticBorderWidth = 2.8.dp,
         trailPadding = trailPadding,
         glowWidth = 12.dp,
-        staticColor = android.graphics.Color.WHITE,
-        trailColor = android.graphics.Color.WHITE,
+        staticColor = trailColor.toArgb(),
+        trailColor = trailColor.toArgb(),
         baseAlpha = 126,
         glowAlpha = 50,
         highlightAlpha = 255,
@@ -65,7 +69,7 @@ fun FocusedCard(
     )
 
     FocusTrailBox(
-        modifier = modifier,
+        modifier = modifier.tiltOnFocus(isFocused, tiltDegrees),
         active = isFocused,
         style = style
     ) {
@@ -83,13 +87,21 @@ fun FocusedCard(
                     isFocused = state.isFocused
                 }
         ) {
-            Box(
+            Card(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(contentPadding)
-                    .clip(RoundedCornerShape(contentCornerRadius))
+                    .padding(contentPadding),
+                shape = RoundedCornerShape(contentCornerRadius),
+                colors = CardDefaults.cardColors(containerColor = TVCardBackground),
+                border = if (isFocused) {
+                    BorderStroke(2.dp, trailColor)
+                } else {
+                    null
+                }
             ) {
-                cardContent(this, isFocused)
+                Box(modifier = Modifier.fillMaxSize()) {
+                    cardContent(this, isFocused)
+                }
             }
         }
     }

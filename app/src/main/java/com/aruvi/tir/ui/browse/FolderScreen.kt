@@ -34,11 +34,8 @@ fun FolderScreen(
     val uiState by viewModel.uiState.collectAsState()
     val focusRequester = remember { FocusRequester() }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(TVBackground)
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        TvAnimatedBackground(modifier = Modifier.fillMaxSize())
         when {
             uiState.isLoading -> {
                 LoadingIndicator(message = "Loading folder...")

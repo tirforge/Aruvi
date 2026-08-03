@@ -237,8 +237,8 @@ fun LargeMediaCard(
         modifier = modifier
             .width(320.dp)
             .height(220.dp),
-        cornerRadius = 16.dp,
-        focusScale = 1.05f
+        cornerRadius = 20.dp,
+        focusScale = 1.08f
     ) { isFocused ->
         Box(modifier = Modifier.fillMaxSize()) {
             // Placeholder layer (visible while loading or on image error)

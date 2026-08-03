@@ -36,6 +36,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import com.aruvi.tir.data.model.GrabSearchResult
+import com.aruvi.tir.ui.components.TvAnimatedBackground
 import com.aruvi.tir.ui.theme.*
 
 @Composable
@@ -48,15 +49,8 @@ fun TvGrabScreen(
     val searchFieldFocus = remember { FocusRequester() }
     val gridFocus = remember { FocusRequester() }
 
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(TVBackground, TVSurface, TVBackground)
-                    )
-                )
-        ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            TvAnimatedBackground(modifier = Modifier.fillMaxSize())
         Column(modifier = Modifier.fillMaxSize()) {
             TvGrabSearchHeader(
                 query = state.query,

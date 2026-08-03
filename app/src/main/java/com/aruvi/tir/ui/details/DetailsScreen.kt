@@ -61,11 +61,8 @@ fun DetailsScreen(
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(TVBackground)
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        TvAnimatedBackground(modifier = Modifier.fillMaxSize())
         when {
             uiState.isLoading -> {
                 LoadingIndicator(message = "Loading file details...")

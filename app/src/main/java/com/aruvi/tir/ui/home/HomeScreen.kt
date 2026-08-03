@@ -74,19 +74,8 @@ viewModel: HomeViewModel = hiltViewModel()
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        TVBackground,
-                        TVSurface,
-                        TVBackground
-                    )
-                )
-            )
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        TvAnimatedBackground(modifier = Modifier.fillMaxSize())
         when {
             uiState.isLoading -> {
                 ModernLoadingState()
@@ -429,11 +418,11 @@ private fun HeroBanner(
         shape = FocusTrailShape.ROUND_RECT,
         durationMs = 10_000L,
         startDelayMs = 1_000L,
-        cornerRadius = 24.dp,
+        cornerRadius = 20.dp,
         borderWidth = 3.dp,
         staticBorderWidth = 3.dp,
         trailPadding = 14.dp,
-        glowWidth = 16.dp,
+        glowWidth = 14.dp,
         staticColor = TVFocusRing.toArgb(),
         trailColor = TVFocusRing.toArgb(),
         baseAlpha = 150,
