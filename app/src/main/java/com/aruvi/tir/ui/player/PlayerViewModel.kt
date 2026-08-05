@@ -91,7 +91,6 @@ data class PlayerUiState(
     val subtitleTracks: List<TrackInfo> = emptyList(),
     val subtitleSize: SubtitleSize = SubtitleSize.MEDIUM,
     val subtitlesEnabled: Boolean = false,
-    val seekSpeed: Int = 10_000,
     val showSeekIndicator: Boolean = false,
     val seekIndicatorText: String = "",
     val seekIndicatorForward: Boolean = true,
@@ -170,7 +169,6 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
     private var progressSaveJob: kotlinx.coroutines.Job? = null
     private var controlHideJob: kotlinx.coroutines.Job? = null
     private var seekIndicatorJob: kotlinx.coroutines.Job? = null
-    private var seekAccelJob: kotlinx.coroutines.Job? = null
     private var resumePosition: Long = savedStateHandle.get<Long>("startPosition") ?: 0L
     private var consecutiveSeekCount: Int = 0
     private var lastSeekTime: Long = 0L
@@ -431,9 +429,15 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
             }
         }
 
+        // Sync the enabled/disabled flag with ExoPlayer's actual selection.
+        // ExoPlayer auto-selects text tracks by default, so relying on the
+        // state default (false) would show the wrong toggle in the UI.
+        val subtitlesSelected = subtitleTracks.any { it.isSelected }
+
         _uiState.value = _uiState.value.copy(
             audioTracks = audioTracks,
-            subtitleTracks = subtitleTracks
+            subtitleTracks = subtitleTracks,
+            subtitlesEnabled = subtitlesSelected
         )
     }
 
@@ -668,6 +672,10 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
         if (exoPlayer.isPlaying) {
             exoPlayer.pause()
             saveProgress()
+        } else if (exoPlayer.playbackState == Player.STATE_ENDED) {
+            // Video finished: replay from the start.
+            exoPlayer.seekToDefaultPosition()
+            exoPlayer.play()
         } else {
             exoPlayer.play()
         }
@@ -765,6 +773,9 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
     }
 
     fun play() {
+        if (exoPlayer.playbackState == Player.STATE_ENDED) {
+            exoPlayer.seekToDefaultPosition()
+        }
         exoPlayer.play()
     }
 
@@ -774,7 +785,10 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
 
     fun seekTo(positionMs: Long) {
         val state = exoPlayer.playbackState
-        if (state != Player.STATE_READY && state != Player.STATE_BUFFERING) return
+        // STATE_ENDED must be allowed: at end-of-video a seek is the only
+        // operation that restarts playback (media3 play() is a no-op when
+        // ENDED, and a seek transitions ENDED → BUFFERING → READY).
+        if (state != Player.STATE_READY && state != Player.STATE_BUFFERING && state != Player.STATE_ENDED) return
         val duration = exoPlayer.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
         val clampedPosition = positionMs.coerceIn(0, duration)
         exoPlayer.seekTo(clampedPosition)
@@ -806,7 +820,6 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
             consecutiveSeekCount <= 15 -> 120_000L
             else -> 300_000L
         }
-        _uiState.value = _uiState.value.copy(seekSpeed = seekMs.toInt())
         return seekMs
     }
 
@@ -1027,8 +1040,17 @@ while (isActive) {
         }
         saveProgress()
         if (!isBackgroundAudioActive) {
-            exoPlayer.stop()
-            exoPlayer.clearMediaItems()
+            // The ExoPlayer is a shared @Singleton. Only tear down the media
+            // this session loaded — if a new session has already replaced the
+            // playlist (different mediaId), stop()+clearMediaItems() would
+            // kill the fresh session's playback.
+            val stillOwnsMedia =
+                exoPlayer.currentMediaItem?.mediaId == currentFileId.toString() ||
+                    exoPlayer.currentMediaItem == null
+            if (stillOwnsMedia) {
+                exoPlayer.stop()
+                exoPlayer.clearMediaItems()
+            }
         }
     }
 }

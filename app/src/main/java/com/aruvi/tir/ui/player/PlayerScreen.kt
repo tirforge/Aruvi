@@ -34,8 +34,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,6 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
 import com.aruvi.tir.ui.theme.*
 
 /**
@@ -59,6 +64,8 @@ fun PlayerScreen(
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val focusRequester = remember { FocusRequester() }
+    val controlsFocusRequester = remember { FocusRequester() }
+    var controlsFocused by remember { mutableStateOf(false) }
 
     // Handle back and save progress when leaving
     DisposableEffect(Unit) {
@@ -81,7 +88,10 @@ fun PlayerScreen(
                                 uiState.showJumpDialog -> false // dialog handles it
                                 uiState.showSettings -> false   // settings handles it
                                 uiState.error != null -> false  // error overlay handles it
-                                uiState.showControls -> false   // focused control button handles it
+                                // Controls are up: let the focused control handle
+                                // ENTER, but if nothing has focus fall back to
+                                // play/pause (same pattern as LEFT/RIGHT below).
+                                uiState.showControls -> !controlsFocused
                                 else -> {
                                     viewModel.togglePlayback()
                                     true
@@ -89,13 +99,20 @@ fun PlayerScreen(
                             }
                         }
                         KeyEvent.KEYCODE_DPAD_LEFT -> {
-                            if (!uiState.showSettings && !uiState.showJumpDialog && uiState.error == null && !uiState.showControls) {
+                            // Seek when controls are hidden, OR when controls are shown
+                            // but no control button currently has focus (so the focused
+                            // Slider/buttons get a chance to handle navigation/scrubbing).
+                            if (!uiState.showSettings && !uiState.showJumpDialog && uiState.error == null &&
+                                (!uiState.showControls || !controlsFocused)
+                            ) {
                                 viewModel.seekBackward()
                                 true
                             } else false
                         }
                         KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                            if (!uiState.showSettings && !uiState.showJumpDialog && uiState.error == null && !uiState.showControls) {
+                            if (!uiState.showSettings && !uiState.showJumpDialog && uiState.error == null &&
+                                (!uiState.showControls || !controlsFocused)
+                            ) {
                                 viewModel.seekForward()
                                 true
                             } else false
@@ -124,6 +141,14 @@ fun PlayerScreen(
                                 }
                                 uiState.showSettings -> {
                                     viewModel.hideSettings()
+                                    true
+                                }
+                                // Hide controls first instead of leaving the player,
+                                // so a stray BACK press doesn't exit playback.
+                                // (Only while playing — hideControls() ignores the
+                                // request when paused, which would trap BACK.)
+                                uiState.showControls && uiState.isPlaying -> {
+                                    viewModel.hideControls()
                                     true
                                 }
                                 else -> {
@@ -209,6 +234,15 @@ fun PlayerScreen(
                 playerView.player = viewModel.exoPlayer
                 playerView.keepScreenOn = true
                 playerView.resizeMode = uiState.toggleResizeMode
+                // Apply the chosen subtitle size (fraction of video height).
+                // MEDIUM (scale 1.0) restores the platform/user default.
+                if (uiState.subtitleSize.scale == 1.0f) {
+                    playerView.subtitleView?.setUserDefaultTextSize()
+                } else {
+                    playerView.subtitleView?.setFractionalTextSize(
+                        SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * uiState.subtitleSize.scale
+                    )
+                }
             },
             modifier = Modifier.fillMaxSize()
         )
@@ -295,10 +329,15 @@ fun PlayerScreen(
                 bufferedPosition = uiState.bufferedPosition,
                 duration = uiState.duration,
                 playbackSpeed = uiState.playbackSpeed,
+                resizeMode = uiState.toggleResizeMode,
+                focusRequester = controlsFocusRequester,
+                onFocusChanged = { controlsFocused = it },
                 onPlayPause = { viewModel.togglePlayback() },
                 onSeekBackward = { viewModel.seekBackward() },
                 onSeekForward = { viewModel.seekForward() },
                 onSeek = { viewModel.seekTo(it) },
+                onCycleSpeed = { viewModel.cyclePlaybackSpeed() },
+                onCycleResize = { viewModel.cycleResizeMode() },
                 onSettings = { viewModel.toggleSettings() },
                 onJumpTo = { viewModel.toggleJumpDialog() }
             )
@@ -350,6 +389,28 @@ fun PlayerScreen(
             focusRequester.requestFocus()
         } catch (e: IllegalStateException) {
             // Ignore
+        }
+    }
+
+    // When controls appear, move focus to the seek bar so the D-pad scrubs
+    // immediately (standard streaming-app behavior). UP/DOWN then navigates
+    // to the control buttons.
+    LaunchedEffect(uiState.showControls, uiState.showSettings, uiState.showJumpDialog, uiState.error) {
+        val canFocusControls = uiState.showControls &&
+            !uiState.showSettings &&
+            !uiState.showJumpDialog &&
+            uiState.error == null
+        if (canFocusControls) {
+            kotlinx.coroutines.delay(300)
+            try {
+                controlsFocusRequester.requestFocus()
+            } catch (e: IllegalStateException) {
+                // Ignore
+            }
+        } else if (!uiState.showControls) {
+            // Controls left composition; onFocusChanged may not fire, so reset
+            // the flag to avoid blocking root LEFT/RIGHT seeking.
+            controlsFocused = false
         }
     }
 }
@@ -638,10 +699,15 @@ private fun PlayerControls(
     bufferedPosition: Long,
     duration: Long,
     playbackSpeed: Float,
+    resizeMode: Int,
+    focusRequester: FocusRequester,
+    onFocusChanged: (Boolean) -> Unit,
     onPlayPause: () -> Unit,
     onSeekBackward: () -> Unit,
     onSeekForward: () -> Unit,
     onSeek: (Long) -> Unit,
+    onCycleSpeed: () -> Unit,
+    onCycleResize: () -> Unit,
     onSettings: () -> Unit,
     onJumpTo: () -> Unit
 ) {
@@ -658,6 +724,11 @@ private fun PlayerControls(
                     )
                 )
             )
+            // Track whether any control inside has focus so the root key
+            // handler knows when to let the focused control own LEFT/RIGHT.
+            // Note: must use hasFocus (descendant focus); isFocused is only
+            // true when this non-focusable Box itself owns focus (never).
+            .onFocusChanged { onFocusChanged(it.hasFocus) }
     ) {
         // ── Top bar ──
         Row(
@@ -715,13 +786,18 @@ private fun PlayerControls(
                 .align(Alignment.BottomCenter)
                 .padding(horizontal = 48.dp, vertical = 32.dp)
         ) {
-            // Enhanced progress bar
+            // Enhanced progress bar (gets initial focus so LEFT/RIGHT scrubs
+            // immediately — the standard streaming-app seek behavior)
             if (duration > 0) {
                 EnhancedSeekBar(
                     currentPosition = currentPosition,
                     bufferedPosition = bufferedPosition,
                     duration = duration,
-                    onSeek = onSeek
+                    onSeek = onSeek,
+                    onSeekBackward = onSeekBackward,
+                    onSeekForward = onSeekForward,
+                    onPlayPause = onPlayPause,
+                    focusRequester = focusRequester
                 )
             }
 
@@ -740,6 +816,25 @@ private fun PlayerControls(
             }
 
             Spacer(modifier = Modifier.height(24.dp))
+
+            // Quick cycle buttons: Speed and Resize (one press each, label shows current value)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                QuickCycleButton(
+                    label = "${speedLabel(playbackSpeed)}x",
+                    onClick = onCycleSpeed
+                )
+                Spacer(modifier = Modifier.width(24.dp))
+                QuickCycleButton(
+                    label = resizeLabel(resizeMode),
+                    onClick = onCycleResize
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Playback controls
             Row(
@@ -793,7 +888,11 @@ private fun EnhancedSeekBar(
     currentPosition: Long,
     bufferedPosition: Long,
     duration: Long,
-    onSeek: (Long) -> Unit
+    onSeek: (Long) -> Unit,
+    onSeekBackward: () -> Unit,
+    onSeekForward: () -> Unit,
+    onPlayPause: () -> Unit,
+    focusRequester: FocusRequester? = null
 ) {
     // progress calculation removed as it was unused
     val bufferedProgress = (bufferedPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
@@ -803,8 +902,22 @@ private fun EnhancedSeekBar(
     var dragPosition by remember { mutableStateOf<Long?>(null) }
     val sliderValue = (dragPosition ?: currentPosition).toFloat()
 
+    // Highlight the whole seek bar when it has focus so it's obvious that
+    // LEFT/RIGHT will scrub (streaming-app style). hasFocus (not isFocused):
+    // the Box itself isn't focusable — the Slider child is.
+    var seekBarFocused by remember { mutableStateOf(false) }
+
     Column {
-        Box(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { seekBarFocused = it.hasFocus }
+                .border(
+                    width = if (seekBarFocused) 2.dp else 0.dp,
+                    color = if (seekBarFocused) TVFocusRing.copy(alpha = 0.8f) else Color.Transparent,
+                    shape = RoundedCornerShape(6.dp)
+                )
+        ) {
             // Track background
             Box(
                 modifier = Modifier
@@ -847,7 +960,9 @@ private fun EnhancedSeekBar(
                 }
             }
 
-            // Playback slider
+            // Playback slider. Focused by default when controls appear; DPAD
+            // LEFT/RIGHT drives the accelerated seek (with the big overlay
+            // indicator) — the standard streaming-app behavior.
             Slider(
                 value = sliderValue,
                 onValueChange = { dragPosition = it.toLong() },
@@ -861,7 +976,29 @@ private fun EnhancedSeekBar(
                 steps = (duration / 10_000L).toInt().coerceAtLeast(0),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .focusable(),
+                    .focusable()
+                    .then(
+                        if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier
+                    )
+                    .onKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown) {
+                            when (event.key) {
+                                Key.DirectionLeft -> {
+                                    onSeekBackward()
+                                    true
+                                }
+                                Key.DirectionRight -> {
+                                    onSeekForward()
+                                    true
+                                }
+                                Key.DirectionCenter, Key.Enter -> {
+                                    onPlayPause()
+                                    true
+                                }
+                                else -> false
+                            }
+                        } else false
+                    },
                 colors = SliderDefaults.colors(
                     thumbColor = TVPrimary,
                     activeTrackColor = TVPrimary,
@@ -1009,6 +1146,56 @@ private fun ControlIconButton(
             )
         }
     }
+}
+
+// ─── Quick Cycle Button (Speed / Resize) ────────────────────────────
+
+@Composable
+private fun QuickCycleButton(
+    label: String,
+    onClick: () -> Unit
+) {
+    var isFocused by remember { mutableStateOf(false) }
+
+    Surface(
+        onClick = onClick,
+        color = if (isFocused) TVPrimary.copy(alpha = 0.3f) else Color.Transparent,
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier
+            .onFocusChanged { isFocused = it.isFocused }
+            .border(
+                width = if (isFocused) 2.dp else 1.dp,
+                color = if (isFocused) TVFocusRing else TVTextSecondary.copy(alpha = 0.2f),
+                shape = RoundedCornerShape(10.dp)
+            )
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = label,
+                color = if (isFocused) Color.White else TVTextPrimary,
+                fontWeight = FontWeight.Medium,
+                fontSize = 14.sp
+            )
+            Text(
+                text = "◀▶",
+                color = TVTextSecondary.copy(alpha = 0.5f),
+                fontSize = 12.sp
+            )
+        }
+    }
+}
+
+private fun speedLabel(speed: Float): String =
+    if (speed == speed.toInt().toFloat()) speed.toInt().toString() else speed.toString()
+
+private fun resizeLabel(mode: Int): String = when (mode) {
+    androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL -> "Fill"
+    androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> "Zoom"
+    else -> "Fit"
 }
 
 // ─── Jump-to-Position Dialog ────────────────────────────────────────
@@ -1510,9 +1697,10 @@ private fun SettingsPanel(
         }
     }
 
-    // Focus first item
+    // Focus first item (wait for the 300ms slide-in animation to finish so
+    // focus reliably lands on the speed chips instead of racing the layout)
     LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(150)
+        kotlinx.coroutines.delay(400)
         try { firstItemFocusRequester.requestFocus() } catch (e: Exception) { }
     }
 }
