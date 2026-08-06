@@ -234,14 +234,14 @@ onSettingsClick: () -> Unit
                 // Logo
                 Surface(
                     color = TVPrimary.copy(alpha = 0.15f),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.size(44.dp)
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.size(46.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Image(
                             painter = painterResource(id = com.aruvi.tir.R.drawable.app_logo),
                             contentDescription = null,
-                            modifier = Modifier.size(28.dp),
+                            modifier = Modifier.size(36.dp),
                             contentScale = ContentScale.Fit
                         )
                     }

@@ -19,3 +19,6 @@ ivy/
 mirrorbot-clean/
 mirrorbot-work/
 /data
+
+# Release APK copies
+dist/

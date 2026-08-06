@@ -928,13 +928,6 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
             .build()
     }
 
-    fun cyclePlaybackSpeed() {
-        val speeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
-        val currentIndex = speeds.indexOf(_uiState.value.playbackSpeed)
-        val nextIndex = if (currentIndex < 0 || currentIndex >= speeds.size - 1) 0 else currentIndex + 1
-        setPlaybackSpeed(speeds[nextIndex])
-    }
-
     fun showControls() {
         _uiState.value = _uiState.value.copy(showControls = true)
         if (!_uiState.value.showSettings) {

@@ -88,10 +88,16 @@ fun PlayerScreen(
                                 uiState.showJumpDialog -> false // dialog handles it
                                 uiState.showSettings -> false   // settings handles it
                                 uiState.error != null -> false  // error overlay handles it
-                                // Controls are up: let the focused control handle
-                                // ENTER, but if nothing has focus fall back to
-                                // play/pause (same pattern as LEFT/RIGHT below).
-                                uiState.showControls -> !controlsFocused
+                                // A control inside the player (Play/Pause button,
+                                // seek bar, rewind/forward, settings/jump) is
+                                // focused: let it own ENTER. Intercepting here
+                                // would swallow the button's click (and trigger
+                                // togglePlayback instead of the button's action).
+                                controlsFocused -> false
+                                uiState.showControls -> {
+                                    viewModel.togglePlayback()
+                                    true
+                                }
                                 else -> {
                                     viewModel.togglePlayback()
                                     true
@@ -99,23 +105,20 @@ fun PlayerScreen(
                             }
                         }
                         KeyEvent.KEYCODE_DPAD_LEFT -> {
-                            // Seek when controls are hidden, OR when controls are shown
-                            // but no control button currently has focus (so the focused
-                            // Slider/buttons get a chance to handle navigation/scrubbing).
-                            if (!uiState.showSettings && !uiState.showJumpDialog && uiState.error == null &&
-                                (!uiState.showControls || !controlsFocused)
-                            ) {
+                            if (controlsFocused || uiState.showSettings || uiState.showJumpDialog || uiState.error != null) {
+                                false // focused control (seek bar scrubs, buttons navigate)
+                            } else {
                                 viewModel.seekBackward()
                                 true
-                            } else false
+                            }
                         }
                         KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                            if (!uiState.showSettings && !uiState.showJumpDialog && uiState.error == null &&
-                                (!uiState.showControls || !controlsFocused)
-                            ) {
+                            if (controlsFocused || uiState.showSettings || uiState.showJumpDialog || uiState.error != null) {
+                                false
+                            } else {
                                 viewModel.seekForward()
                                 true
-                            } else false
+                            }
                         }
                         KeyEvent.KEYCODE_DPAD_UP -> {
                             if (uiState.showSettings || uiState.showJumpDialog || uiState.error != null || uiState.showControls) {
@@ -328,16 +331,12 @@ fun PlayerScreen(
                 currentPosition = uiState.currentPosition,
                 bufferedPosition = uiState.bufferedPosition,
                 duration = uiState.duration,
-                playbackSpeed = uiState.playbackSpeed,
-                resizeMode = uiState.toggleResizeMode,
                 focusRequester = controlsFocusRequester,
                 onFocusChanged = { controlsFocused = it },
                 onPlayPause = { viewModel.togglePlayback() },
                 onSeekBackward = { viewModel.seekBackward() },
                 onSeekForward = { viewModel.seekForward() },
                 onSeek = { viewModel.seekTo(it) },
-                onCycleSpeed = { viewModel.cyclePlaybackSpeed() },
-                onCycleResize = { viewModel.cycleResizeMode() },
                 onSettings = { viewModel.toggleSettings() },
                 onJumpTo = { viewModel.toggleJumpDialog() }
             )
@@ -698,16 +697,12 @@ private fun PlayerControls(
     currentPosition: Long,
     bufferedPosition: Long,
     duration: Long,
-    playbackSpeed: Float,
-    resizeMode: Int,
     focusRequester: FocusRequester,
     onFocusChanged: (Boolean) -> Unit,
     onPlayPause: () -> Unit,
     onSeekBackward: () -> Unit,
     onSeekForward: () -> Unit,
     onSeek: (Long) -> Unit,
-    onCycleSpeed: () -> Unit,
-    onCycleResize: () -> Unit,
     onSettings: () -> Unit,
     onJumpTo: () -> Unit
 ) {
@@ -724,10 +719,12 @@ private fun PlayerControls(
                     )
                 )
             )
+            // Focusable so Compose tracks descendant focus via hasFocus.
+            // Without this, onFocusChanged never fires for child focus
+            // changes and controlsFocused stays permanently false.
+            .focusable()
             // Track whether any control inside has focus so the root key
             // handler knows when to let the focused control own LEFT/RIGHT.
-            // Note: must use hasFocus (descendant focus); isFocused is only
-            // true when this non-focusable Box itself owns focus (never).
             .onFocusChanged { onFocusChanged(it.hasFocus) }
     ) {
         // ── Top bar ──
@@ -753,9 +750,6 @@ private fun PlayerControls(
                 ) {
                     if (resolution != null) {
                         ResolutionBadge(resolution)
-                    }
-                    if (playbackSpeed != 1.0f) {
-                        SpeedBadge(playbackSpeed)
                     }
                 }
             }
@@ -816,25 +810,6 @@ private fun PlayerControls(
             }
 
             Spacer(modifier = Modifier.height(24.dp))
-
-            // Quick cycle buttons: Speed and Resize (one press each, label shows current value)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                QuickCycleButton(
-                    label = "${speedLabel(playbackSpeed)}x",
-                    onClick = onCycleSpeed
-                )
-                Spacer(modifier = Modifier.width(24.dp))
-                QuickCycleButton(
-                    label = resizeLabel(resizeMode),
-                    onClick = onCycleResize
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
 
             // Playback controls
             Row(
@@ -1027,22 +1002,6 @@ private fun ResolutionBadge(resolution: String) {
     }
 }
 
-@Composable
-private fun SpeedBadge(speed: Float) {
-    Surface(
-        color = TVSecondary.copy(alpha = 0.15f),
-        shape = RoundedCornerShape(4.dp)
-    ) {
-        Text(
-            text = "${speed}x",
-            style = MaterialTheme.typography.labelSmall,
-            color = TVSecondary,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-        )
-    }
-}
-
 // ─── Time Display ───────────────────────────────────────────────────
 
 @Composable
@@ -1146,56 +1105,6 @@ private fun ControlIconButton(
             )
         }
     }
-}
-
-// ─── Quick Cycle Button (Speed / Resize) ────────────────────────────
-
-@Composable
-private fun QuickCycleButton(
-    label: String,
-    onClick: () -> Unit
-) {
-    var isFocused by remember { mutableStateOf(false) }
-
-    Surface(
-        onClick = onClick,
-        color = if (isFocused) TVPrimary.copy(alpha = 0.3f) else Color.Transparent,
-        shape = RoundedCornerShape(10.dp),
-        modifier = Modifier
-            .onFocusChanged { isFocused = it.isFocused }
-            .border(
-                width = if (isFocused) 2.dp else 1.dp,
-                color = if (isFocused) TVFocusRing else TVTextSecondary.copy(alpha = 0.2f),
-                shape = RoundedCornerShape(10.dp)
-            )
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = label,
-                color = if (isFocused) Color.White else TVTextPrimary,
-                fontWeight = FontWeight.Medium,
-                fontSize = 14.sp
-            )
-            Text(
-                text = "◀▶",
-                color = TVTextSecondary.copy(alpha = 0.5f),
-                fontSize = 12.sp
-            )
-        }
-    }
-}
-
-private fun speedLabel(speed: Float): String =
-    if (speed == speed.toInt().toFloat()) speed.toInt().toString() else speed.toString()
-
-private fun resizeLabel(mode: Int): String = when (mode) {
-    androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL -> "Fill"
-    androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> "Zoom"
-    else -> "Fit"
 }
 
 // ─── Jump-to-Position Dialog ────────────────────────────────────────
