@@ -32,6 +32,7 @@ jobs:
           echo "Keystore restored from secret."
 
       - name: Build APKs (release, R8-minified, debug-signed when no release key)
+        working-directory: android
         env:
           RELEASE_STORE_FILE: ${{ secrets.RELEASE_STORE_FILE }}
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
