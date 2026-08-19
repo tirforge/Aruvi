@@ -78,23 +78,24 @@ jobs:
           echo "upload_url=$UPLOAD_URL"
 
           # Delete any existing assets whose names collide with the fresh APKs
-          python3 - "$REL" <<'PY'
-import json, sys, urllib.request, os
-rel = json.load(sys.stdin)
-token = os.environ["GH_TOKEN"]
-names = {"Aruvi-mobile.apk", "Aruvi-tv.apk"}
-for a in rel.get("assets", []):
-    if a["name"] in names:
-        req = urllib.request.Request(
-            f"https://api.github.com/repos/tirforge/Aruvi/releases/assets/{a['id']}",
-            method="DELETE",
-            headers={"Authorization": f"Bearer {token}"})
-        try:
-            urllib.request.urlopen(req)
-            print(f"deleted old asset {a['name']}")
-        except Exception as e:
-            print(f"delete {a['name']} failed: {e}")
-PY
+          echo "$REL" > /tmp/rel.json
+          python3 -c '
+          import json, urllib.request, os
+          rel = json.load(open("/tmp/rel.json"))
+          token = os.environ["GH_TOKEN"]
+          for a in rel.get("assets", []):
+              if a["name"] in ("Aruvi-mobile.apk", "Aruvi-tv.apk"):
+                  try:
+                      req = urllib.request.Request(
+                          "https://api.github.com/repos/tirforge/Aruvi/releases/assets/%s" % a["id"],
+                          method="DELETE",
+                          headers={"Authorization": "Bearer %s" % token})
+                      urllib.request.urlopen(req)
+                      print("deleted old asset %s" % a["name"])
+                  except Exception as e:
+                      print("delete %s failed (continuing): %s" % (a["name"], e))
+          '
+          rm -f /tmp/rel.json
 
           for apk in android/dist/*.apk; do
             code=$(curl -s -X POST -H "$AUTH" \
