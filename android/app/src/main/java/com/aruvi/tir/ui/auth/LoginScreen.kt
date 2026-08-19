@@ -136,11 +136,36 @@ fun LoginScreen(
                         color = TVError,
                         textAlign = TextAlign.Center
                     )
-                    Spacer(modifier = Modifier.height(32.dp))
-                    TVButton(
-                        text = "Try Again",
-                        onClick = { viewModel.generateLoginCode() }
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    // Server URL input — lets users point the app at their own backend
+                    // when the default (localhost:7680) can't be reached.
+                    OutlinedTextField(
+                        value = uiState.serverUrl,
+                        onValueChange = { viewModel.updateServerUrl(it) },
+                        label = { Text("Server URL") },
+                        placeholder = { Text("http://localhost:7680") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = TVPrimary,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(0.6f)
                     )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        TVButton(
+                            text = "Try Again",
+                            onClick = { viewModel.generateLoginCode() }
+                        )
+                        TVButton(
+                            text = "Save & Retry",
+                            onClick = { viewModel.saveAndRestart() },
+                            isPrimary = false
+                        )
+                    }
                 }
 
                 uiState.loginCode != null -> {

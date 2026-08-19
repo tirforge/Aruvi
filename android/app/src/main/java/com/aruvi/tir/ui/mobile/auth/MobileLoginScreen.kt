@@ -120,9 +120,10 @@ fun MobileLoginScreen(
 
             Spacer(modifier = Modifier.height(40.dp))
 
-            // Server Configuration (Collapsible)
+            // Server Configuration (Collapsible — auto-expands when the
+            // default URL can't be reached so users can enter their own link)
             AnimatedVisibility(
-                visible = uiState.showServerConfig,
+                visible = uiState.showServerConfig || uiState.error != null,
                 enter = expandVertically(),
                 exit = shrinkVertically()
             ) {
