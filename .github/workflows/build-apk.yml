@@ -58,24 +58,51 @@ jobs:
           asset_path: android/dist/*.apk
           overwrite: true
 
-      # Or to a manually-specified release (workflow_dispatch with release_tag)
+      # Or to a manually-specified release (workflow_dispatch with release_tag).
+      # Deletes existing matching assets first (GitHub has no overwrite-on-POST),
+      # then uploads the fresh APKs.
       - name: Upload APKs to release (manual dispatch)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != ''
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.release_tag }}"
-          REL=$(curl -s -H "Authorization: Bearer ${{ github.token }}" \
+          AUTH="Authorization: Bearer $GH_TOKEN"
+          REL=$(curl -s -H "$AUTH" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG")
-          UPLOAD_URL=$(echo "$REL" | /home/runner/ruby/bin/ruby -rjson -e 'puts JSON.parse(STDIN.read)["upload_url"]' 2>/dev/null \
-            || echo "$REL" | python3 -c "import sys,json; print(json.load(sys.stdin)['upload_url'])")
+          REL_ID=$(echo "$REL" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+          UPLOAD_URL=$(echo "$REL" | python3 -c "import sys,json; print(json.load(sys.stdin)['upload_url'].split('{')[0])")
+          echo "release_id=$REL_ID"
           echo "upload_url=$UPLOAD_URL"
+
+          # Delete any existing assets whose names collide with the fresh APKs
+          python3 - "$REL" <<'PY'
+import json, sys, urllib.request, os
+rel = json.load(sys.stdin)
+token = os.environ["GH_TOKEN"]
+names = {"Aruvi-mobile.apk", "Aruvi-tv.apk"}
+for a in rel.get("assets", []):
+    if a["name"] in names:
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/tirforge/Aruvi/releases/assets/{a['id']}",
+            method="DELETE",
+            headers={"Authorization": f"Bearer {token}"})
+        try:
+            urllib.request.urlopen(req)
+            print(f"deleted old asset {a['name']}")
+        except Exception as e:
+            print(f"delete {a['name']} failed: {e}")
+PY
+
           for apk in android/dist/*.apk; do
-            curl -s -X POST -H "Authorization: Bearer ${{ github.token }}" \
+            code=$(curl -s -X POST -H "$AUTH" \
               -H "Content-Type: application/vnd.android.package-archive" \
               --data-binary "@$apk" \
-              -w "%{http_code}\n" -o /dev/null \
-              "${UPLOAD_URL%\{*}?name=$(basename "$apk")"
+              -o /dev/null -w "%{http_code}" \
+              "$UPLOAD_URL?name=$(basename "$apk")")
+            echo "uploaded $(basename "$apk") -> $code"
           done
 
       # Always keep the APKs as workflow artifacts
