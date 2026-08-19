@@ -74,9 +74,7 @@ class LoginViewModel @Inject constructor(
         if (url.startsWith("http") && url.length > 10) {
             fetchBotInfo()
         }
-    }
-
-    fun fetchBotInfo() {
+    }    fun fetchBotInfo() {
         viewModelScope.launch {
             authRepository.getBotInfo().onSuccess { botInfo ->
                 _uiState.value = _uiState.value.copy(botUsername = botInfo.username)
@@ -133,7 +131,7 @@ class LoginViewModel @Inject constructor(
 
                 result.fold(
                     onSuccess = { response ->
-                        val bot = _uiState.value.botUsername.ifBlank { "Aaruvi_movie_bot" }
+                        val bot = _uiState.value.botUsername.ifBlank { "telegram" }
                         val url = "https://t.me/$bot?start=${response.code}"
                         val qrBitmap = withContext(Dispatchers.Default) {
                             generateQrCode(url, 600)

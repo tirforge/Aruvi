@@ -276,7 +276,7 @@ fun LoginScreen(
                             Spacer(modifier = Modifier.height(24.dp))
 
                             Text(
-                                text = "Open Telegram, send /login ${uiState.loginCode} to @${uiState.botUsername.ifBlank { "Aaruvi_movie_bot" }}",
+                                text = "Open Telegram, send /login ${uiState.loginCode} to @${uiState.botUsername.ifBlank { "telegram" }}",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = TVTextSecondary,
                                 textAlign = TextAlign.Center

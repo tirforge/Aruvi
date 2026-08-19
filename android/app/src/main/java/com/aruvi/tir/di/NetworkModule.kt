@@ -92,11 +92,17 @@ object NetworkModule {
     ): Retrofit {
         val defaultUrl = BuildConfig.DEFAULT_SERVER_URL.ifBlank { "http://localhost:7680" }
         val serverUrl = try {
-            runBlocking { settingsRepository.getServerUrl() }
+            settingsRepository.normalizeServerUrl(runBlocking { settingsRepository.getServerUrl() })
         } catch (e: Exception) {
             defaultUrl
         }
-        val baseUrl = if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/"
+        // Retrofit requires a valid http(s) base URL; anything else must never
+        // reach startup (would crash the app beyond launch).
+        val baseUrl = if (serverUrl.startsWith("http://") || serverUrl.startsWith("https://")) {
+            if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/"
+        } else {
+            "http://localhost:7680/"
+        }
 
         return Retrofit.Builder()
             .baseUrl(baseUrl + "api/")

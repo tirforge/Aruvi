@@ -239,7 +239,7 @@ fun MobileLoginScreen(
                 // Deep Link Button
                 Button(
                     onClick = {
-                        val bot = uiState.botUsername.ifBlank { "Aaruvi_movie_bot" }
+                        val bot = uiState.botUsername.ifBlank { "telegram" }
                         val intent = android.content.Intent(
                             android.content.Intent.ACTION_VIEW,
                             android.net.Uri.parse("https://t.me/$bot?start=${uiState.loginCode}")
@@ -262,7 +262,7 @@ fun MobileLoginScreen(
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
-                    Text("Open @${uiState.botUsername.ifBlank { "Aaruvi_movie_bot" }}", color = Color.White)
+                    Text("Open @${uiState.botUsername.ifBlank { "telegram" }}", color = Color.White)
                 }
                 
                 Spacer(modifier = Modifier.height(24.dp))

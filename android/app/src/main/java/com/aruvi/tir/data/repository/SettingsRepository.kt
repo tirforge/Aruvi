@@ -48,11 +48,25 @@ class SettingsRepository @Inject constructor(
     }
 
     /**
+     * Normalize a user-entered server URL: add a scheme when missing so it never
+     * crashes URL parsing / Retrofit at startup.
+     */
+    fun normalizeServerUrl(input: String): String {
+        val trimmed = input.trim().trimEnd('/')
+        if (trimmed.isEmpty()) return trimmed
+        return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+            trimmed
+        } else {
+            "http://$trimmed"
+        }
+    }
+
+    /**
      * Set server URL.
      */
     suspend fun setServerUrl(url: String) {
         context.settingsDataStore.edit { prefs ->
-            prefs[PreferencesKeys.SERVER_URL] = url.trimEnd('/')
+            prefs[PreferencesKeys.SERVER_URL] = normalizeServerUrl(url)
         }
     }
 
@@ -60,7 +74,7 @@ class SettingsRepository @Inject constructor(
      * Get bot username.
      */
     val botUsername: Flow<String> = context.settingsDataStore.data.map { prefs ->
-        prefs[PreferencesKeys.BOT_USERNAME] ?: "Aaruvi_movie_bot"
+        prefs[PreferencesKeys.BOT_USERNAME].orEmpty()
     }
 
     suspend fun setBotUsername(username: String) {
