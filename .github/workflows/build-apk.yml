@@ -24,13 +24,14 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Configure release keystore
-        if: ${{ secrets.RELEASE_KEYSTORE_B64 != '' }}
+        if: ${{ env.KEYS != '' }}
+        env:
+          KEYS: ${{ secrets.RELEASE_KEYSTORE_B64 }}
         run: |
-          echo "${{ secrets.RELEASE_KEYSTORE_B64 }}" | base64 -d > android/my-release-key.jks
+          echo "$KEYS" | base64 -d > android/my-release-key.jks
           echo "Keystore restored from secret."
 
       - name: Build APKs (release, R8-minified, debug-signed when no release key)
-        working-directory: android
         env:
           RELEASE_STORE_FILE: ${{ secrets.RELEASE_STORE_FILE }}
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
