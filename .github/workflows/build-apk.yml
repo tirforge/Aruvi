@@ -23,33 +23,22 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Configure signing
-        run: |
-          if [ -n "${{ secrets.RELEASE_KEYSTORE_B64 }}" ]; then
-            echo "${{ secrets.RELEASE_KEYSTORE_B64 }}" | base64 -d > android/my-release-key.jks
-          fi
-
-      - name: Build APKs
+      - name: Build APKs (debug-signed)
         working-directory: android
-        env:
-          RELEASE_STORE_FILE: ${{ secrets.RELEASE_STORE_FILE }}
-          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
-          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
-          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
-          ./gradlew :app:assembleMobileRelease :app:assembleTvRelease
+          ./gradlew --no-daemon :app:assembleMobileDebug :app:assembleTvDebug
           mkdir -p dist
-          cp app/build/outputs/apk/mobile/release/app-mobile-release.apk dist/Aruvi-mobile.apk 2>/dev/null || true
-          cp app/build/outputs/apk/tv/release/app-tv-release.apk dist/Aruvi-tv.apk 2>/dev/null || true
+          cp app/build/outputs/apk/mobile/debug/app-mobile-debug.apk dist/Aruvi-mobile.apk
+          cp app/build/outputs/apk/tv/debug/app-tv-debug.apk dist/Aruvi-tv.apk
           ls -la dist
 
       # Attach APKs to the release that triggered this run
       - name: Upload APKs to release
-        if: github.event_name == 'release' && hashFiles('android/dist/*') != ''
+        if: github.event_name == 'release'
         uses: shogo82148/actions-upload-release-asset@v1
         with:
           upload_url: ${{ github.event.release.upload_url }}
-          asset_path: android/dist/*
+          asset_path: android/dist/*.apk
           overwrite: true
 
       # Always keep the APKs as workflow artifacts
