@@ -49,7 +49,7 @@ async def _periodic_housekeeping():
         except Exception as e:
             _log.warning("Housekeeping msg cache prune error: %s", e)
 
-config = uvicorn.Config(app, host="0.0.0.0", port=7680, log_level="info", access_log=False)
+config = uvicorn.Config(app, host="0.0.0.0", port=int(os.environ.get("SERVER_PORT", "7680")), log_level="info", access_log=False)
 server = uvs.Server(config)
 
 async def run():

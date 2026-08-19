@@ -1,0 +1,36 @@
+# Git
+.git
+.gitignore
+
+# Env / secrets — never bake into images
+.env
+**/.env
+*.jks
+*.keystore
+
+# Local data / sessions
+data/
+session/
+backend/data/
+backend/session/
+
+# Frontend build deps & artifacts
+frontend/node_modules/
+frontend/dist/
+backend/app/static/assets/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Junk / tooling litter
+*.so
+*.alive
+*.log
+core-js-banners/
+native-platform*/
+*.apk
+.npmrc

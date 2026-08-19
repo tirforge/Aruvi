@@ -1,0 +1,18 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aruvi-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SERVER_PORT: "7680"
+    ports:
+      - "7680:7680"
+    volumes:
+      - ./data:/app/data
+      - ./session:/app/session

@@ -22,6 +22,19 @@ aruvi/
 
 ## Quick Start
 
+### 0. Docker (all-in-one, recommended)
+
+Builds the React SPA and serves it from the backend in a single image:
+
+```bash
+cp .env.example .env          # fill in your Telegram credentials first
+docker compose up -d --build
+```
+
+- Backend listens on `:7680` (override with `SERVER_PORT`).
+- `./data` and `./session` are bind-mounted for persistence.
+- The `.dockerignore` keeps `.env`, sessions, data and build junk out of the image.
+
 ### 1. Backend (required)
 
 ```bash
@@ -90,7 +103,7 @@ the app's settings screen.
 | `TELEGRAM_BOT_SESSION_STRINGS` | *empty* | Comma-separated session strings (optional) |
 | `DATABASE_URL` | `sqlite+aiosqlite:///./data/teleplay.db` | DB URL (PostgreSQL supported) |
 | `JWT_SECRET` | auto-generated | Set it for sessions to survive restarts |
-| `SERVER_PORT` | `24696` | HTTP port for the backend |
+| `SERVER_PORT` | `24696` | HTTP port for the backend (`run.py`/Docker default to `7680`) |
 | `AUTH_USERS` / `ADMIN_IDS` | *empty* | Telegram user ids granted admin/access |
 | `WEB_BASE_URL` | *placeholder* | Public base URL of the web app (tunnel/domain) |
 | `MT_PROXY_URL` | *empty* | Optional SOCKS5 proxy |
