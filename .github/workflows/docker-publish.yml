@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  IMAGE: ghcr.io/${{ github.repository }}
+  IMAGE: ghcr.io/${{ github.repository }} # lowercased in the job below (GHCR requires lowercase)
 
 jobs:
   docker:
@@ -32,7 +32,7 @@ jobs:
       - name: Compute image tags
         id: meta
         run: |
-          IMAGE="${{ env.IMAGE }}"
+          IMAGE=$(echo "${{ env.IMAGE }}" | tr '[:upper:]' '[:lower:]')
           TAGS="$IMAGE:latest"
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
