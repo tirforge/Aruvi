@@ -11,6 +11,7 @@ services:
       - .env
     environment:
       SERVER_PORT: "7680"
+      WEB_BASE_URL: "http://localhost:7680"
     ports:
       - "7680:7680"
     volumes:

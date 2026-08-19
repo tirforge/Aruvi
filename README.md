@@ -75,9 +75,10 @@ cp local.properties.example local.properties   # set sdk.dir + server URL
 ./gradlew assembleTvDebug                       # Android TV flavor
 ```
 
-The app logs in via a code from your Telegram bot (`/login <code>`). Point
-`TELEGRAM_TV_SERVER_URL` in `local.properties` at your backend, or set the server URL in
-the app's settings screen.
+The app logs in via a code from your Telegram bot (`/login <code>`). The default server
+URL is `http://localhost:7680`. To point the app at a different backend, either set
+`TELEGRAM_TV_SERVER_URL` in `local.properties` at build time, or enter the URL in the
+app's Server Settings screen on the login page (mobile flavor).
 
 ## Architecture
 
@@ -103,9 +104,9 @@ the app's settings screen.
 | `TELEGRAM_BOT_SESSION_STRINGS` | *empty* | Comma-separated session strings (optional) |
 | `DATABASE_URL` | `sqlite+aiosqlite:///./data/teleplay.db` | DB URL (PostgreSQL supported) |
 | `JWT_SECRET` | auto-generated | Set it for sessions to survive restarts |
-| `SERVER_PORT` | `24696` | HTTP port for the backend (`run.py`/Docker default to `7680`) |
+| `SERVER_PORT` | `7680` | HTTP port for the backend |
 | `AUTH_USERS` / `ADMIN_IDS` | *empty* | Telegram user ids granted admin/access |
-| `WEB_BASE_URL` | *placeholder* | Public base URL of the web app (tunnel/domain) |
+| `WEB_BASE_URL` | `http://localhost:7680` | Public base URL of the web app (tunnel/domain) |
 | `MT_PROXY_URL` | *empty* | Optional SOCKS5 proxy |
 | `TELEGRAM_CLIENT_CONCURRENCY` | `8` | Per-bot pipelined fetch concurrency |
 | `GRAB_GROUP_USERNAMES` | *empty* | Telegram groups to search for movies |

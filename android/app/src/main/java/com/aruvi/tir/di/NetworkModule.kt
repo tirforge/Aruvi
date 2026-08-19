@@ -90,7 +90,7 @@ object NetworkModule {
         gson: Gson,
         settingsRepository: SettingsRepository
     ): Retrofit {
-        val defaultUrl = BuildConfig.DEFAULT_SERVER_URL.ifBlank { "http://your-server:7680" }
+        val defaultUrl = BuildConfig.DEFAULT_SERVER_URL.ifBlank { "http://localhost:7680" }
         val serverUrl = try {
             runBlocking { settingsRepository.getServerUrl() }
         } catch (e: Exception) {

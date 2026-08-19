@@ -36,7 +36,7 @@ class SettingsRepository @Inject constructor(
      */
     val serverUrl: Flow<String> = context.settingsDataStore.data.map { prefs ->
         prefs[PreferencesKeys.SERVER_URL]
-            ?: BuildConfig.DEFAULT_SERVER_URL.ifBlank { "http://your-server:7680" }
+            ?: BuildConfig.DEFAULT_SERVER_URL.ifBlank { "http://localhost:7680" }
     }
 
     /**
@@ -44,7 +44,7 @@ class SettingsRepository @Inject constructor(
      */
     suspend fun getServerUrl(): String {
         return context.settingsDataStore.data.first()[PreferencesKeys.SERVER_URL]
-            ?: BuildConfig.DEFAULT_SERVER_URL.ifBlank { "http://your-server:7680" }
+            ?: BuildConfig.DEFAULT_SERVER_URL.ifBlank { "http://localhost:7680" }
     }
 
     /**

@@ -148,7 +148,7 @@ fun MobileLoginScreen(
                             value = uiState.serverUrl,
                             onValueChange = { viewModel.updateServerUrl(it) },
                             label = { Text("Server URL", color = Color.White.copy(alpha = 0.6f)) },
-                            placeholder = { Text("http://your-server:7680") },
+                            placeholder = { Text("http://localhost:7680") },
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,

@@ -39,7 +39,7 @@ android {
         applicationId = "com.aruvi.tir"
         minSdk = 28
 
-        val serverUrl = localProperties.getProperty("TELEGRAM_TV_SERVER_URL", "http://your-server:7680")
+        val serverUrl = localProperties.getProperty("TELEGRAM_TV_SERVER_URL", "http://localhost:7680")
         buildConfigField("String", "DEFAULT_SERVER_URL", "\"$serverUrl\"")
     }
 
