@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="apple-touch-icon" href="/aruvi-brand.png">
+<title>Download Aruvi</title>
+<meta name="description" content="Download the Aruvi Android app for mobile or TV. Stream your Telegram files on any device.">
+<meta property="og:title" content="Download Aruvi">
+<meta property="og:description" content="Get the Aruvi app for Android phone, tablet, or TV.">
+<meta property="og:image" content="/aruvi-brand.png">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://github.com/tirforge/Aruvi">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--accent:#6366f1;--accent-light:#818cf8;--accent-text:#a5b4fc;--hero-bg:#0a0a0f;--dark-surface:#12121a;--wrap:1160px;--px:32px;--radius:6px;--radius-lg:12px}
+html{scroll-behavior:smooth}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--hero-bg);color:#E6E8EB;-webkit-font-smoothing:antialiased;line-height:1.65}
+a{color:inherit;text-decoration:none}
+.wrap{max-width:var(--wrap);margin:0 auto;padding:0 var(--px)}
+@media(max-width:480px){:root{--px:16px}}
+#main-nav{position:sticky;top:0;z-index:100;background:rgba(10,10,15,.96);backdrop-filter:blur(14px);border-bottom:1px solid rgba(255,255,255,.06)}
+.nav-wrap{max-width:var(--wrap);margin:0 auto;padding:0 var(--px);height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.logo{display:flex;align-items:center;gap:4px;font-size:1.05rem;font-weight:900;letter-spacing:.08em;background:linear-gradient(135deg,#6366f1,#a855f7,#ec4899);-webkit-background-clip:text;-webkit-text-fill-color:transparent;flex-shrink:0}
+.nav-links{display:flex;align-items:center;gap:20px}
+.nav-links a{font-size:.78rem;font-weight:500;color:#9CA3AF;transition:color .12s}
+.nav-links a:hover{color:#E6E8EB}
+.btn-p-nav{background:#4f46e5;color:#E6E8EB;font-size:.78rem;font-weight:700;padding:7px 16px;border-radius:var(--radius);transition:opacity .15s;white-space:nowrap}
+.btn-p-nav:hover{opacity:.85}
+.dl-hero{padding:80px 0 60px;position:relative}
+.dl-hero::before{content:'';position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,.025) 1px,transparent 1px);background-size:30px 30px;pointer-events:none}
+.dl-hero-inner{position:relative;z-index:1}
+.dl-title{font-size:clamp(1.6rem,4vw,2.8rem);font-weight:800;line-height:1.15;color:#E6E8EB;margin-bottom:12px}
+.dl-sub{font-size:clamp(.85rem,2vw,.95rem);color:#9CA3AF;max-width:560px;line-height:1.75;margin-bottom:8px}
+.dl-meta{font-size:.78rem;color:#6B7280;margin-bottom:32px}
+.dl-meta a{color:var(--accent-text);border-bottom:1px solid rgba(165,180,252,.18)}
+.dl-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;max-width:700px}
+@media(max-width:640px){.dl-grid{grid-template-columns:1fr}}
+.dl-card{background:var(--dark-surface);border:1px solid rgba(255,255,255,.06);border-radius:var(--radius-lg);padding:28px;transition:border-color .18s}
+.dl-card:hover{border-color:rgba(165,180,252,.18)}
+.dl-card-icon{width:40px;height:40px;border-radius:8px;background:rgba(99,102,241,.1);display:flex;align-items:center;justify-content:center;margin-bottom:14px}
+.dl-card-icon svg{width:20px;height:20px;fill:none;stroke:var(--accent-light);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.dl-card-title{font-size:.95rem;font-weight:700;color:#E6E8EB;margin-bottom:4px}
+.dl-card-body{font-size:.8rem;color:#9CA3AF;line-height:1.65;margin-bottom:18px}
+.dl-card-info{font-size:.72rem;color:#6B7280;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:4px 14px}
+.dl-btn{display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#6366f1,#a855f7,#ec4899);color:#E6E8EB;font-size:.82rem;font-weight:700;padding:11px 22px;border-radius:var(--radius);transition:opacity .15s}
+.dl-btn:hover{opacity:.85}
+.dl-btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.dl-note{margin-top:32px;font-size:.78rem;color:#6B7280}
+.dl-note a{color:var(--accent-text);border-bottom:1px solid rgba(165,180,252,.18)}
+footer{margin-top:60px;background:#07070c;padding:32px 0 24px}
+.footer-inner{max-width:var(--wrap);margin:0 auto;padding:0 var(--px);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.footer-copy{font-size:.72rem;color:#6B7280}
+.footer-links{display:flex;gap:16px}
+.footer-links a{font-size:.72rem;color:#6B7280;transition:color .12s}
+.footer-links a:hover{color:#E6E8EB}
+</style>
+</head>
+<body>
+
+<nav id="main-nav">
+  <div class="nav-wrap">
+    <a href="/" class="logo">AR</a>
+    <div class="nav-links">
+      <a href="/">Home</a>
+      <a href="/#features">Features</a>
+      <a href="/download">Download</a>
+      <a href="/login" class="btn-p-nav">Login</a>
+    </div>
+  </div>
+</nav>
+
+<section class="dl-hero">
+  <div class="wrap dl-hero-inner">
+    <h1 class="dl-title">Download Aruvi</h1>
+    <p class="dl-sub">Get the official Android app for your phone, tablet, or TV. Stream your Telegram files directly.</p>
+    <p class="dl-meta">Version v1.0.0 &middot; <a href="https://github.com/Thirupathi-pirate/Aruvi/releases/tag/v1.0.0" target="_blank">Release notes</a> &middot; 12.9 MB each</p>
+
+    <div class="dl-grid">
+      <div class="dl-card">
+        <div class="dl-card-icon"><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12" y2="18"/></svg></div>
+        <div class="dl-card-title">Mobile</div>
+        <div class="dl-card-body">For Android phones and tablets. Universal APK works on all architectures.</div>
+        <div class="dl-card-info"><span>arm64-v8a</span><span>armeabi-v7a</span><span>x86</span><span>x86_64</span></div>
+        <a href="https://github.com/Thirupathi-pirate/Aruvi/releases/download/v1.0.0/app-mobile-universal-release.apk" class="dl-btn" download><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download Mobile APK</a>
+      </div>
+
+      <div class="dl-card">
+        <div class="dl-card-icon"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="17" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/></svg></div>
+        <div class="dl-card-title">TV</div>
+        <div class="dl-card-body">For Android TV, Fire TV, and all TV-based Android devices.</div>
+        <div class="dl-card-info"><span>arm64-v8a</span><span>armeabi-v7a</span><span>x86</span><span>x86_64</span></div>
+        <a href="https://github.com/Thirupathi-pirate/Aruvi/releases/download/v1.0.0/app-tv-universal-release.apk" class="dl-btn" download><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download TV APK</a>
+      </div>
+    </div>
+
+    <p class="dl-note">After downloading, enable <strong>"Install from unknown apps"</strong> on your device, then tap the APK to install. <a href="/">Back to Aruvi →</a></p>
+  </div>
+</section>
+
+<footer>
+  <div class="footer-inner">
+    <span class="footer-copy">&copy; 2026 Aruvi</span>
+    <div class="footer-links">
+      <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
+      <a href="/">Home</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

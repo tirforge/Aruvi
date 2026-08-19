@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Aruvi</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0a;color:#ccc;font-family:system-ui,-apple-system,sans-serif;padding:16px;min-height:100vh;display:flex;flex-direction:column}
+.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+.header-left{display:flex;align-items:center;gap:10px}
+.header-left img{width:32px;height:32px;border-radius:8px}
+h1{font-size:1.3rem;font-weight:600;color:#00ff41}
+.uptime{font-size:.8rem;color:#33cc66;font-variant-numeric:tabular-nums}
+.cards{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.card{background:#141414;border:1px solid #222;border-radius:10px;padding:16px;flex:1;min-width:130px}
+.card h3{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:#666;margin-bottom:6px}
+.card .val{font-size:1.4rem;font-weight:600;color:#fff;font-variant-numeric:tabular-nums;margin-bottom:2px}
+.card .subval{font-size:.72rem;color:#555;margin-top:4px;font-variant-numeric:tabular-nums}
+.bar-wrap{background:#222;border-radius:6px;height:6px;margin:10px 0 4px 0;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;transition:width .6s ease}
+.cpu-fill{background:#00ff41}
+.ram-fill{background:#4da6ff}
+canvas.spark{display:block;width:100%;height:28px;margin-top:10px;border-radius:4px}
+.log-box{background:#0d0d0d;border:1px solid #1a1a1a;border-radius:10px;padding:10px;flex:1;display:flex;flex-direction:column;min-height:0}
+.log-box h3{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:#555;margin-bottom:6px}
+#logs{font-family:"SF Mono","Fira Code","Cascadia Code",monospace;font-size:.7rem;line-height:1.45;flex:1;overflow-y:auto;color:#00ff41;white-space:pre-wrap;word-break:break-all;scrollbar-width:thin;scrollbar-color:#333 #0d0d0d;min-height:100px}
+#logs::-webkit-scrollbar{width:4px}
+#logs::-webkit-scrollbar-thumb{background:#333;border-radius:2px}
+.ctrl{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:space-between;margin-top:10px;flex-shrink:0}
+.ctrl-left{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.btn{background:#1a1a1a;border:1px solid #333;color:#aaa;padding:6px 14px;border-radius:7px;cursor:pointer;font-size:.8rem;transition:all .15s;display:inline-flex;align-items:center;gap:5px}
+.btn:hover{background:#222;color:#fff}
+.btn-red{background:#c00;border-color:#900;color:#fff;padding:6px 14px;border-radius:7px;cursor:pointer;font-size:.8rem;transition:all .15s}
+.btn-red:hover{background:#e00}
+.pulse{animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.copy-svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+@media(min-width:768px){
+  body{padding:20px 32px}
+  .card{padding:14px}
+  .card .val{font-size:1.5rem}
+  #logs{font-size:.75rem}
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <img src="/aruvi-brand.png" alt="Aruvi">
+    <h1>Aruvi</h1>
+  </div>
+  <div class="uptime" id="uptime">--</div>
+</div>
+
+<div class="cards">
+  <div class="card">
+    <h3>CPU</h3>
+    <div class="val" id="cpu-val">--</div>
+    <div class="bar-wrap"><div class="bar-fill cpu-fill" id="cpu-bar" style="width:0%"></div></div>
+    <canvas class="spark" id="cpu-spark"></canvas>
+  </div>
+  <div class="card">
+    <h3>RAM</h3>
+    <div class="val" id="ram-val">--</div>
+    <div class="subval" id="ram-detail"></div>
+    <div class="bar-wrap"><div class="bar-fill ram-fill" id="ram-bar" style="width:0%"></div></div>
+    <canvas class="spark" id="ram-spark"></canvas>
+  </div>
+  <div class="card">
+    <h3>NET</h3>
+    <div class="val" id="net-rx" style="color:#00ff41">--</div>
+    <div class="subval" id="net-tx" style="color:#ff8800"></div>
+    <canvas class="spark" id="net-spark"></canvas>
+  </div>
+  <div class="card">
+    <h3>CACHE</h3>
+    <div class="val" id="cache-val" style="color:#ddaaff">--</div>
+    <div class="subval" id="cache-detail"></div>
+  </div>
+</div>
+
+<div id="pv-section" style="display:none;margin-bottom:12px">
+  <div style="background:#141414;border:1px solid #222;border-radius:10px;padding:12px">
+    <h3 style="font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:#666;margin-bottom:8px">Videos</h3>
+    <div id="pv-list" style="font-family:monospace;font-size:.7rem;color:#aaa"></div>
+  </div>
+</div>
+
+<div class="log-box">
+  <h3>Live Logs</h3>
+  <div id="logs"></div>
+</div>
+
+<div class="ctrl">
+  <div class="ctrl-left">
+    <button class="btn" onclick="toggleScroll()" id="scroll-btn">Auto-scroll</button>
+    <button class="btn" onclick="copyLogs()">
+      <svg class="copy-svg" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      <span id="copy-label">Copy</span>
+    </button>
+    <button class="btn" onclick="clearLogs()">Clear</button>
+    <button class="btn-red" onclick="restartSpace()">Restart</button>
+  </div>
+  <span id="poll-status" style="font-size:.72rem;color:#888">polling 1s</span>
+</div>
+<div style="text-align:center;margin-top:14px;font-size:.7rem;color:#888">Made with ❤️</div>
+
+<script>
+let autoScroll = true;
+let _allLogs = [];
+
+const logEl = document.getElementById('logs');
+
+logEl.addEventListener('scroll', function(){
+  const atBottom = this.scrollTop + this.clientHeight >= this.scrollHeight - 20;
+  if (!atBottom) autoScroll = false;
+});
+
+function toggleScroll(){
+  autoScroll = !autoScroll;
+  document.getElementById('scroll-btn').textContent = autoScroll ? 'Auto-scroll' : 'Paused';
+  if (autoScroll) {
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+}
+
+function truncate(s, n){
+  return s.length > n ? s.substring(0, n) + '\u2026' : s;
+}
+
+function appendLogs(lines, atBottom){
+  const frag = document.createDocumentFragment();
+  for (const l of lines) {
+    const d = document.createElement('div');
+    d.textContent = truncate(l, 200);
+    d.title = l;
+    frag.appendChild(d);
+  }
+  logEl.appendChild(frag);
+  if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+}
+
+function updatePerVideo(list){
+  const sec = document.getElementById('pv-section');
+  const el = document.getElementById('pv-list');
+  if (!list || !list.length) { sec.style.display = 'none'; return }
+  sec.style.display = 'block';
+  el.innerHTML = list.map(v => {
+    const bpct = v.max_mb > 0 ? Math.min(v.size_mb / v.max_mb * 100, 100) : 0;
+    const fpct = v.forward_max_mb > 0 ? Math.min(v.forward_mb / v.forward_max_mb * 100, 100) : 0;
+    const fwdLabel = v.forward_max_mb > 0 ? `Fwd ${v.forward_mb}/${v.forward_max_mb} ch` : '';
+    return `<div style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:2px;color:#888">
+        <span>Msg ${v.message_id}</span>
+        <span style="color:#ddaaff">Bwd ${v.size_mb}/${v.max_mb} MB ${bpct.toFixed(0)}%${fwdLabel ? ' | ' + fwdLabel : ''}</span>
+      </div>
+      <div style="display:flex;gap:2px">
+        ${fwdLabel ? `<div style="flex:1;background:#222;border-radius:4px;height:5px;overflow:hidden"><div style="height:100%;border-radius:4px;width:${fpct}%;background:#00ff41;transition:width .6s ease"></div></div>
+        ` : ''}
+        <div style="flex:1;background:#222;border-radius:4px;height:5px;overflow:hidden"><div style="height:100%;border-radius:4px;width:${bpct}%;background:#ddaaff;transition:width .6s ease"></div></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function copyLogs(){
+  const txt = Array.from(logEl.children).map(el=>el.textContent).join('\n');
+  navigator.clipboard.writeText(txt).catch(()=>{});
+  document.getElementById('copy-label').textContent = 'Copied!';
+  setTimeout(() => document.getElementById('copy-label').textContent = 'Copy', 2000);
+}
+
+function clearLogs(){
+  fetch('/api/status/clear-logs', {method:'POST'});
+  _allLogs = [];
+  logEl.textContent = '';
+}
+
+function fmtTime(sec){
+  const h = Math.floor(sec/3600);
+  const m = Math.floor((sec%3600)/60);
+  const s = sec%60;
+  if(h) return `${h}h ${m}m ${s}s`;
+  if(m) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function fmtMbps(v){
+  if(v===0) return '0';
+  if(v<0.01) return '<0.1';
+  return v.toFixed(1);
+}
+
+function drawSpark(canvasId, data, color, maxVal){
+  const c = document.getElementById(canvasId);
+  if(!c || !data.length) return;
+  const pr = devicePixelRatio||1;
+  const w = c.parentElement.clientWidth - 24;
+  const h = 24;
+  c.width = w * pr;
+  c.height = h * pr;
+  c.style.width = w + 'px';
+  c.style.height = h + 'px';
+  const ctx = c.getContext('2d');
+  ctx.scale(pr, pr);
+  ctx.clearRect(0,0,w,h);
+  if(data.length<2) return;
+  const max = maxVal || Math.max(...data, 1);
+  const len = data.length;
+  const step = w / (len-1);
+  ctx.beginPath();
+  data.forEach((v,i)=>{
+    const x = i * step;
+    const y = h - (v/max * (h-2)) - 1;
+    i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+  });
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = color + '20';
+  ctx.lineTo(w, h);
+  ctx.lineTo(0, h);
+  ctx.closePath();
+  ctx.fill();
+}
+
+async function fetchStatus(){
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    document.getElementById('uptime').textContent = fmtTime(d.uptime_seconds);
+    document.getElementById('cpu-val').textContent = d.cpu + '%';
+    document.getElementById('cpu-bar').style.width = Math.min(d.cpu, 100) + '%';
+    document.getElementById('ram-val').textContent = d.ram.used_gb + ' / ' + d.ram.total_gb + ' GB';
+    document.getElementById('ram-detail').textContent = d.ram.percent + '%';
+    document.getElementById('ram-bar').style.width = Math.min(d.ram.percent, 100) + '%';
+    document.getElementById('net-rx').innerHTML = '\u2193 ' + fmtMbps(d.net.rx_mbps) + ' Mbps';
+    document.getElementById('net-tx').innerHTML = '\u2191 ' + fmtMbps(d.net.tx_mbps) + ' Mbps';
+    const c = d.cache || {};
+    const fwd = c.forward || null;
+    document.getElementById('cache-val').textContent = 'Bwd ' + c.size_mb + '/' + c.max_mb + ' MB' + (fwd ? ' | Fwd ' + fwd.total_prebuffer_mb + '/' + fwd.total_max_mb + ' ch' : '');
+    const hitRate = (c.hits + c.misses) > 0 ? (c.hits / (c.hits + c.misses) * 100).toFixed(1) : '--';
+    document.getElementById('cache-detail').textContent = c.chunks + ' chunks | hits ' + c.hits + ' evict ' + c.evictions + ' | ' + hitRate + '%';
+    updatePerVideo(c.per_video);
+    const hist = d.history || [];
+    drawSpark('cpu-spark', hist.map(p=>p.cpu), '#00ff41');
+    drawSpark('ram-spark', hist.map(p=>p.ram), '#4da6ff');
+    const netVals = hist.map(p=>Math.max(p.rx, p.tx, 0.1));
+    drawSpark('net-spark', netVals, '#00ff41');
+
+    const atBottom = autoScroll;
+    if (d.logs.length > _allLogs.length) {
+      appendLogs(d.logs.slice(_allLogs.length), atBottom);
+      _allLogs = d.logs;
+    } else if (d.logs.length < _allLogs.length) {
+      logEl.textContent = '';
+      _allLogs = [];
+      if (d.logs.length) {
+        appendLogs(d.logs, true);
+        _allLogs = d.logs;
+      }
+    }
+    document.getElementById('poll-status').textContent = 'polling 1s';
+  } catch(e){
+    document.getElementById('poll-status').textContent = 'offline';
+  }
+}
+
+function restartSpace(){
+  if(!confirm('Restart Aruvi Space?')) return;
+  const btn = document.querySelector('.btn-red');
+  btn.textContent = 'Restarting...';
+  btn.disabled = true;
+  btn.classList.add('pulse');
+  fetch('/api/restart',{method:'POST'}).then(async r=>{
+    if(!r.ok) {
+      const body = await r.json().catch(()=>({detail:'unknown'}));
+      btn.textContent = body.detail ? body.detail.substring(0,40) : 'Failed';
+      btn.disabled=false;
+      btn.classList.remove('pulse');
+    }
+  }).catch(()=>{
+    btn.textContent='Failed'; btn.disabled=false; btn.classList.remove('pulse');
+  });
+}
+
+fetchStatus();
+setInterval(fetchStatus, 1000);
+</script>
+</body>
+</html>

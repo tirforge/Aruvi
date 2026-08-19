@@ -1,0 +1,304 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family:
+    "Inter",
+    system-ui,
+    -apple-system,
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #0f172a 0%, #020617 100%);
+  color: #f8fafc;
+}
+
+/* Selection color */
+::selection {
+  background: rgba(168, 85, 247, 0.3);
+  color: #fff;
+}
+
+/* Custom scrollbar */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.3) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.5);
+}
+
+/* ============================================
+   GLASSMORPHISM COMPONENTS
+   ============================================ */
+
+.glass {
+  @apply bg-dark-800/40 backdrop-blur-xl border border-white/[0.08];
+}
+
+.glass-card {
+  @apply bg-dark-800/50 backdrop-blur-xl border border-white/[0.08] rounded-xl;
+}
+
+.glass-panel {
+  @apply bg-dark-900/80 backdrop-blur-2xl border border-white/[0.05] rounded-2xl shadow-2xl;
+}
+
+/* ============================================
+   BUTTON COMPONENTS
+   ============================================ */
+
+.btn-primary {
+  @apply bg-gradient-to-r from-primary-600 to-primary-500 
+         hover:from-primary-500 hover:to-primary-400
+         text-white font-medium px-4 py-2 rounded-lg
+         transition-all duration-200 
+         hover:shadow-lg hover:shadow-primary-500/25
+         active:scale-[0.98];
+}
+
+.btn-secondary {
+  @apply bg-dark-700/80 hover:bg-dark-600/80 
+         text-white font-medium px-4 py-2 rounded-lg
+         border border-white/[0.08] hover:border-white/[0.15]
+         transition-all duration-200;
+}
+
+.btn-ghost {
+  @apply bg-transparent hover:bg-white/[0.08] 
+         text-dark-300 hover:text-white
+         font-medium px-4 py-2 rounded-lg
+         transition-all duration-200;
+}
+
+.btn-icon {
+  @apply p-2 rounded-lg bg-transparent hover:bg-white/[0.08] 
+         text-dark-400 hover:text-white
+         transition-all duration-200;
+}
+
+/* ============================================
+   INPUT COMPONENTS
+   ============================================ */
+
+.input {
+  @apply bg-dark-800/60 border border-white/[0.08] rounded-lg
+         px-4 py-2.5 text-white placeholder-dark-500
+         focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500/50
+         transition-all duration-200;
+}
+
+.input-search {
+  @apply bg-dark-800/40 border border-white/[0.06] rounded-xl
+         pl-10 pr-4 py-2.5 text-white placeholder-dark-500
+         focus:outline-none focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500/30
+         focus:bg-dark-800/60
+         transition-all duration-200;
+}
+
+/* ============================================
+   CARD COMPONENTS
+   ============================================ */
+
+.card-hover {
+  @apply transition-all duration-300 
+         hover:scale-[1.02] hover:-translate-y-0.5
+         hover:shadow-xl hover:shadow-primary-500/5
+         hover:border-white/[0.12];
+}
+
+.file-card {
+  @apply glass-card p-3 cursor-pointer card-hover;
+}
+
+.file-card.selected {
+  @apply ring-2 ring-primary-500 bg-primary-500/10 border-primary-500/30;
+}
+
+/* ============================================
+   CONTEXT MENU
+   ============================================ */
+
+.context-menu {
+  @apply absolute glass-panel py-1.5 min-w-[180px] shadow-2xl;
+  z-index: 9999;
+  animation: scaleIn 0.15s ease-out;
+}
+
+.context-menu-item {
+  @apply flex items-center gap-3 px-3 py-2 text-sm 
+         text-dark-200 hover:text-white
+         hover:bg-white/[0.06] cursor-pointer 
+         transition-all duration-150;
+}
+
+.context-menu-item:first-child {
+  @apply rounded-t-lg;
+}
+
+.context-menu-item:last-child {
+  @apply rounded-b-lg;
+}
+
+.context-menu-divider {
+  @apply border-t border-white/[0.06] my-1;
+}
+
+/* ============================================
+   DRAG & DROP
+   ============================================ */
+
+.drag-over {
+  @apply ring-2 ring-primary-500 border-2 border-dashed border-primary-500/50 
+         bg-primary-500/5 scale-[1.02];
+}
+
+/* ============================================
+   SKELETON LOADING
+   ============================================ */
+
+.skeleton {
+  @apply bg-gradient-to-r from-dark-800 via-dark-700 to-dark-800 
+         bg-[length:200%_100%] animate-shimmer rounded;
+}
+
+/* ============================================
+   BADGES / PILLS
+   ============================================ */
+
+.badge {
+  @apply inline-flex items-center px-2 py-0.5 rounded-full 
+         text-xs font-medium bg-dark-700/80 text-dark-300
+         border border-white/[0.05];
+}
+
+.badge-primary {
+  @apply bg-primary-500/20 text-primary-300 border-primary-500/30;
+}
+
+.badge-success {
+  @apply bg-emerald-500/20 text-emerald-300 border-emerald-500/30;
+}
+
+/* ============================================
+   VIDEO PLAYER
+   ============================================ */
+
+.video-js {
+  @apply w-full h-full rounded-lg overflow-hidden;
+}
+
+.player-controls {
+  @apply glass-panel px-6 py-4;
+}
+
+/* Progress bar */
+.progress-bar {
+  @apply relative h-1 bg-white/20 rounded-full cursor-pointer
+         transition-all duration-200 group-hover:h-1.5;
+}
+
+.progress-bar-fill {
+  @apply absolute inset-y-0 left-0 bg-gradient-to-r from-primary-500 to-primary-400 rounded-full;
+}
+
+.progress-bar-thumb {
+  @apply absolute top-1/2 -translate-y-1/2 w-3 h-3 
+         bg-white rounded-full shadow-lg
+         opacity-0 group-hover:opacity-100 transition-opacity;
+}
+
+/* ============================================
+   ANIMATIONS
+   ============================================ */
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.2s ease-out;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.3s ease-out;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* ============================================
+   UTILITIES
+   ============================================ */
+
+.text-gradient {
+  @apply bg-gradient-to-r from-primary-400 to-primary-600 bg-clip-text text-transparent;
+}
+
+.glow-text {
+  text-shadow: 0 0 20px rgba(168, 85, 247, 0.5);
+}
+
+.focus-ring {
+  @apply focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:ring-offset-2 focus:ring-offset-dark-900;
+}
+
+/* Hide scrollbar but keep functionality */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

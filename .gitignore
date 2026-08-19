@@ -1,0 +1,36 @@
+# Secrets / runtime data — never commit
+.env
+**/.env
+*.session
+*.session-journal
+backend/session/
+backend/data/
+swagger_ui/
+*.db
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+
+# Android
+android/local.properties
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+*.jks
+*.keystore
+*.apk
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
