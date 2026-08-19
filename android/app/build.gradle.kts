@@ -64,7 +64,15 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("release")
+            // Sign with the release key when provided (local/CI), otherwise fall
+            // back to the auto-generated debug keystore so builds never need secrets.
+            val releaseKeyConfigured = System.getenv("RELEASE_STORE_PASSWORD") != null
+                || localProperties.getProperty("RELEASE_STORE_PASSWORD", "").isNotEmpty()
+            signingConfig = if (releaseKeyConfigured) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
         debug {
             isMinifyEnabled = false
