@@ -4,6 +4,10 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to publish APKs to (e.g. v2.0.0). Leave empty for artifact-only build"
+        required: false
 
 jobs:
   build:
@@ -45,14 +49,34 @@ jobs:
           cp app/build/outputs/apk/tv/release/app-tv-release.apk dist/Aruvi-tv.apk
           ls -la dist
 
-      # Attach APKs to the release that triggered this run
-      - name: Upload APKs to release
+      # Attach APKs to the release that triggered this run (release event)
+      - name: Upload APKs to release (release event)
         if: github.event_name == 'release'
         uses: shogo82148/actions-upload-release-asset@v1
         with:
           upload_url: ${{ github.event.release.upload_url }}
           asset_path: android/dist/*.apk
           overwrite: true
+
+      # Or to a manually-specified release (workflow_dispatch with release_tag)
+      - name: Upload APKs to release (manual dispatch)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.release_tag }}"
+          REL=$(curl -s -H "Authorization: Bearer ${{ github.token }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG")
+          UPLOAD_URL=$(echo "$REL" | /home/runner/ruby/bin/ruby -rjson -e 'puts JSON.parse(STDIN.read)["upload_url"]' 2>/dev/null \
+            || echo "$REL" | python3 -c "import sys,json; print(json.load(sys.stdin)['upload_url'])")
+          echo "upload_url=$UPLOAD_URL"
+          for apk in android/dist/*.apk; do
+            curl -s -X POST -H "Authorization: Bearer ${{ github.token }}" \
+              -H "Content-Type: application/vnd.android.package-archive" \
+              --data-binary "@$apk" \
+              -w "%{http_code}\n" -o /dev/null \
+              "${UPLOAD_URL%\{*}?name=$(basename "$apk")"
+          done
 
       # Always keep the APKs as workflow artifacts
       - name: Upload APK artifacts
