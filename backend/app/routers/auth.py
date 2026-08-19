@@ -190,7 +190,7 @@ async def generate_login_code(
 
 
 @router.post("/verify-code", response_model=AuthResponse)
-@limiter.limit("40/minute")  # Allow TV polling while limiting brute force attempts
+@limiter.limit("80/minute")  # Allow TV polling while limiting brute force attempts
 async def verify_login_code(
     request: Request,  # Required for rate limiter
     code_request: VerifyCodeRequest,

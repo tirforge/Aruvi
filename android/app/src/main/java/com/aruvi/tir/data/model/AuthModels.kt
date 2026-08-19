@@ -24,7 +24,7 @@ data class AuthResponse(
     @SerializedName("access_token") val accessToken: String,
     @SerializedName("refresh_token") val refreshToken: String,
     @SerializedName("token_type") val tokenType: String,
-    @SerializedName("expires_in") val expiresIn: Int,
+    @SerializedName("expires_in") val expiresIn: Int? = null,
     @SerializedName("user") val user: User
 )
 
@@ -38,7 +38,7 @@ data class RefreshResponse(
     @SerializedName("access_token") val accessToken: String,
     @SerializedName("refresh_token") val refreshToken: String,
     @SerializedName("token_type") val tokenType: String,
-    @SerializedName("expires_in") val expiresIn: Int
+    @SerializedName("expires_in") val expiresIn: Int? = null
 )
 
 data class BotInfo(
