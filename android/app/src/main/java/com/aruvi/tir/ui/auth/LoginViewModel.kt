@@ -36,6 +36,7 @@ data class LoginUiState(
     val debugLog: String = "",
     val serverUrl: String = "",
     val botUsername: String = "",
+    val botName: String = "",
     val showServerConfig: Boolean = false
 )
 
@@ -59,7 +60,8 @@ class LoginViewModel @Inject constructor(
         viewModelScope.launch {
             val url = settingsRepository.serverUrl.first()
             val bot = settingsRepository.botUsername.first()
-            _uiState.value = _uiState.value.copy(serverUrl = url, botUsername = bot)
+            val botName = settingsRepository.botName.first()
+            _uiState.value = _uiState.value.copy(serverUrl = url, botUsername = bot, botName = botName)
 
             if (url.isNotEmpty()) {
                 fetchBotInfo()
@@ -77,8 +79,18 @@ class LoginViewModel @Inject constructor(
     }    fun fetchBotInfo() {
         viewModelScope.launch {
             authRepository.getBotInfo().onSuccess { botInfo ->
-                _uiState.value = _uiState.value.copy(botUsername = botInfo.username)
-                settingsRepository.setBotUsername(botInfo.username)
+                val username = botInfo.username.takeIf { it.isNotBlank() }
+                    ?: _uiState.value.botUsername
+                _uiState.value = _uiState.value.copy(
+                    botUsername = username,
+                    botName = botInfo.name.orEmpty()
+                )
+                if (botInfo.username.isNotBlank()) {
+                    settingsRepository.setBotUsername(botInfo.username)
+                }
+                if (!botInfo.name.isNullOrBlank()) {
+                    settingsRepository.setBotName(botInfo.name)
+                }
             }.onFailure { e ->
                 _uiState.value = _uiState.value.copy(
                     error = e.toUserFriendlyMessage()
@@ -131,7 +143,20 @@ class LoginViewModel @Inject constructor(
 
                 result.fold(
                     onSuccess = { response ->
-                        val bot = _uiState.value.botUsername.ifBlank { "telegram" }
+                        // The code response carries the bot username/name from the
+                        // backend, so the login button/deep link always reflect the
+                        // live server (no hardcoded bot, no race with a separate fetch).
+                        val bot =
+                            response.botUsername?.takeIf { it.isNotBlank() }
+                                ?: _uiState.value.botUsername.ifBlank { "telegram" }
+                        if (response.botUsername?.isNotBlank() == true) {
+                            settingsRepository.setBotUsername(response.botUsername)
+                            settingsRepository.setBotName(response.botName.orEmpty())
+                        }
+                        _uiState.value = _uiState.value.copy(
+                            botUsername = bot,
+                            botName = response.botName ?: _uiState.value.botName
+                        )
                         val url = "https://t.me/$bot?start=${response.code}"
                         val qrBitmap = withContext(Dispatchers.Default) {
                             generateQrCode(url, 600)

@@ -27,6 +27,7 @@ class SettingsRepository @Inject constructor(
     private object PreferencesKeys {
         val SERVER_URL = stringPreferencesKey("server_url")
         val BOT_USERNAME = stringPreferencesKey("bot_username")
+        val BOT_NAME = stringPreferencesKey("bot_name")
         val AUTO_PLAY_NEXT = booleanPreferencesKey("auto_play_next")
         val PREFERRED_QUALITY = stringPreferencesKey("preferred_quality")
     }
@@ -80,6 +81,19 @@ class SettingsRepository @Inject constructor(
     suspend fun setBotUsername(username: String) {
         context.settingsDataStore.edit { prefs ->
             prefs[PreferencesKeys.BOT_USERNAME] = username
+        }
+    }
+
+    /**
+     * Get bot display name.
+     */
+    val botName: Flow<String> = context.settingsDataStore.data.map { prefs ->
+        prefs[PreferencesKeys.BOT_NAME].orEmpty()
+    }
+
+    suspend fun setBotName(name: String) {
+        context.settingsDataStore.edit { prefs ->
+            prefs[PreferencesKeys.BOT_NAME] = name
         }
     }
 

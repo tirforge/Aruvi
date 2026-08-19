@@ -36,9 +36,7 @@ _BOT_INFO_TTL_SECONDS = 3600
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
-
-@router.get("/bot/info", response_model=BotInfoResponse)
-async def get_bot_info_endpoint():
+async def get_bot_info() -> BotInfoResponse:
     """Get bot username and name for the login screen (cached to avoid Telegram flood waits)."""
     cached = _bot_info_cache["data"]
     if cached and time.time() - _bot_info_cache["ts"] < _BOT_INFO_TTL_SECONDS:
@@ -58,6 +56,12 @@ async def get_bot_info_endpoint():
         if cached:
             return cached
         raise HTTPException(status_code=500, detail="Unable to fetch bot info")
+
+
+@router.get("/bot/info", response_model=BotInfoResponse)
+async def get_bot_info_endpoint():
+    """Get bot username and name for the login screen (cached to avoid Telegram flood waits)."""
+    return await get_bot_info()
 
 
 @router.post("/refresh", response_model=Token)
@@ -163,10 +167,25 @@ async def generate_login_code(
         raise HTTPException(status_code=500, detail="Failed to generate a login code")
 
     await db.refresh(login_code)
-    
+
+    # Include the bot's username/name with the code so clients (mobile, TV,
+    # web) can build the correct login deep-link without a separate request.
+    bot_username = None
+    bot_name = None
+    try:
+        bot = await get_bot_info()
+        bot_username = bot.username
+        bot_name = bot.name
+    except Exception:
+        logging.getLogger("auth").warning(
+            "Bot info unavailable during code generation; continuing without it"
+        )
+
     return LoginCodeResponse(
         code=code,
-        expires_at=expires_at
+        expires_at=expires_at,
+        bot_username=bot_username,
+        bot_name=bot_name
     )
 
 

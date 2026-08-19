@@ -9,7 +9,9 @@ import com.google.gson.annotations.SerializedName
 // Login code request (TV generates a code, user enters it in Telegram bot)
 data class LoginCodeResponse(
     @SerializedName("code") val code: String,
-    @SerializedName("expires_at") val expiresAt: String
+    @SerializedName("expires_at") val expiresAt: String,
+    @SerializedName("bot_username") val botUsername: String? = null,
+    @SerializedName("bot_name") val botName: String? = null
 )
 
 // Verify login code
