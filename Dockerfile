@@ -1,6 +1,6 @@
-# Stage 1: Build React frontend
+# Stage 1: Build React frontend (vite outDir writes to ../backend/app/static)
 FROM node:20-slim AS frontend-builder
-WORKDIR /frontend
+WORKDIR /repo/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci
 COPY frontend/ .
@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY backend/ /app
 # Copy built frontend into backend's static directory (served by FastAPI)
-COPY --from=frontend-builder /frontend/dist/ /app/app/static/
+COPY --from=frontend-builder /repo/backend/app/static/ /app/app/static/
 
 WORKDIR /app
 RUN mkdir -p /app/data /app/session /app/data/vcache

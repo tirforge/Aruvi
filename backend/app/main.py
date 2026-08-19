@@ -324,9 +324,7 @@ NO_CACHE_HEADERS = {"Cache-Control": "no-cache, no-store, must-revalidate"}
 
 
 @app.get("/", include_in_schema=False)
-async def landing():
-    if os.path.exists("app/static/landing.html"):
-        return FileResponse("app/static/landing.html", headers=NO_CACHE_HEADERS)
+async def index():
     if os.path.exists("app/static/index.html"):
         return FileResponse("app/static/index.html", headers=NO_CACHE_HEADERS)
     return JSONResponse(status_code=404, content={"detail": "Not found"})
