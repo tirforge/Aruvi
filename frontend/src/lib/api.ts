@@ -178,16 +178,19 @@ return Promise.reject(error);
 }
 
 if (isRefreshing) {
-return new Promise(function (resolve, reject) {
-failedQueue.push({ resolve, reject });
-})
-.then((token) => {
-originalRequest.headers['Authorization'] = 'Bearer ' + token;
-return api(originalRequest);
-})
-.catch((err) => {
-return Promise.reject(err);
-});
+  return new Promise(function (resolve, reject) {
+    failedQueue.push({ resolve, reject });
+  })
+  .then((token) => {
+    // Mark the retry so a second 401 (e.g. authz denial) can't kick off
+    // another refresh and rotate the refresh token in a loop.
+    originalRequest._retry = true;
+    originalRequest.headers['Authorization'] = 'Bearer ' + token;
+    return api(originalRequest);
+  })
+  .catch((err) => {
+    return Promise.reject(err);
+  });
 }
 
 originalRequest._retry = true;
@@ -516,7 +519,9 @@ const files = original.filter((f) => f.id !== fileId);
 return files.length === original.length ? old : { ...old, files };
 }
 const others = original.filter((f) => f.id !== fileId);
-return { ...old, files: [{ ...(original.find((f) => f.id === fileId) as TelegramFile), ...updated }, ...others] };
+const existing = original.find((f) => f.id === fileId);
+if (!existing) return old; // file isn't in continue-watching — nothing to reorder
+return { ...old, files: [{ ...existing, ...updated }, ...others] };
 });
 // The main file grid and the "recently added" list also render progress
 // bars from last_pos — patch those entries in place too (order unchanged).

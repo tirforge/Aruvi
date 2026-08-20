@@ -24,6 +24,9 @@ class User(Base):
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     auth_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     gdrive_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    refresh_sessions: Mapped[List["RefreshSession"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     last_active: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
     
@@ -135,3 +138,20 @@ class LoginCode(Base):
     telegram_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class RefreshSession(Base):
+    """A single issued refresh token (device session). Rotation deletes the old
+    row and inserts the new one, so a rotated/replayed token stops working."""
+    __tablename__ = "refresh_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    last_used_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    user: Mapped["User"] = relationship(back_populates="refresh_sessions")

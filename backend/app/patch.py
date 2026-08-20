@@ -1,7 +1,7 @@
 import asyncio
 import functools
-from collections import OrderedDict
-from typing import Dict, Optional, Union
+from collections import OrderedDict, deque
+from typing import Deque, Dict, Optional, Union
 from pyrogram import handlers, types
 from pyrogram import Client as PyroClient
 from pyrogram import errors, raw, session, types
@@ -15,7 +15,7 @@ class ListenerCanceled(Exception):
 
 class PatchedClient(PyroClient):
     def __init__(self, *args, **kwargs):
-        self.listeners: Dict[str, Dict[str, Union[asyncio.Future, Filter, None]]] = {}
+        self.listeners: Dict[str, Deque[dict]] = {}
         super().__init__(*args, **kwargs)
 
     async def load_session(self):
@@ -68,9 +68,14 @@ class PatchedClient(PyroClient):
         else:
             raise TypeError("chat_id or inline_message_id is required")
         future = self.loop.create_future()
-        future.add_done_callback(functools.partial(self.remove_listener, key))
-        self.listeners.update({key: {"future": future, "filters": filters}})
-        return await asyncio.wait_for(future, timeout)
+        entry = {"future": future, "filters": filters}
+        self.listeners.setdefault(key, deque()).append(entry)
+        future.add_done_callback(functools.partial(self._forget_listener, key, entry))
+        try:
+            return await asyncio.wait_for(future, timeout)
+        except asyncio.TimeoutError:
+            self._forget_listener(key, entry)
+            raise
 
     async def wait_for_message(
         self,
@@ -81,38 +86,79 @@ class PatchedClient(PyroClient):
         if not isinstance(chat_id, int):
             chat = await self.get_chat(chat_id)
             chat_id = chat.id  # type: ignore
+        key = str(chat_id)
         future = self.loop.create_future()
-        future.add_done_callback(functools.partial(self.remove_listener, str(chat_id)))
-        self.listeners.update({str(chat_id): {"future": future, "filters": filters}})
-        return await asyncio.wait_for(future, timeout)
+        entry = {"future": future, "filters": filters}
+        self.listeners.setdefault(key, deque()).append(entry)
+        future.add_done_callback(functools.partial(self._forget_listener, key, entry))
+        try:
+            return await asyncio.wait_for(future, timeout)
+        except asyncio.TimeoutError:
+            self._forget_listener(key, entry)
+            raise
 
     async def wait_for_inline_query(
         self, user_id: int, filters: Optional[Filter] = None, timeout: Optional[int] = None
     ):
+        key = str(user_id)
         future = self.loop.create_future()
-        future.add_done_callback(functools.partial(self.remove_listener, str(user_id)))
-        self.listeners.update({str(user_id): {"future": future, "filters": filters}})
-        return await asyncio.wait_for(future, timeout)
+        entry = {"future": future, "filters": filters}
+        self.listeners.setdefault(key, deque()).append(entry)
+        future.add_done_callback(functools.partial(self._forget_listener, key, entry))
+        try:
+            return await asyncio.wait_for(future, timeout)
+        except asyncio.TimeoutError:
+            self._forget_listener(key, entry)
+            raise
 
     async def wait_for_inline_result(
         self, user_id: int, filters: Optional[Filter] = None, timeout: Optional[int] = None
     ):
+        key = str(user_id)
         future = self.loop.create_future()
-        future.add_done_callback(functools.partial(self.remove_listener, str(user_id)))
-        self.listeners.update({str(user_id): {"future": future, "filters": filters}})
-        return await asyncio.wait_for(future, timeout)
+        entry = {"future": future, "filters": filters}
+        self.listeners.setdefault(key, deque()).append(entry)
+        future.add_done_callback(functools.partial(self._forget_listener, key, entry))
+        try:
+            return await asyncio.wait_for(future, timeout)
+        except asyncio.TimeoutError:
+            self._forget_listener(key, entry)
+            raise
+
+    def _forget_listener(self, key: str, entry: dict, _future=None):
+        """Remove a specific listener entry once its future resolves (or is
+        canceled/hits a timeout). Done-callbacks pass the future as a trailing
+        positional arg, hence the ignored ``_future`` slot."""
+        queue = self.listeners.get(key)
+        if not queue:
+            return
+        try:
+            queue.remove(entry)
+        except ValueError:
+            pass
+        if not queue:
+            self.listeners.pop(key, None)
 
     def remove_listener(self, key: str, future=None):
-        if key in self.listeners and future == self.listeners[key]["future"]:
-            self.listeners.pop(key)
+        """Remove a pending listener by future identity (or all when future is None)."""
+        queue = self.listeners.get(key)
+        if not queue:
+            return
+        for entry in list(queue):
+            if future is None or entry["future"] is future:
+                self._forget_listener(key, entry)
+                if future is not None:
+                    return
 
     def cancel_listener(self, key: str):
-
-        listener = self.listeners.get(key)
-        if not listener or listener["future"].done():  # type: ignore
+        queue = self.listeners.get(key)
+        if not queue:
             return
-        listener["future"].set_exception(ListenerCanceled())  # type: ignore
-        self.remove_listener(key, listener["future"])
+        for entry in list(queue):
+            future = entry["future"]
+            if not future.done():  # type: ignore
+                future.set_exception(ListenerCanceled())  # type: ignore
+        self.listeners.pop(key, None)
 
     async def invoke(
         self,
@@ -146,6 +192,14 @@ async def resolve_listener(
     client: PatchedClient,
     update: Union[types.CallbackQuery, types.Message, types.InlineQuery, types.ChosenInlineResult],
 ):
+    if isinstance(update, types.Message):
+        # Never swallow bot commands into a pending flow: let /cancel and every
+        # other command reach their real handlers instead of being consumed as
+        # "user input" for rename / folder-creation / login flows.
+        if getattr(update, "text", None) and update.text.startswith("/"):
+            update.continue_propagation()
+            return
+
     if isinstance(update, types.CallbackQuery):
         if update.message:
             key = f"{update.message.chat.id}:{update.message.id}"
@@ -158,18 +212,22 @@ async def resolve_listener(
     else:
         key = str(update.chat.id)  # type: ignore
 
-    listener = client.listeners.get(key)
+    queue = client.listeners.get(key)
+    if not queue:
+        update.continue_propagation()
+        return
 
-    if listener and not listener["future"].done():  # type: ignore
-        if callable(listener["filters"]):
-            if not await listener["filters"](client, update):
-                update.continue_propagation()
-                return
-        listener["future"].set_result(update)  # type: ignore
-        update.stop_propagation()
-    else:
-        if listener and listener["future"].done():  # type: ignore
-            client.remove_listener(key, listener["future"])
+    entry = queue[0]
+    if entry["future"].done():  # type: ignore
+        client._forget_listener(key, entry)
+        update.continue_propagation()
+        return
+    if callable(entry["filters"]):
+        if not await entry["filters"](client, update):
+            update.continue_propagation()
+            return
+    entry["future"].set_result(update)  # type: ignore
+    update.stop_propagation()
 
 
 class Client(PatchedClient):

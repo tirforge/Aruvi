@@ -87,6 +87,8 @@ class _IvySlot:
     session: str
     client: object | None = None
     start_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    active: int = 0  # concurrent users of this slot's client
+    needs_rebuild: bool = False  # client broken; rebuild once idle
 
 
 class _IvyPool:
@@ -137,10 +139,17 @@ class _IvyPool:
             cls._round_robin += 1
             slot = cls._slots[idx]
             # Per-slot lock: never start two clients from the same session
-            # string concurrently (would trigger AUTH_KEY_DUPLICATED).
+            # string concurrently (would trigger AUTH_KEY_DUPLICATED), and
+            # never tear a client down while other callers still hold it.
             async with slot.start_lock:
-                if slot.client is None:
-                    slot.client = await _start_client(slot.session)
+                if slot.client is None or slot.needs_rebuild:
+                    if slot.active == 0:
+                        if slot.client is not None:
+                            await _stop_client_safe(slot.client)
+                            slot.client = None
+                        slot.client = await _start_client(slot.session)
+                        slot.needs_rebuild = False
+                slot.active += 1
             try:
                 return await fn(slot.client)
             except (_GrabError, _SlowError):
@@ -148,14 +157,17 @@ class _IvyPool:
                 # account slowmode-limited) — the client is fine, don't drop it.
                 raise
             except Exception:
-                # Drop a client that errored mid-operation so the next call
-                # reconnects fresh instead of reusing a broken connection.
-                try:
-                    await slot.client.stop()
-                except Exception:
-                    pass
-                slot.client = None
+                # The client may be broken — don't stop it while others still
+                # hold it; flag it for rebuild by the last active caller.
+                slot.needs_rebuild = True
                 raise
+            finally:
+                async with slot.start_lock:
+                    slot.active -= 1
+                    if slot.active == 0 and slot.needs_rebuild and slot.client is not None:
+                        await _stop_client_safe(slot.client)
+                        slot.client = None
+                        slot.needs_rebuild = False
 
 
 _ivy_pool = _IvyPool()
@@ -208,6 +220,15 @@ async def _start_client(session_str: str) -> Client:
             pass
         raise RuntimeError("Ivy client start timed out")
     return ivy
+
+
+async def _stop_client_safe(client) -> None:
+    """Stop a client that may already be stopped/disconnected."""
+    try:
+        if client is not None:
+            await client.stop()
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +284,7 @@ async def _collect_bot_replies(
     """
     collected: list[object] = []
     direct: list[object] = []
+    seen: set[int] = set()
     for _ in range(seconds):
         try:
             history = [m async for m in ivy.get_chat_history(chat_id, limit=20)]
@@ -273,17 +295,20 @@ async def _collect_bot_replies(
         for msg in history:
             if msg.id <= sent.id or not msg.reply_markup or not msg.from_user:
                 continue
+            if msg.id in seen:
+                continue
+            seen.add(msg.id)
             is_direct = getattr(msg, "reply_to_message_id", None) == sent.id
             bot_ok = bot_user is None or msg.from_user.id == bot_user.id
-            if not (is_direct or bot_ok):
-                continue
-            if any(m.id == msg.id for m in collected) or any(m.id == msg.id for m in direct):
-                continue
             if is_direct:
                 direct.append(msg)
-            else:
+            elif bot_ok:
+                # Non-direct bot posts may belong to a *concurrent* search by
+                # another user in a busy shared group. Only use them as a
+                # fallback, and keep scanning the window so our own direct
+                # reply still gets a chance instead of breaking early.
                 collected.append(msg)
-        if collected or direct:
+        if direct:
             break
         await asyncio.sleep(1)
     if direct:
@@ -1484,7 +1509,7 @@ async def grab_selected(
             db_file_id = file_record.id
 
         from .auth import create_download_token
-        token = create_download_token(str(telegram_id))
+        token = create_download_token(str(telegram_id), db_file_id)
         s = get_settings()
         stream_url = f"{s.web_base_url.rstrip('/')}/api/stream/{db_file_id}?token={token}"
 

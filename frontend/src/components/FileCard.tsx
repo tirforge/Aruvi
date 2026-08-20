@@ -89,7 +89,7 @@ export default function FileCard({
                 <div className="w-12 h-12 rounded-lg bg-dark-800/80 flex items-center justify-center overflow-hidden shrink-0 border border-white/[0.05]">
                     {file.file_type === 'image' ? (
                         <img
-                            src={`${window.location.origin}${file.stream_url}?token=${accessToken}`}
+                            src={`${window.location.origin}${file.stream_url}${file.stream_url.includes('?') ? '&' : '?'}token=${accessToken}`}
                             alt={file.file_name}
                             className="w-full h-full object-cover"
                             referrerPolicy="no-referrer"
@@ -120,7 +120,7 @@ export default function FileCard({
                             <>
                                 <span className="w-1 h-1 rounded-full bg-dark-600"></span>
                                 <span className="text-primary-400">
-                                    {Math.round((file.last_pos / file.duration) * 100)}%
+                                    {Math.min(100, Math.round((file.last_pos / file.duration) * 100))}%
                                 </span>
                             </>
                         )}
@@ -168,7 +168,7 @@ export default function FileCard({
             <div className={`aspect-video rounded-lg mb-3 overflow-hidden relative border ${selected ? 'border-primary-500/20' : 'border-white/[0.05]'} bg-dark-900/50`}>
                 {file.file_type === 'image' ? (
                     <img
-                        src={`${window.location.origin}${file.stream_url}?token=${accessToken}`}
+                        src={`${window.location.origin}${file.stream_url}${file.stream_url.includes('?') ? '&' : '?'}token=${accessToken}`}
                         alt={file.file_name}
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                         referrerPolicy="no-referrer"

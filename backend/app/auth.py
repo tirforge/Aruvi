@@ -3,6 +3,7 @@ JWT authentication utilities.
 """
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+import secrets
 
 from jose import jwt, JWTError
 from fastapi import Depends, HTTPException, status, Request
@@ -18,15 +19,18 @@ from .schemas import TokenPayload
 settings = get_settings()
 security = HTTPBearer(auto_error=False)
 
+REFRESH_TOKEN_DURATION = timedelta(minutes=settings.jwt_expiry_minutes * 4)
 
 
-def create_download_token(telegram_id: int, version: int = 0) -> str:
-    """Create a JWT download token valid for 30 days."""
+
+def create_download_token(telegram_id: int, file_id: int, version: int = 0) -> str:
+    """Create a JWT download token bound to a specific file (valid 30 days)."""
     expire = datetime.now(timezone.utc) + timedelta(days=30)
     payload = {
         "sub": str(telegram_id),
         "exp": expire,
         "type": "download",
+        "file_id": file_id,
         "ver": version
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
@@ -63,7 +67,8 @@ def create_refresh_token(telegram_id: int, version: int = 0) -> str:
         "sub": str(telegram_id),  # Subject must be string
         "exp": expire,
         "type": "refresh",
-        "ver": version
+        "ver": version,
+        "jti": secrets.token_urlsafe(16),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 

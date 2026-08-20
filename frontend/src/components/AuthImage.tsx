@@ -7,6 +7,12 @@ interface AuthImageProps {
     className?: string;
 }
 
+const getAbsoluteUrl = (url: string) => {
+    if (!url) return '';
+    if (url.startsWith('http')) return url;
+    return `${window.location.origin}${url}`;
+};
+
 export default function AuthImage({ src, alt, className }: AuthImageProps) {
     const [blobUrl, setBlobUrl] = useState<string | null>(null);
     const [error, setError] = useState(false);
@@ -30,10 +36,12 @@ export default function AuthImage({ src, alt, className }: AuthImageProps) {
             return;
         }
 
+        const url = getAbsoluteUrl(src);
+
         let cancelled = false;
 
         const loadImage = (authToken: string) =>
-            fetch(src, {
+            fetch(url, {
                 headers: { 'Authorization': `Bearer ${authToken}` }
             })
             .then((res) => {

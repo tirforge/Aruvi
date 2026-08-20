@@ -210,9 +210,8 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         }
     }, [internetSubs, selectedInternet, attachingSubs, file.id]);
 
-    // Fetch fresh file details to get latest progress
-    const { data: extendedFile } = useFile(file.id);
     const { mutate: updateProgress } = useUpdateProgress();
+    const { data: extendedFile, isError: extendedFileError } = useFile(file.id);
 
     // Load the movi-player engine unconditionally for video/audio (no native
     // fallback). Images render as a plain <img> — no engine needed.
@@ -260,6 +259,37 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
     const externalUrl = getAbsoluteUrl((extendedFile || file).public_stream_url || '') || authorizedStreamUrl;
     const vlcUrl = `vlc://${externalUrl}`;
 
+    // If the access token rotates mid-playback (refresh interceptor), the
+    // frozen authorizedStreamUrl would 401 on the next request with no way to
+    // recover. Re-source the element with a fresh token only when it actually
+    // changed, preserving the current playhead and play state.
+    const mountedFileRef = useRef<number | null>(null);
+    const prevTokenRef = useRef<string>(reactiveToken);
+    useEffect(() => {
+        const el = elRef.current;
+        if (!el || isImage || mountedFileRef.current !== file.id) return;
+        if (prevTokenRef.current === reactiveToken || !prevTokenRef.current) {
+            prevTokenRef.current = reactiveToken;
+            return;
+        }
+        prevTokenRef.current = reactiveToken;
+        const wasPlaying = !el.paused;
+        const prevTime = el.currentTime || 0;
+        el.source({
+            video: { src: authorizedStreamUrl, type: 'video/mp4' },
+        });
+        const restore = () => {
+            try {
+                if (prevTime > 0) el.currentTime = prevTime;
+            } catch { /* noop */ }
+            if (wasPlaying) {
+                try { el.play(); } catch { /* noop */ }
+            }
+            el.removeEventListener('loadeddata', restore);
+        };
+        el.addEventListener('loadeddata', restore);
+    }, [reactiveToken, authorizedStreamUrl, isImage, file.id]);
+
     const handleDownload = async () => {
         // Open the target tab synchronously (still inside the click gesture) so
         // browsers don't block it as a popup, then point it at the download page
@@ -294,10 +324,10 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
     // on later refetches, or playback would restart mid-watch.
     const [extendedReadyForFile, setExtendedReadyForFile] = useState<number | null>(null);
     useEffect(() => {
-        if (extendedFile) {
+        if (extendedFile || extendedFileError) {
             setExtendedReadyForFile((prev) => (prev === file.id ? prev : file.id));
         }
-    }, [extendedFile, file.id]);
+    }, [extendedFile, extendedFileError, file.id]);
 
     // Tracks whether playback actually started in this session. Progress is only
     // reported once the media has played, so merely opening a movie (or having
@@ -390,6 +420,8 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         el.style.height = '100%';
         holder.replaceChildren(el);
         elRef.current = el;
+        mountedFileRef.current = file.id;
+        prevTokenRef.current = reactiveToken;
         // The engine's constructor sets the host tabindex on a microtask, so
         // focus is deferred a tick. Without this the player never has focus on
         // open and its hotkeys stay dead until the user clicks the video.

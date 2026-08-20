@@ -139,13 +139,17 @@ def _os_lang_code() -> str:
     """OpenSubtitles.com expects a bare code like 'en'."""
     code = settings.subtitle_languages[0] if settings.subtitle_languages else "en"
     try:
-        return Language.fromietf(code).alpha2
+        lang = Language.fromietf(code)
     except (LanguageReverseError, ValueError):
-        return code
+        return "en"
+    alpha2 = getattr(lang, "alpha2", None)
+    if not alpha2 or len(alpha2) > 3:
+        return "en"
+    return alpha2
 
 
-def _os_search(title: str | None, year: int | None,
-               season: int | None = None, episode: int | None = None) -> list[dict]:
+async def _os_search(title: str | None, year: int | None,
+                     season: int | None = None, episode: int | None = None) -> list[dict]:
     """Query api.opensubtitles.com /subtitles (single page). Returns serialized dicts."""
     if not title:
         return []
@@ -163,8 +167,8 @@ def _os_search(title: str | None, year: int | None,
         params["episode_number"] = episode
 
     try:
-        with httpx.Client(timeout=20, follow_redirects=True) as client:
-            r = client.get(f"{_OS_URL}/subtitles", headers=_os_headers(), params=params)
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            r = await client.get(f"{_OS_URL}/subtitles", headers=_os_headers(), params=params)
             r.raise_for_status()
             payload = r.json()
     except Exception as exc:
@@ -197,13 +201,13 @@ def _os_search(title: str | None, year: int | None,
     return out
 
 
-def _os_download(sub_id: str, file_id: int | None) -> tuple[str, str]:
+async def _os_download(sub_id: str, file_id: int | None) -> tuple[str, str]:
     """Download subtitle content via the /download endpoint. Returns (format, text)."""
     if file_id is None:
         raise HTTPException(status_code=404, detail="Subtitle has no downloadable file entry")
     try:
-        with httpx.Client(timeout=30, follow_redirects=True) as client:
-            r = client.post(
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            r = await client.post(
                 f"{_OS_URL}/download",
                 headers=_os_headers(),
                 json={"file_id": int(file_id)},
@@ -216,7 +220,7 @@ def _os_download(sub_id: str, file_id: int | None) -> tuple[str, str]:
             link = dl.get("link")
             if not link:
                 raise HTTPException(status_code=502, detail="OpenSubtitles returned no download link")
-            content = client.get(link, headers=_os_headers()).content
+            content = (await client.get(link, headers=_os_headers())).content
     except HTTPException:
         raise
     except Exception as exc:
@@ -282,7 +286,7 @@ async def search_subtitles(
     if _os_enabled():
         is_ep = info.get("type") == "episode"
         candidates.extend(
-            _os_search(
+            await _os_search(
                 title,
                 info.get("year") or None,
                 season=info.get("season") or None if is_ep else None,
@@ -335,7 +339,7 @@ async def subtitle_content(
     if provider == "opensubtitlescom":
         if not _os_enabled():
             raise HTTPException(status_code=400, detail="OpenSubtitles API key not configured")
-        fmt, text = _os_download(subtitle_id, download_id)
+        fmt, text = await _os_download(subtitle_id, download_id)
         return {"provider": provider, "layer_id": subtitle_id, "format": fmt, "text": text}
 
     _ensure_region()

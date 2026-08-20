@@ -23,18 +23,41 @@ export default function MoveFileModal({ items, onClose }: MoveFileModalProps) {
 
     const handleMove = async () => {
         try {
+            if (items.folders.length > 0) {
+                // Prevent moving a folder into itself or any of its descendants.
+                // Validate before any mutation is dispatched.
+                const folderIds = new Set(items.folders.map(f => f.id));
+                const descendants = new Set<number>();
+                const collectSubtree = (nodes: Folder[] | undefined) => {
+                    nodes?.forEach(n => {
+                        descendants.add(n.id);
+                        collectSubtree(n.children);
+                    });
+                };
+                // Descend the tree; anything under a moved folder (not itself
+                // another moved folder) is an invalid destination.
+                const findMoved = (nodes: Folder[] | undefined) => {
+                    nodes?.forEach(n => {
+                        if (folderIds.has(n.id)) {
+                            collectSubtree(n.children);
+                        } else {
+                            findMoved(n.children);
+                        }
+                    });
+                };
+                findMoved(folderTree);
+                if (selectedId != null && (folderIds.has(selectedId) || descendants.has(selectedId))) {
+                    addToast('Cannot move a folder into itself or its subfolder', 'error');
+                    return;
+                }
+            }
+
             const promises = [];
             if (items.files.length > 0) {
                 promises.push(moveFiles({ ids: items.files.map(f => f.id), folderId: selectedId }));
             }
             if (items.folders.length > 0) {
-                // Prevent moving folder into itself
-                const folderIds = items.folders.map(f => f.id);
-                if (selectedId && folderIds.includes(selectedId)) {
-                    addToast('Cannot move a folder into itself', 'error');
-                    return;
-                }
-                promises.push(moveFolders({ ids: folderIds, folderId: selectedId }));
+                promises.push(moveFolders({ ids: items.folders.map(f => f.id), folderId: selectedId }));
             }
 
             await Promise.all(promises);

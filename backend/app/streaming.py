@@ -895,9 +895,10 @@ _MSG_CACHE_TTL = 60.0
 # hammering Telegram (a fresh reference is valid ~1h, so one per window is enough).
 _msg_refresh_locks: dict[tuple[int, int, int], asyncio.Lock] = {}
 _msg_last_force: dict[tuple[int, int, int], float] = {}
+_msg_poisoned: set[tuple[int, int, int]] = set()
 _MSG_REFRESH_MIN_INTERVAL = 15.0
 
-# The three dicts above grow one key per (bot, chat, message) ever streamed;
+# The four containers below grow one key per (bot, chat, message) ever streamed;
 # without a cap they leak (telegram.py evicts its own _msg_cache; this one did
 # not). Bound them by count, evicting the oldest entries and dropping the
 # matching lock/last-force keys so all three stay in sync. Worst case ~4k
@@ -914,6 +915,7 @@ def _prune_msg_state():
         _msg_cache.pop(key, None)
         _msg_refresh_locks.pop(key, None)
         _msg_last_force.pop(key, None)
+        _msg_poisoned.discard(key)
 
 
 def _get_msg_refresh_lock(key: tuple[int, int, int]) -> asyncio.Lock:
@@ -921,6 +923,14 @@ def _get_msg_refresh_lock(key: tuple[int, int, int]) -> asyncio.Lock:
     if lock is None:
         lock = _msg_refresh_locks[key] = asyncio.Lock()
     return lock
+
+
+def _mark_msg_poisoned(client, chat_id: int, message_id: int) -> None:
+    """Record that a file-reference error invalidated this (bot, chat, message).
+    A subsequent throttled force-refetch will then actually hit Telegram for a
+    fresh reference instead of returning the dead cached Message."""
+    key = (getattr(client, "pool_index", 0), chat_id, message_id)
+    _msg_poisoned.add(key)
 
 
 async def _fetch_message(client, chat_id: int, message_id: int, force: bool = False):
@@ -934,9 +944,13 @@ async def _fetch_message(client, chat_id: int, message_id: int, force: bool = Fa
         async with _get_msg_refresh_lock(key):
             if now - _msg_last_force.get(key, 0) < _MSG_REFRESH_MIN_INTERVAL:
                 entry = _msg_cache.get(key)
-                if entry:
+                # If the cached Message is the dead one that produced the
+                # FILE_REFERENCE error, a throttled return would hand workers
+                # the same broken reference forever. Refresh for real instead.
+                if entry and key not in _msg_poisoned:
                     return entry[1]
             _msg_last_force[key] = now
+            _msg_poisoned.discard(key)
             msg = await client.get_messages(chat_id, message_id)
             _msg_cache[key] = (time.monotonic(), msg)
             _prune_msg_state()
@@ -1109,6 +1123,25 @@ async def parallel_stream_generator(
     _forward_stream = {"chat_id": chat_id, "results": results, "total_chunks": total_chunks, "updated_at": time.monotonic()}
     _forward_streams[message_id] = _forward_stream
 
+    async def _resolve_chunk_now(chunk_idx: int, data: bytes) -> bool:
+        """Resolve a chunk future, acquiring a backpressure permit ONLY when we
+        actually transition it not-done → done. Re-fetched chunks that another
+        attempt already resolved (batch retries after FileReferenceExpired etc.)
+        skip the acquire so every permit stays paired with a yield-loop release;
+        otherwise refetch storms silently drain the in-flight budget."""
+        if chunk_idx not in results:
+            return False
+        future = results[chunk_idx]
+        if future.done():
+            return False
+        await _backpressure.acquire()
+        try:
+            future.set_result(data)
+            return True
+        except asyncio.InvalidStateError:
+            _backpressure.release()
+            return False
+
     # Keep this movie alive on disk while it is streaming (TTL counts from the
     # last touch, i.e. "30 min after the active stream ends"), and start the
     # ahead-prefetcher that fills RAM + disk before the player asks.
@@ -1222,10 +1255,7 @@ async def parallel_stream_generator(
                         data = bytes(part)
                         video_cache.put(current, data)
                         _schedule_disk_write(chat_id, message_id, current, data)
-                        if not results[current].done():
-                            results[current].set_result(data)
-                        # Backpressure: wait until yield loop frees a slot
-                        await _backpressure.acquire()
+                        await _resolve_chunk_now(current, data)
                         current += 1
                         last_progress = time.perf_counter()
             except asyncio.TimeoutError:
@@ -1240,7 +1270,7 @@ async def parallel_stream_generator(
             logger.warning("Slow batch %d-%d: %.1fs (bot %d)", batch_start, batch_end, elapsed, getattr(cl, 'pool_index', '?'))
         return current - 1 == batch_end
 
-    async def _fetch_one(chunk_offset, cl, msg, sem, timeout=None, backpressure=None):
+    async def _fetch_one(chunk_offset, cl, msg, sem, timeout=None):
         """Fetch a single chunk, forward-caching it on success. Stops after timeout."""
         if timeout is None:
             timeout = STREAM_CHUNK_TIMEOUT_S
@@ -1260,7 +1290,6 @@ async def parallel_stream_generator(
                 data = bytes(d)
                 video_cache.put(chunk_offset, data)
                 _schedule_disk_write(chat_id, message_id, chunk_offset, data)
-                if backpressure: await backpressure.acquire()
                 return data
             except asyncio.TimeoutError:
                 logger.warning("Chunk %d timed out after %.0fs", chunk_offset, timeout)
@@ -1323,6 +1352,7 @@ async def parallel_stream_generator(
                         batch_ok = await _fetch_batch(batch_start, batch_end, client, local_msg, semaphore)
                     except (FileReferenceInvalid, FileReferenceExpired):
                         logger.warning("Bot %d: batch file reference expired, re-fetching message", c_idx)
+                        _mark_msg_poisoned(client, chat_id, message_id)
                         try:
                             local_msg = await _fetch_message(client, chat_id, message_id, force=True)
                             batch_ok = await _fetch_batch(batch_start, batch_end, client, local_msg, semaphore)
@@ -1360,13 +1390,13 @@ async def parallel_stream_generator(
                         if chunk_offset not in results or results[chunk_offset].done():
                             continue
                         try:
-                            chunk_data = await _fetch_one(chunk_offset, client, local_msg, semaphore, backpressure=_backpressure)
+                            chunk_data = await _fetch_one(chunk_offset, client, local_msg, semaphore)
                             if chunk_data is not None:
-                                if not results[chunk_offset].done():
-                                    results[chunk_offset].set_result(chunk_data)
+                                await _resolve_chunk_now(chunk_offset, chunk_data)
                                 continue
                         except (FileReferenceInvalid, FileReferenceExpired):
                             logger.warning("Bot %d: file reference expired for chunk %d", c_idx, chunk_offset)
+                            _mark_msg_poisoned(client, chat_id, message_id)
                             try:
                                 local_msg = await _fetch_message(client, chat_id, message_id, force=True)
                                 async with semaphore:
@@ -1375,9 +1405,7 @@ async def parallel_stream_generator(
                                         d.extend(part)
                                 data = bytes(d)
                                 video_cache.put(chunk_offset, data)
-                                await _backpressure.acquire()
-                                if not results[chunk_offset].done():
-                                    results[chunk_offset].set_result(data)
+                                await _resolve_chunk_now(chunk_offset, data)
                                 continue
                             except Exception as e2:
                                 logger.error("Bot %d failed chunk %d after re-fetch: %s", c_idx, chunk_offset, e2)
@@ -1393,9 +1421,7 @@ async def parallel_stream_generator(
                                                 d.extend(part)
                                         data = bytes(d)
                                         video_cache.put(chunk_offset, data)
-                                        await _backpressure.acquire()
-                                        if not results[chunk_offset].done():
-                                            results[chunk_offset].set_result(data)
+                                        await _resolve_chunk_now(chunk_offset, data)
                                         continue
                                     except Exception as e2:
                                         logger.error("Bot %d failed chunk %d after reconnect: %s", c_idx, chunk_offset, e2)
@@ -1414,9 +1440,7 @@ async def parallel_stream_generator(
                                                 d.extend(part)
                                         data = bytes(d)
                                         video_cache.put(chunk_offset, data)
-                                        await _backpressure.acquire()
-                                        if not results[chunk_offset].done():
-                                            results[chunk_offset].set_result(data)
+                                        await _resolve_chunk_now(chunk_offset, data)
                                         continue
                                     except Exception as e2:
                                         logger.error("Bot %d failed chunk %d after refresh: %s", c_idx, chunk_offset, e2)
@@ -1458,7 +1482,7 @@ async def parallel_stream_generator(
                 fmsg = await _fetch_message(fclient, chat_id, message_id)
                 if not fmsg:
                     return None
-                return await _fetch_one(chunk_idx, fclient, fmsg, fsem, backpressure=_backpressure)
+                return await _fetch_one(chunk_idx, fclient, fmsg, fsem)
         except ClientPoolEmpty:
             return None
         except Exception as e:

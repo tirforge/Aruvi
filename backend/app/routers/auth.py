@@ -6,10 +6,10 @@ import time
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 from ..database import get_db
-from ..models import User, LoginCode
+from ..models import User, LoginCode, RefreshSession
 from ..rate_limit import limiter
 from ..schemas import (
     Token,
@@ -26,6 +26,7 @@ from ..auth import (
     create_refresh_token,
     verify_token_payload,
     get_current_user,
+    REFRESH_TOKEN_DURATION,
 )
 from ..telegram import tg_client
 
@@ -69,7 +70,13 @@ async def refresh_token(
     request: RefreshTokenRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Refresh access token using refresh token."""
+    """Refresh access token using refresh token.
+
+    Refresh tokens are single-use and rotated: every refresh records the new
+    token's hash in ``refresh_sessions`` and removes the old one. A rotated or
+    replayed token no longer matches any stored session, so it dies immediately
+    instead of remaining valid for its full lifetime.
+    """
     payload = verify_token_payload(request.refresh_token, token_type="refresh")
     telegram_id = int(payload.get("sub")) if payload and payload.get("sub") else None
     token_version = payload.get("ver") if payload else None
@@ -89,9 +96,34 @@ async def refresh_token(
     if token_version is not None and token_version < user.auth_version:
         raise HTTPException(status_code=401, detail="Refresh token has been invalidated")
     
-    # Generate new tokens
+    from hashlib import sha256
+    presented_hash = sha256(request.refresh_token.encode()).hexdigest()
+    session_result = await db.execute(
+        select(RefreshSession).where(
+            RefreshSession.token_hash == presented_hash,
+            RefreshSession.user_id == user.id,
+        )
+    )
+    session = session_result.scalar_one_or_none()
+    if session is None:
+        # Replayed, rotated, or forged token — reject it. This is also the
+        # "logout-all" path at the session level (their stored sessions were
+        # deleted or never created).
+        raise HTTPException(status_code=401, detail="Refresh token has been invalidated")
+    if session.expires_at < datetime.now(timezone.utc).replace(tzinfo=None):
+        await db.delete(session)
+        await db.commit()
+        raise HTTPException(status_code=401, detail="Refresh token has expired")
+    
+    # Rotate: old session is consumed, new one replaces it.
     new_access_token = create_access_token(telegram_id, version=user.auth_version)
     new_refresh_token = create_refresh_token(telegram_id, version=user.auth_version)
+    session.token_hash = sha256(new_refresh_token.encode()).hexdigest()
+    session.last_used_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    session.expires_at = (
+        datetime.now(timezone.utc).replace(tzinfo=None) + REFRESH_TOKEN_DURATION
+    )
+    await db.commit()
     
     return Token(
         access_token=new_access_token,
@@ -107,6 +139,11 @@ async def logout_all(
     """Invalidate all active sessions for the current user."""
     current_user.auth_version += 1
     db.add(current_user)
+    # Delete all persisted refresh sessions so they can't be reused even if
+    # the access token's version check were somehow bypassed.
+    await db.execute(
+        delete(RefreshSession).where(RefreshSession.user_id == current_user.id)
+    )
     await db.commit()
     return {"message": "All sessions have been invalidated"}
 
@@ -248,6 +285,12 @@ async def verify_login_code(
     # Generate tokens
     access_token = create_access_token(user.telegram_id, version=user.auth_version)
     refresh_token = create_refresh_token(user.telegram_id, version=user.auth_version)
+    from hashlib import sha256
+    db.add(RefreshSession(
+        user_id=user.id,
+        token_hash=sha256(refresh_token.encode()).hexdigest(),
+        expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + REFRESH_TOKEN_DURATION,
+    ))
     
     # Delete code after successful login
     await db.delete(login_code)

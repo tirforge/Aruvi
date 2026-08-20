@@ -170,8 +170,10 @@ async def start_command(client, message: Message):
             login_code = result2.scalar_one_or_none()
             if login_code and login_code.telegram_id:
                 await message.reply("⚠️ This code has already been used.")
-            else:
+            elif login_code:
                 await message.reply("❌ This code has expired.")
+            else:
+                await message.reply("❌ Invalid login code. Use /login on your TV app to generate a fresh one.")
 
     from pyrogram.errors import ButtonUrlInvalid
     try:
@@ -1520,7 +1522,7 @@ async def handle_callback(client, callback: CallbackQuery):
             file_size = file.file_size
             file_type = file.file_type
 
-        token = create_download_token(callback.from_user.id)
+        token = create_download_token(callback.from_user.id, file_id)
         from urllib.parse import quote
         download_url = f"{settings.web_base_url}/api/stream/dl?id={file_id}&token={quote(token, safe='')}"
 

@@ -267,10 +267,12 @@ async def _warmup_messages():
             for mid in mids:
                 try:
                     msg = await client.get_messages(channel_id, mid)
-                    if msg and msg.id not in _msg_cache:
-                        _msg_cache[msg.id] = (time.monotonic(), msg)
-                        count += 1
-                        _msg_cache_evict()
+                    if msg:
+                        key = (getattr(client, "pool_index", 0), msg.id)
+                        if key not in _msg_cache:
+                            _msg_cache[key] = (time.monotonic(), msg)
+                            count += 1
+                            _msg_cache_evict()
                 except Exception:
                     pass
             return count
@@ -489,16 +491,21 @@ async def stop_telegram_client():
 
 # ── Message cache ────────────────────────────────────────────────────
 
-_msg_cache: dict[int, tuple[float, Message]] = {}
+_msg_cache: dict[tuple[int, int], tuple[float, Message]] = {}
 MSG_CACHE_TTL = 3600  # 1 hour (messages in storage channel don't change)
 _MSG_CACHE_MAX = 5000
+
+def _msg_cache_key(message_id: int) -> tuple[int, int]:
+    """Cache is keyed per-client (pool_index) so we never hand a Message
+    fetched by helper bot N to a stream running on tg_client (bot 0)."""
+    return (getattr(tg_client, "pool_index", 0), message_id)
 
 def _prune_msg_cache():
     """Remove TTL-expired entries proactively."""
     now = time.monotonic()
-    stale = [mid for mid, (ts, _) in _msg_cache.items() if now - ts > MSG_CACHE_TTL]
-    for mid in stale:
-        _msg_cache.pop(mid, None)
+    stale = [key for key, (ts, _) in _msg_cache.items() if now - ts > MSG_CACHE_TTL]
+    for key in stale:
+        _msg_cache.pop(key, None)
 
 def _msg_cache_evict():
     """Remove oldest entries if cache exceeds max size."""
@@ -507,29 +514,31 @@ def _msg_cache_evict():
     # Sort by timestamp and remove oldest 20%
     by_age = sorted(_msg_cache.items(), key=lambda x: x[1][0])
     to_remove = len(_msg_cache) - int(_MSG_CACHE_MAX * 0.8)
-    for mid, _ in by_age[:to_remove]:
-        _msg_cache.pop(mid, None)
+    for key, _ in by_age[:to_remove]:
+        _msg_cache.pop(key, None)
 
 def invalidate_message_cache(message_id: int):
-    _msg_cache.pop(message_id, None)
+    for key in [k for k in _msg_cache if k[1] == message_id]:
+        _msg_cache.pop(key, None)
 
 def invalidate_message_cache_batch(message_ids: list[int]):
     for mid in message_ids:
-        _msg_cache.pop(mid, None)
+        invalidate_message_cache(mid)
 
 # ── convenience helpers (always use tg_client) ───────────────────────
 
 async def get_message_from_channel(message_id: int) -> Message:
     now = time.monotonic()
-    if message_id in _msg_cache:
-        ts, msg = _msg_cache[message_id]
+    key = _msg_cache_key(message_id)
+    if key in _msg_cache:
+        ts, msg = _msg_cache[key]
         if now - ts < MSG_CACHE_TTL:
             return msg
     msg = await tg_client.get_messages(
         settings.telegram_storage_channel_id,
         message_id,
     )
-    _msg_cache[message_id] = (now, msg)
+    _msg_cache[key] = (now, msg)
     _msg_cache_evict()
     return msg
 

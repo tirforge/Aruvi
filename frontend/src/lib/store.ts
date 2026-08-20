@@ -4,10 +4,6 @@
 import { create } from 'zustand';
 import { TelegramFile, Folder } from './api';
 
-// Cache of the last file list passed to setSelectedFiles, so selection
-// mutators can keep the derived selectedFiles array in sync.
-let knownFiles: TelegramFile[] = [];
-
 interface AppState {
     // Current navigation
     currentFolderId: number | null;
@@ -16,6 +12,10 @@ interface AppState {
     // Breadcrumb path
     breadcrumbs: Array<{ id: number | null; name: string }>;
     setBreadcrumbs: (breadcrumbs: Array<{ id: number | null; name: string }>) => void;
+
+    // The currently visible file list (used to derive selectedFiles from ids).
+    visibleFiles: TelegramFile[];
+    setVisibleFiles: (files: TelegramFile[]) => void;
 
     // Selection
     selectedFileIds: Set<number>;
@@ -95,8 +95,6 @@ export const useAppStore = create<AppState>((set) => ({
     // Navigation
     currentFolderId: null,
     setCurrentFolderId: (id) => set({ currentFolderId: id }),
-
-    // Breadcrumbs
     breadcrumbs: [{ id: null, name: 'My Files' }],
     setBreadcrumbs: (breadcrumbs) => set({ breadcrumbs }),
 
@@ -111,6 +109,8 @@ export const useAppStore = create<AppState>((set) => ({
     // Selection
     selectedFileIds: new Set(),
     selectedFolderIds: new Set(),
+    visibleFiles: [],
+    setVisibleFiles: (files) => set({ visibleFiles: files }),
     selectFile: (id, multi = false) => set((state) => {
         if (multi) {
             const newSet = new Set(state.selectedFileIds);
@@ -118,13 +118,13 @@ export const useAppStore = create<AppState>((set) => ({
             else newSet.add(id);
             return {
                 selectedFileIds: newSet,
-                selectedFiles: knownFiles.filter((f) => newSet.has(f.id)),
+                selectedFiles: state.visibleFiles.filter((f) => newSet.has(f.id)),
             };
         }
         return {
             selectedFileIds: new Set([id]),
             selectedFolderIds: new Set(),
-            selectedFiles: knownFiles.filter((f) => f.id === id),
+            selectedFiles: state.visibleFiles.filter((f) => f.id === id),
         };
     }),
     deselectFile: (id) => set((state) => {
@@ -154,11 +154,11 @@ export const useAppStore = create<AppState>((set) => ({
         return { selectedFolderIds: newSet };
     }),
     clearSelection: () => set({ selectedFileIds: new Set(), selectedFolderIds: new Set(), selectedFiles: [] }),
-    selectAll: (fileIds, folderIds = []) => set({
+    selectAll: (fileIds, folderIds = []) => set((state) => ({
         selectedFileIds: new Set(fileIds),
         selectedFolderIds: new Set(folderIds),
-        selectedFiles: knownFiles.filter((f) => fileIds.includes(f.id)),
-    }),
+        selectedFiles: state.visibleFiles.filter((f) => fileIds.includes(f.id)),
+    })),
 
     // View mode
     viewMode: 'grid',
@@ -178,10 +178,7 @@ export const useAppStore = create<AppState>((set) => ({
     setMoveItems: (items) => set({ moveItems: items }),
     setMoveFiles: (files) => set({ moveItems: { files, folders: [] } }),
     selectedFiles: [],
-    setSelectedFiles: (files) => {
-        knownFiles = files;
-        set({ selectedFiles: files });
-    },
+    setSelectedFiles: (files) => set({ selectedFiles: files }),
 
     showNewFolder: false,
     setShowNewFolder: (show) => set({ showNewFolder: show }),

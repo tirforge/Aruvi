@@ -53,7 +53,8 @@ export default function FileBrowser() {
         setSelectionBox,
         activeSection,
         addToast,
-        setSelectedFiles
+        setSelectedFiles,
+        setVisibleFiles
     } = useAppStore();
 
     // Pagination state
@@ -75,7 +76,7 @@ export default function FileBrowser() {
     }, [searchInput, setSearchQuery]);
 
     // Data Fetching
-    const { data: filesList, isLoading: filesLoading, refetch: refetchFiles } = useFiles(currentFolderId, fileTypeFilter || undefined, searchQuery || undefined, page);
+    const { data: filesList, isLoading: filesLoading, isError: filesError, refetch: refetchFiles } = useFiles(currentFolderId, fileTypeFilter || undefined, searchQuery || undefined, page);
     const { data: recentFiles, isLoading: recentLoading, refetch: refetchRecent } = useRecentFiles(50);
     const { data: cwFiles, isLoading: cwLoading, refetch: refetchCW } = useContinueWatching(50);
     
@@ -437,11 +438,17 @@ export default function FileBrowser() {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [
         previewFile, showNewFolder, moveItems, deleteConfirm, 
-        selectedFileIds, displayFiles, breadcrumbs, clipboard, 
+        selectedFileIds, selectedFolderIds, displayFiles, breadcrumbs, clipboard, 
         currentFolderId, handlePaste, handleRefresh,
         setPreviewFile, setShowNewFolder, setMoveItems, setDeleteConfirm, 
         clearSelection, selectAll, setRenameFile, navigateToBreadcrumb, setClipboard, folders, showFolders
     ]);
+
+    // Keep visibleFiles in sync so store selection mutators can derive the
+    // full selected file objects (not just the filtered subset).
+    useEffect(() => {
+        if (displayFiles) setVisibleFiles(displayFiles);
+    }, [displayFiles, setVisibleFiles]);
 
     // Keep selectedFiles in sync with selectedFileIds
     useEffect(() => {
@@ -481,7 +488,16 @@ export default function FileBrowser() {
     // For files section, replace on page 1 (folder/filter/search change), append with dedupe for later pages.
     // Runs after the reset effect above so a cached page-1 for the new key replaces instead of being wiped.
     useEffect(() => {
-        if (filesList && activeSection === 'files') {
+        if (activeSection !== 'files') return;
+        // A failed page fetch (server error, network drop) must not leave the
+        // scroll guards stuck — otherwise infinite scroll deadlocks forever and
+        // the UI silently falls into the empty state. Reset them on error too.
+        if (filesError) {
+            pendingResetRef.current = false;
+            pageLoadingRef.current = false;
+            return;
+        }
+        if (filesList) {
             if (filesList.page <= 1) pendingResetRef.current = false;
             pageLoadingRef.current = false;
             setAllFiles(prev => {
@@ -492,7 +508,7 @@ export default function FileBrowser() {
             });
             setHasMore(filesList.page * filesList.per_page < filesList.total);
         }
-    }, [filesList, activeSection]);
+    }, [filesList, activeSection, filesError]);
 
     if (showAdminPanel) {
         return <AdminPanel onBack={() => setShowAdminPanel(false)} />;

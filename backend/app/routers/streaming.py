@@ -37,9 +37,20 @@ async def _user_from_download_token(request: Request, file_id: int, db: AsyncSes
     if not payload:
         return None
     claimed = payload.get("file_id")
-    if claimed is not None and int(claimed) != file_id:
+    if claimed is None:
         raise HTTPException(status_code=403, detail="Token not valid for this file")
-    tid = int(payload["sub"])
+    try:
+        if int(claimed) != file_id:
+            raise HTTPException(status_code=403, detail="Token not valid for this file")
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=403, detail="Token not valid for this file")
+    sub = payload.get("sub")
+    if sub is None:
+        return None
+    try:
+        tid = int(sub)
+    except (TypeError, ValueError):
+        return None
     token_version = payload.get("ver")
     result = await db.execute(select(User).where(User.telegram_id == tid))
     user = result.scalar_one_or_none()
@@ -49,25 +60,38 @@ async def _user_from_download_token(request: Request, file_id: int, db: AsyncSes
 
 
 def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
-    """Parse HTTP Range header for video seeking support."""
-    if not range_header:
-        return 0, file_size - 1
+    """Parse HTTP Range header for video seeking support.
 
-    # Suffix range: bytes=-500 (last N bytes)
-    suffix_match = re.match(r'bytes=-(\d+)', range_header)
-    if suffix_match:
-        suffix_len = int(suffix_match.group(1))
-        start = max(0, file_size - suffix_len)
-        return start, file_size - 1
+    For a zero-byte file there is no body to satisfy, so the caller answers
+    ``0, -1`` + a 200 against a 0 length instead of a bogus 416. Multipart
+    ranges (``bytes=a-b,c-d``) are rejected with ``None`` — the caller turns
+    that into a 416 rather than silently serving only the first range.
+    """
+    if range_header:
+        if "," in range_header:
+            return None
+        # Suffix range: bytes=-500 (last N bytes)
+        suffix_match = re.match(r'bytes=-(\d+)', range_header)
+        if suffix_match:
+            suffix_len = int(suffix_match.group(1))
+            if file_size == 0:
+                return 0, -1
+            start = max(0, file_size - suffix_len)
+            return start, file_size - 1
 
-    match = re.match(r'bytes=(\d+)-(\d*)', range_header)
-    if not match:
-        return 0, file_size - 1
+        match = re.match(r'bytes=(\d+)-(\d*)', range_header)
+        if not match:
+            return 0, file_size - 1
 
-    start = int(match.group(1))
-    end = int(match.group(2)) if match.group(2) else file_size - 1
+        start = int(match.group(1))
+        end = int(match.group(2)) if match.group(2) else file_size - 1
+        if file_size == 0:
+            return 0, -1
+        return start, min(end, file_size - 1)
 
-    return start, min(end, file_size - 1)
+    if file_size == 0:
+        return 0, -1
+    return 0, file_size - 1
 
 
 @router.get("/debug")
@@ -283,6 +307,37 @@ async def stream_file(
     # Parse range header
     range_header = request.headers.get("range")
     from_bytes, until_bytes = parse_range_header(range_header, file_size)
+
+    # Validate range
+    if from_bytes is None:
+        # Multipart ranges (bytes=a-b,c-d) aren't supported; tell the client
+        # plainly instead of silently serving only the first range as a 206.
+        return Response(
+            status_code=416,
+            content="416: Range not satisfiable",
+            headers={"Content-Range": f"bytes */{file_size}"},
+        )
+
+    if until_bytes == -1:
+        # Zero-byte file: satisfy a plain GET with an empty 200 body; a Range
+        # on a zero-byte file can't be satisfied per RFC 7233 → 416.
+        if range_header:
+            # Prefer staying consistent — send the 206 empty body variant when
+            # range is satisfiable, otherwise 416. Empty body → 206/200 equally
+            # fine; use 416 to match the RFC.
+            return Response(
+                status_code=416,
+                content="416: Range not satisfiable",
+                headers={"Content-Range": "bytes */0"},
+            )
+        headers = {
+            "Content-Type": file.mime_type or "application/octet-stream",
+            "Content-Disposition": "attachment" if download else "inline",
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "no-store" if download else "private, max-age=300",
+            "Content-Length": "0",
+        }
+        return Response(status_code=200, content=b"", headers=headers)
 
     # Validate range
     if (until_bytes > file_size) or (from_bytes < 0) or (from_bytes > until_bytes):

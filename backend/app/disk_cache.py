@@ -9,6 +9,7 @@ Policy:  directories expire DISK_CACHE_TTL seconds after the LAST ACTIVITY
          Set DISK_CACHE_ENABLED=0 to disable (all methods become no-ops).
 """
 import os
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -139,17 +140,25 @@ class DiskChunkCache:
 
     def put(self, chat_id: int, message_id: int, chunk_idx: int, data: bytes):
         """Write-through with atomic replace so a concurrent reader never sees
-        a partially-written chunk (would corrupt the stream)."""
+        a partially-written chunk (would corrupt the stream). Each writer uses
+        its own unique temp file so simultaneous puts of the same chunk can't
+        tear each other's data before the replace."""
         if not ENABLED or not data:
             return
         try:
             d = self._movie_dir(chat_id, message_id)
             d.mkdir(parents=True, exist_ok=True)
-            tmp = d / f"{chunk_idx}.bin.tmp"
             final = d / f"{chunk_idx}.bin"
-            with open(tmp, "wb") as f:
-                f.write(data)
-            os.replace(tmp, final)
+            fd, tmp = tempfile.mkstemp(prefix=f"{chunk_idx}.", suffix=".tmp", dir=d)
+            try:
+                with os.fdopen(fd, "wb") as f:
+                    f.write(data)
+                os.replace(tmp, final)
+            finally:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
         except OSError:
             pass
         self.touch(chat_id, message_id)

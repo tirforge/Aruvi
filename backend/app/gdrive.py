@@ -237,6 +237,15 @@ MAX_GDRIVE_FILE = 4 * 1024 * 1024 * 1024
 _GDRIVE_DOWNLOAD_SEM = asyncio.Semaphore(30)
 
 
+def _raw_write(fd: int, offset: int, data: bytes) -> None:
+    """pwrite + FADV_DONTNEED, run on a worker thread by callers."""
+    os.pwrite(fd, data, offset)
+    try:
+        os.posix_fadvise(fd, offset, len(data), os.POSIX_FADV_DONTNEED)
+    except OSError:
+        pass
+
+
 async def upload_streaming(
     token_dict: dict,
     msg: "Message",
@@ -275,7 +284,11 @@ async def upload_streaming(
         last_ts = 0
         dlerr = None
         lock = asyncio.Lock()
-        fd = os.open(tmp, os.O_RDWR | os.O_DSYNC)
+        # No O_DSYNC: syncing every 1MB pwrite to disk freezes the event loop
+        # (and the whole service) for the duration of the task-gather. Page
+        # cache + one final fsync below gives the same durability without the
+        # per-chunk stall.
+        fd = os.open(tmp, os.O_RDWR)
 
         # Split file into 1MB slots — each slot is one _byte_accurate_file_stream call
         SLOT_SIZE = 1024 * 1024
@@ -300,8 +313,11 @@ async def upload_streaming(
                             async for offset, chunk in _byte_accurate_file_stream(
                                 client, msg, total, slot_start, slot_end
                             ):
-                                os.pwrite(fd, chunk, offset)
-                                os.posix_fadvise(fd, offset, len(chunk), os.POSIX_FADV_DONTNEED)
+                                # Offload blocking pwrite/fadvise to a thread —
+                                # these syscalls must never run on the event loop.
+                                await asyncio.to_thread(
+                                    _raw_write, fd, offset, chunk
+                                )
                                 async with lock:
                                     downloaded += len(chunk)
                                     now = time.monotonic()
@@ -322,10 +338,38 @@ async def upload_streaming(
             c_idx = helper_clients[i % len(helper_clients)].pool_index
             tasks.append(asyncio.create_task(_download_slot(slot_start, c_idx)))
 
+        async def _abort_siblings(on_err: BaseException):
+            # Stop remaining slots the moment one fails — otherwise the other
+            # ~N slots keep downloading a multi-GB file that will be thrown away.
+            nonlocal dlerr, tasks
+            if dlerr is None:
+                dlerr = on_err
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+            try:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            finally:
+                tasks = []
+
         try:
             await asyncio.gather(*tasks)
+        except asyncio.CancelledError:
+            # A caller cancelled the whole upload: stop slots cleanly, re-raise.
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+        except Exception as e:
+            await _abort_siblings(e)
+            raise
         finally:
             if fd is not None:
+                try:
+                    os.fsync(fd)  # single durable flush after all slots
+                except OSError:
+                    pass
                 os.close(fd)
 
         if dlerr:
@@ -362,7 +406,7 @@ async def upload_streaming(
             resp = None
             with open(tmp, "rb") as f:
                 while True:
-                    chunk = f.read(CHUNK_SIZE)
+                    chunk = await asyncio.to_thread(f.read, CHUNK_SIZE)
                     if not chunk:
                         break
                     start = uploaded
