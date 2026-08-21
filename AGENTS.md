@@ -82,10 +82,10 @@ npx tsc --noEmit && npx eslint . --ext ts,tsx --max-warnings 0 && npx vite build
 
 ## Architecture Cheat Sheet
 
-- **RAM cache** = 200 MB/video (hot, lost on restart)
+- **RAM cache** = 300 MB/video (hot, lost on restart)
 - **Disk cache** = 8 GB total / 2 GB/video (persists 30 min after last use)
 - **11 bots** = 1 main + 10 helpers (round-robin chunk downloads)
-- **Prefetcher** = silently downloads 128 MB ahead while you watch
+- **Prefetcher** = silently downloads ~192 MB ahead while you watch
 - **Backpressure** = permits acquired ONLY on successful chunk delivery
 - **Refresh tokens rotate** = replay = 401; server stores SHA256 hash only
 - **Download tokens bind to file_id** = prevents cross-user access

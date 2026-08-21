@@ -73,10 +73,110 @@ They all connect to the same storage channel. Round-robin load balancing.
 
 | Layer | Size | Speed | Persists? |
 |-------|------|-------|-----------|
-| **RAM (Hot)** | 200 MB per video | ~Memory speed | ❌ Lost on restart |
+| **RAM (Hot)** | 300 MB per video (`STREAM_RAM_PER_VIDEO_MB`) | ~Memory speed | ❌ Lost on restart |
 | **Disk (Cold)** | 8 GB total / 2 GB per video | ~SSD speed | ✅ 30 min after last use |
 
-**Prefetcher:** While you watch, we silently download the next 128 MB ahead of you — so seeking is instant.
+**Prefetcher:** While you watch, we silently download the next ~192 MB ahead of you — so seeking is instant.
+
+---
+
+## Request Lifecycle (What Happens on One API Call)
+
+```
+GET /api/files/42
+     │
+     ▼
+main.py (FastAPI app)
+     │  CORS → exception handlers
+     ▼
+routers/files.py @router.get("/{file_id}")
+     │  Depends(get_current_user)      ← JWT check (15-min token)
+     │  Depends(get_db)                ← AsyncSession
+     ▼
+models.py (SQLAlchemy async)
+     │  SELECT * FROM files WHERE id=42 AND user_id=<you>
+     ▼
+schemas.py (Pydantic)
+     │  FileResponse model validates output
+     ▼
+JSON back to client
+```
+
+Streaming requests skip JWT entirely — they use the 30-day download token in the query string (see [auth.md](auth.md)).
+
+---
+
+## Component Inventory
+
+| Module | Role | Key Exports |
+|--------|------|-------------|
+| `main.py` | App assembly, CORS, startup/shutdown | `app` |
+| `config.py` | Pydantic Settings, all env vars | `get_settings()` |
+| `database.py` | Async engine + session factory | `get_db`, `engine` |
+| `models.py` | 5 SQLAlchemy tables | `User`, `File`, `Folder`, ... |
+| `auth.py` | JWT mint/verify, token factories | `create_access_token`, `create_download_token` |
+| `streaming.py` | Cache tiers, workers, prefetcher, range logic | `_cache_manager`, `_backpressure` |
+| `telegram.py` | 11-bot pool, chunk fetch, message cache | `get_client`, `stream_media` |
+| `disk_cache.py` | LRU disk tier, atomic writes | `put`, `get`, `touch` |
+| `patch.py` | Telethon client wrapper + listener registry | `resolve_listener`, `cancel_listener` |
+| `bot.py` | Command handlers (/start codes, admin) | router registration |
+| `grabber.py` | Movie search across source channels | `search_movie` |
+| `subtitles.py` (provider logic) | Multi-provider subtitle search | provider functions |
+| `gdrive.py` | Google Drive OAuth + import | auth URL builders |
+| `routers/*` | 11 HTTP routers (see [api.md](api.md)) | `router` |
+
+---
+
+## Configuration Reference (defaults from code)
+
+### Streaming & Cache
+| Env Var | Default | Meaning |
+|---------|---------|---------|
+| `CHUNK_SIZE` | 1 MB (fixed) | Telegram fetch granularity |
+| `STREAM_RAM_PER_VIDEO_MB` | 300 | RAM hot-cache cap per video |
+| `STREAM_INFLIGHT_MB` | 200 | Un-backlogged in-flight data per stream |
+| `STREAM_MAX_CONCURRENT` | 4 | Worker semaphore per stream |
+| `STREAM_PREFETCH_AHEAD_MB` | 192 | How far ahead to prefetch |
+| `STREAM_BATCH_SIZE` | 10 | Chunks per `stream_media` batch |
+| `DISK_CACHE_DIR` | `./data/vcache` | Disk tier location |
+| `DISK_CACHE_TTL` | 1800 s | Dir expires 30 min after last activity |
+| `DISK_CACHE_MAX_BYTES` | 8 GB | Total disk tier cap |
+| `DISK_CACHE_PER_VIDEO_BYTES` | 2 GB | Per-video disk cap |
+| `DISK_CACHE_ENABLED` | 1 | Set 0 to disable disk tier |
+
+### Telegram Pool
+| Env Var | Default | Meaning |
+|---------|---------|---------|
+| `TELEGRAM_CLIENT_CONCURRENCY` | 5 | Per-bot download semaphore |
+| `TELEGRAM_HELPER_BOT_TOKENS` | — | Comma-separated; 10 helpers expected |
+
+### Auth
+| Env Var | Default | Meaning |
+|---------|---------|---------|
+| `JWT_SECRET` | required | Signing key (32+ chars) |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | 15 | Access JWT TTL |
+| `REFRESH_TOKEN_DURATION` | 60 min | Refresh TTL (rotates each use) |
+| `DOWNLOAD_TOKEN_DURATION` | 30 days | Streaming URL token TTL |
+
+---
+
+## Upload Flow (How Files Get In)
+
+```
+User sends file to bot OR grabber imports from source channel
+        │
+        ▼
+Bot uploads to STORAGE CHANNEL (private, -100...)
+        │  message_id returned
+        ▼
+INSERT INTO files (channel_message_id, user_id, ...)
+        │
+        ▼
+File appears in library — nothing is copied.
+Streaming always reads straight from the channel via message_id.
+```
+
+**Key insight:** Aruvi never stores video bytes itself. The DB row is just a pointer into the Telegram channel.
 
 ---
 

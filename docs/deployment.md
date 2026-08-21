@@ -133,10 +133,15 @@ grep -E "Client.*start|FLOOD_WAIT|AuthKey|FILE_REFERENCE" /home/container/grabbe
 | Variable | Default | What It Does |
 |----------|---------|--------------|
 | `TELEGRAM_CLIENT_CONCURRENCY` | 5 | Per-bot download semaphore |
-| `STREAM_MAX_CONCURRENT` | 3 | Workers per stream (2 user + 1 prefetch) |
+| `STREAM_MAX_CONCURRENT` | 4 | Worker semaphore per stream |
+| `STREAM_BATCH_SIZE` | 10 | Chunks per Telegram batch fetch |
+| `STREAM_PREFETCH_AHEAD_MB` | 192 | How far ahead to prefetch |
 | `STREAM_PREFETCH_CONCURRENCY` | 1 | Bots used for prefetch |
 | `STREAM_INFLIGHT_MB` | 200 | Unbacklogged data cap per stream |
-| `STREAM_RAM_PER_VIDEO_MB` | 200 | RAM hot cache per video |
+| `STREAM_RAM_PER_VIDEO_MB` | 300 | RAM hot cache per video |
+| `DISK_CACHE_TTL` | 1800 | Seconds a cache dir lives after last use |
+| `DISK_CACHE_MAX_BYTES` | 8 GB | Total disk tier cap |
+| `DISK_CACHE_PER_VIDEO_BYTES` | 2 GB | Per-video disk cap |
 
 Raise `TELEGRAM_CLIENT_CONCURRENCY` for more parallel chunk fetches; watch for `Batch ... timed out` and RAM.
 

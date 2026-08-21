@@ -87,7 +87,7 @@ cp local.properties.example local.properties
 ```
 
 - **11 bots** (1 main + 10 helpers) download chunks in parallel
-- **RAM cache**: 200 MB/video (instant replay)
+- **RAM cache**: 300 MB/video (instant replay)
 - **Disk cache**: 8 GB total / 2 GB/video (survives restarts)
 - **Refresh tokens rotate** — replay attacks impossible
 - **Download tokens bind to file_id** — prevents cross-user access
@@ -101,9 +101,11 @@ See [docs/architecture.md](docs/architecture.md) for the full simple explanation
 | Topic | File |
 |-------|------|
 | Architecture (5 min) | [docs/architecture.md](docs/architecture.md) |
+| API reference | [docs/api.md](docs/api.md) |
 | Streaming engine | [docs/streaming.md](docs/streaming.md) |
 | Auth & tokens | [docs/auth.md](docs/auth.md) |
 | Database schema | [docs/data-model.md](docs/data-model.md) |
+| Testing | [docs/testing.md](docs/testing.md) |
 | Deploy & runbook | [docs/deployment.md](docs/deployment.md) |
 | Agent cheat sheet | [AGENTS.md](AGENTS.md) |
 
