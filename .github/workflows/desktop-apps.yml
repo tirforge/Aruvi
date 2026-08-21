@@ -57,28 +57,35 @@ jobs:
           ICON="$GITHUB_WORKSPACE/aruvi/frontend/public/logo.png"
           node dist/cli.js "${{ inputs.url }}" --name Aruvi --icon "$ICON" \
             --width 1280 --height 800 --targets deb,appimage
+          # CLI copies artifacts to project root with lowercased names
           mkdir -p output/linux
-          mv Aruvi.deb output/linux/ 2>/dev/null || mv src-tauri/target/release/bundle/deb/*.deb output/linux/
-          mv Aruvi.AppImage output/linux/ 2>/dev/null || mv src-tauri/target/release/bundle/appimage/*.AppImage output/linux/
+          find . -maxdepth 1 \( -iname "*.deb" -o -iname "*.AppImage" \) \
+            ! -path "./output/*" -exec mv {} output/linux/ \;
+          ls -la output/linux
 
-      - name: Build Windows installer (.exe)
+      - name: Build Windows packages (.msi installer + portable .exe)
         if: matrix.platform == 'windows'
         timeout-minutes: 45
         shell: pwsh
         run: |
           $icon = "$env:GITHUB_WORKSPACE\aruvi\frontend\public\logo.png"
           $args = "${{ inputs.url }}", "--name", "Aruvi", "--icon", $icon,
-                  "--width", "1280", "--height", "800", "--targets", "nsis"
+                  "--width", "1280", "--height", "800", "--targets", "x64"
           node dist/cli.js $args
-          New-Item -Path "output\windows" -ItemType Directory -Force
-          $rootExe = Get-ChildItem -Path "." -Filter "Aruvi*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($rootExe) {
-            Move-Item $rootExe.FullName "output\windows\"
-          } else {
-            $nsis = Get-ChildItem -Path "src-tauri\target\release\bundle\nsis" -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-            if (-not $nsis) { Write-Error "No .exe produced"; exit 1 }
-            Move-Item $nsis.FullName "output\windows\"
+          New-Item -Path "output\windows" -ItemType Directory -Force | Out-Null
+          # pake-cli always bundles MSI via WiX and copies it to project root
+          $msi = Get-ChildItem -Path "." -Filter "*.msi" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $msi) {
+            $msi = Get-ChildItem -Path "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi" -Filter "*.msi" -ErrorAction SilentlyContinue | Select-Object -First 1
           }
+          if ($msi) { Move-Item $msi.FullName "output\windows\" } else { Write-Error "No .msi produced"; exit 1 }
+          # Portable single-binary exe straight from the rust build dir
+          $rel = "src-tauri\target\x86_64-pc-windows-msvc\release"
+          $raw = Get-ChildItem -Path $rel -Filter "*aruvi*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($raw) { Copy-Item $raw.FullName "output\windows\Aruvi-portable.exe" }
+          Get-ChildItem -Path $rel -Filter "WebView2Loader.dll" -ErrorAction SilentlyContinue |
+            ForEach-Object { Copy-Item $_.FullName "output\windows\" }
+          Get-ChildItem "output\windows"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
