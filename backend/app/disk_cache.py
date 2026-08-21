@@ -103,7 +103,11 @@ class DiskChunkCache:
                 if not d.is_dir():
                     continue
                 try:
-                    total += sum(e.stat().st_size for e in os.scandir(d.path) if e.is_file())
+                    total += sum(
+                        e.stat().st_size
+                        for e in os.scandir(d.path)
+                        if e.is_file() and not e.name.endswith(".tmp")
+                    )
                 except OSError:
                     continue
         with self._lock:
@@ -181,7 +185,11 @@ class DiskChunkCache:
                 continue
             chat_id, message_id = key
             try:
-                size = sum(f.stat().st_size for f in d.iterdir() if f.is_file())
+                size = sum(
+                    f.stat().st_size
+                    for f in d.iterdir()
+                    if f.is_file() and not f.name.endswith(".tmp")
+                )
             except OSError:
                 continue
             total += size
@@ -191,11 +199,25 @@ class DiskChunkCache:
                 total -= size
             else:
                 entries.append((active_ts, d, size))
+        # Drop activity bookkeeping for dirs that no longer exist so the map
+        # can't grow without bound across many watched videos.
+        with self._lock:
+            self._last_active = {
+                k: ts
+                for k, ts in self._last_active.items()
+                if self._movie_dir(*k).is_dir()
+            }
         # Enforce per-video cap: evict oldest chunks within each movie dir.
+        # .tmp files are excluded — they may be mid-write by a concurrent put,
+        # and unlinking one would only send its writer to the unlink fallback
+        # while corrupting our size accounting.
         for _, d, _ in list(entries):
             try:
-                files = sorted(d.iterdir(), key=lambda p: p.stat().st_mtime)
-                size = sum(f.stat().st_size for f in files if f.is_file())
+                files = sorted(
+                    (f for f in d.iterdir() if f.is_file() and not f.name.endswith(".tmp")),
+                    key=lambda p: p.stat().st_mtime,
+                )
+                size = sum(f.stat().st_size for f in files)
             except OSError:
                 continue
             over = size - DISK_CACHE_PER_VIDEO_BYTES
@@ -218,10 +240,16 @@ class DiskChunkCache:
                 continue
             chat_id, message_id = key
             try:
-                size = sum(f.stat().st_size for f in d.iterdir() if f.is_file())
+                dir_files = [f for f in d.iterdir() if f.is_file()]
+                size = sum(
+                    f.stat().st_size
+                    for f in dir_files
+                    if not f.name.endswith(".tmp")
+                )
             except OSError:
                 continue
-            if size == 0:
+            if size == 0 and not any(f.name.endswith(".tmp") for f in dir_files):
+                # Empty AND no in-flight writes — safe to reclaim the dir.
                 self._remove_dir(d)
                 continue
             total += size

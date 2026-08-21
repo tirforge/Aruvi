@@ -1,3 +1,4 @@
+import asyncio
 import os
 import time
 import logging
@@ -73,16 +74,17 @@ def get_cpu() -> float:
             return 0.0
 
         cores = None
-        raw = _read_int("/sys/fs/cgroup/cpu.max")
-        if raw is not None:
-            if raw < 10**6:
-                cores = raw / 100000
-            else:
-                with open("/sys/fs/cgroup/cpu.max") as f:
-                    parts = f.read().strip().split()
-                q = int(parts[0]) if parts[0] != "max" else os.cpu_count() * 100000
-                p = int(parts[1])
-                cores = q / p
+        # cgroup v2: cpu.max is "<quota> <period>" where quota may be "max"
+        # (unlimited). _read_int can't parse the two-token format, so split it.
+        try:
+            with open("/sys/fs/cgroup/cpu.max") as f:
+                parts = f.read().split()
+            if len(parts) == 2 and parts[0] != "max":
+                q, p = int(parts[0]), int(parts[1])
+                if q > 0 and p > 0:
+                    cores = q / p
+        except (OSError, ValueError):
+            cores = None
         if cores is None:
             cores = _cgroup_v1_cpu_cores()
         if cores is None:
@@ -105,9 +107,9 @@ def get_cpu() -> float:
 
 def _parse_mem_env(val: str) -> int:
     val = val.strip().upper()
-    for suffix in ["GIB", "GI", "GB", "G"]:
+    for suffix in ["GIB", "GI", "GB", "G", "MIB", "MI", "MB", "M"]:
         if val.endswith(suffix):
-            return int(float(val[: -len(suffix)]) * 1024**3)
+            return int(float(val[: -len(suffix)]) * (1024**3 if suffix[0] == "G" else 1024**2))
     return int(val)
 
 
@@ -354,7 +356,7 @@ def clear_logs():
         _ring_handler.clear()
 
 
-def get_status() -> dict:
+async def get_status() -> dict:
     cpu = get_cpu()
     ram = get_ram()
     net = get_net()
@@ -388,7 +390,9 @@ def get_status() -> dict:
         "total_max_mb": sum(s["max_mb"] for s in forward),
         "stream_count": len(forward),
     } if forward else None
-    disk_bytes = _dc_disk_size()
+    # Full-cache directory scan — run off the event loop so status polls
+    # never stall active streams when the 15s internal cache expires.
+    disk_bytes = await asyncio.to_thread(_dc_disk_size)
     return {
         "name": "Aruvi",
         "cpu": cpu,

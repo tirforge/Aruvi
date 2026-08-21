@@ -173,7 +173,9 @@ function copyLogs(){
 }
 
 function clearLogs(){
-  fetch('/api/status/clear-logs', {method:'POST'});
+  const pw = prompt('Debug password:');
+  if(!pw) return;
+  fetch('/api/status/clear-logs', {method:'POST', headers:{'Authorization':'Bearer '+pw}});
   _allLogs = [];
   logEl.textContent = '';
 }

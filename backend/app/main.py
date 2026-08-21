@@ -301,13 +301,29 @@ async def diag_bot_send(request: Request, chat_id: int = 0):
 async def api_v():
     return {"v": 2, "commit": "33c4c1a57a7a"}
 
+def _has_debug_auth(request: Request) -> bool:
+    auth = request.headers.get("Authorization", "")
+    return bool(settings.debug_password) and auth == f"Bearer {settings.debug_password}"
+
+
 @app.get("/api/status")
-async def api_status():
-    return get_status()
+async def api_status(request: Request):
+    status = await get_status()
+    if not _has_debug_auth(request):
+        # Public dashboard mode: metrics stay visible, but logs and per-video
+        # entries leak chat/message IDs, so strip them for unauthenticated viewers.
+        status["logs"] = []
+        cache = status.get("cache")
+        if isinstance(cache, dict):
+            cache["per_video"] = []
+            cache["forward"] = None
+    return status
 
 
 @app.post("/api/status/clear-logs")
-async def api_clear_logs():
+async def api_clear_logs(request: Request):
+    if not _has_debug_auth(request):
+        raise HTTPException(status_code=401, detail="Invalid debug token")
     clear_logs()
     return {"status": "ok"}
 

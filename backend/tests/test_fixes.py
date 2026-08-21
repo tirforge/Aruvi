@@ -528,5 +528,274 @@ class TestMarkdownSafety:
         assert "\x00" not in sanitize_filename("bad\x00name")
 
 
+class TestPublicStreamRangeGuards:
+    """Public /s/{hash} route must 416 multipart ranges and handle zero-byte
+    files like the private route (previously: TypeError → 500 / bogus 416)."""
+
+    @staticmethod
+    def _req(range_header: str | None = None):
+        from starlette.requests import Request
+        headers = []
+        if range_header:
+            headers.append((b"range", range_header.encode()))
+        return Request({
+            "type": "http", "method": "GET",
+            "path": "/s/pubhash123",
+            "headers": headers, "query_string": b"",
+            "client": ("127.0.0.1", 12345),
+        })
+
+    @pytest_asyncio.fixture
+    async def public_file(self, temp_db, sample_user):
+        from app.models import File
+        f = File(
+            user_id=sample_user.id,
+            file_id="pyrogram-file-id",
+            file_unique_id="uniq-pub-1",
+            file_name="movie.mp4",
+            file_size=1000,
+            mime_type="video/mp4",
+            file_type="video",
+            channel_message_id=77,
+            public_hash="pubhash123",
+        )
+        temp_db.add(f)
+        await temp_db.commit()
+        await temp_db.refresh(f)
+        return f
+
+    @pytest.mark.asyncio
+    async def test_multipart_range_416_not_500(self, temp_db, public_file):
+        from app.routers.streaming import stream_public_file
+        resp = await stream_public_file(
+            public_hash="pubhash123",
+            request=self._req("bytes=0-10,20-30"),
+            db=temp_db,
+            download=0,
+        )
+        assert resp.status_code == 416
+
+    @pytest.mark.asyncio
+    async def test_zero_byte_plain_get_200(self, temp_db, sample_user):
+        from app.models import File
+        from app.routers.streaming import stream_public_file
+        f = File(
+            user_id=sample_user.id,
+            file_id="fid", file_unique_id="u2", file_name="empty.mp4",
+            file_size=0, mime_type="video/mp4", file_type="video",
+            channel_message_id=78, public_hash="zerohash",
+        )
+        temp_db.add(f)
+        await temp_db.commit()
+
+        resp = await stream_public_file(
+            public_hash="zerohash", request=self._req(None), db=temp_db, download=0,
+        )
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_zero_byte_with_range_416(self, temp_db, sample_user):
+        from app.models import File
+        from app.routers.streaming import stream_public_file
+        f = File(
+            user_id=sample_user.id,
+            file_id="fid", file_unique_id="u3", file_name="empty.mp4",
+            file_size=0, mime_type="video/mp4", file_type="video",
+            channel_message_id=79, public_hash="zerohash2",
+        )
+        temp_db.add(f)
+        await temp_db.commit()
+
+        resp = await stream_public_file(
+            public_hash="zerohash2", request=self._req("bytes=0-100"), db=temp_db, download=0,
+        )
+        assert resp.status_code == 416
+
+
+class TestMemEnvParsing:
+    """MEMORY env must accept M/MB suffixes, not only G variants."""
+
+    def test_suffixes(self):
+        from app.status import _parse_mem_env
+        assert _parse_mem_env("3Gi") == 3 * 1024 ** 3
+        assert _parse_mem_env("3G") == 3 * 1024 ** 3
+        assert _parse_mem_env("512M") == 512 * 1024 ** 2
+        assert _parse_mem_env("2MB") == 2 * 1024 ** 2
+        assert _parse_mem_env("1048576") == 1048576
+
+
+class TestDiskCacheTmpSafety:
+    """Sweep/size accounting must ignore in-flight .tmp writes."""
+
+    def test_used_bytes_excludes_tmp(self):
+        from app.disk_cache import DiskChunkCache
+        import pathlib
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = DiskChunkCache(cache_dir=pathlib.Path(tmpdir))
+            d = cache._movie_dir(1, 2)
+            d.mkdir(parents=True)
+            (d / "0.bin").write_bytes(b"x" * 100)
+            (d / "0.stale.tmp").write_bytes(b"y" * 500)
+            assert cache.used_bytes(max_age=0) == 100
+
+    def test_sweep_spares_tmp_and_evicts_oldest_bin(self, monkeypatch):
+        from app import disk_cache as dc_mod
+        from app.disk_cache import DiskChunkCache
+        import pathlib
+        import time as _time
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = DiskChunkCache(cache_dir=pathlib.Path(tmpdir))
+            d = cache._movie_dir(1, 2)
+            d.mkdir(parents=True)
+            old = _time.time() - 3600
+            tmp_f = d / "0.stale.tmp"
+            tmp_f.write_bytes(b"t" * 100)
+            os.utime(tmp_f, (old - 10, old - 10))  # oldest file overall
+            c0 = d / "0.bin"
+            c0.write_bytes(b"a" * 100)
+            os.utime(c0, (old, old))
+            c1 = d / "1.bin"
+            c1.write_bytes(b"b" * 100)
+
+            monkeypatch.setattr(dc_mod, "DISK_CACHE_PER_VIDEO_BYTES", 150)
+            cache.sweep()
+
+            assert tmp_f.exists()      # in-flight write protected
+            assert not c0.exists()     # oldest real chunk evicted instead
+            assert c1.exists()
+
+    def test_sweep_prunes_last_active(self):
+        from app.disk_cache import DiskChunkCache
+        import pathlib
+        import time as _time
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = DiskChunkCache(cache_dir=pathlib.Path(tmpdir))
+            cache._last_active[(9, 9)] = _time.time()  # dir never existed
+            d = cache._movie_dir(3, 4)
+            d.mkdir(parents=True)
+            (d / "0.bin").write_bytes(b"x")
+            cache._last_active[(3, 4)] = _time.time()
+
+            cache.sweep()
+
+            assert (9, 9) not in cache._last_active
+            assert (3, 4) in cache._last_active
+
+
+class TestEmptyMessageCacheSkip:
+    """Empty Telegram messages must not be cached for the full TTL hour."""
+
+    @pytest.mark.asyncio
+    async def test_empty_message_not_cached(self):
+        from app import telegram
+
+        class FakeMsg:
+            empty = True
+            id = 424242
+
+        async def fake_get_messages(chat_id, message_id):
+            return FakeMsg()
+
+        key = telegram._msg_cache_key(424242)
+        telegram._msg_cache.pop(key, None)
+        orig = telegram.tg_client.get_messages
+        telegram.tg_client.get_messages = fake_get_messages
+        try:
+            msg = await telegram.get_message_from_channel(424242)
+            assert isinstance(msg, FakeMsg)
+            assert key not in telegram._msg_cache
+        finally:
+            telegram.tg_client.get_messages = orig
+            telegram._msg_cache.pop(key, None)
+
+    @pytest.mark.asyncio
+    async def test_real_message_still_cached(self):
+        from app import telegram
+
+        class FakeMsg:
+            empty = False
+            id = 424243
+
+        async def fake_get_messages(chat_id, message_id):
+            return FakeMsg()
+
+        key = telegram._msg_cache_key(424243)
+        telegram._msg_cache.pop(key, None)
+        orig = telegram.tg_client.get_messages
+        telegram.tg_client.get_messages = fake_get_messages
+        try:
+            msg = await telegram.get_message_from_channel(424243)
+            assert isinstance(msg, FakeMsg)
+            assert key in telegram._msg_cache
+        finally:
+            telegram.tg_client.get_messages = orig
+            telegram._msg_cache.pop(key, None)
+
+
+class TestStatusAuthGate:
+    """/api/status strips logs/per_video for anonymous viewers; clear-logs
+    requires the debug password."""
+
+    @staticmethod
+    def _req(auth: str | None = None):
+        from starlette.requests import Request
+        headers = []
+        if auth:
+            headers.append((b"authorization", auth.encode()))
+        return Request({
+            "type": "http", "method": "GET",
+            "path": "/api/status",
+            "headers": headers, "query_string": b"",
+            "client": ("127.0.0.1", 12345),
+        })
+
+    @pytest.mark.asyncio
+    async def test_anonymous_status_strips_sensitive_fields(self, monkeypatch):
+        from app import main as app_main
+
+        async def fake_status():
+            return {
+                "cpu": 1.0, "ram": {}, "net": {},
+                "logs": ["secret log line"],
+                "cache": {"per_video": [{"chat_id": -100}], "forward": {"total_prebuffer_mb": 1}},
+                "disk": {}, "uptime_seconds": 1, "history": [],
+            }
+
+        monkeypatch.setattr(app_main, "get_status", fake_status)
+        out = await app_main.api_status(self._req())
+        assert out["logs"] == []
+        assert out["cache"]["per_video"] == []
+        assert out["cache"]["forward"] is None
+
+    @pytest.mark.asyncio
+    async def test_debug_password_sees_full_status(self, monkeypatch):
+        from app import main as app_main
+
+        async def fake_status():
+            return {
+                "cpu": 1.0, "ram": {}, "net": {},
+                "logs": ["secret log line"],
+                "cache": {"per_video": [{"chat_id": -100}], "forward": None},
+                "disk": {}, "uptime_seconds": 1, "history": [],
+            }
+
+        monkeypatch.setattr(app_main, "get_status", fake_status)
+        out = await app_main.api_status(self._req("Bearer testdebug"))
+        assert out["logs"] == ["secret log line"]
+        assert out["cache"]["per_video"] == [{"chat_id": -100}]
+
+    @pytest.mark.asyncio
+    async def test_clear_logs_requires_auth(self):
+        from app import main as app_main
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as ei:
+            await app_main.api_clear_logs(self._req())
+        assert ei.value.status_code == 401
+
+        ok = await app_main.api_clear_logs(self._req("Bearer testdebug"))
+        assert ok["status"] == "ok"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

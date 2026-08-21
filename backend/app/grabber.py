@@ -1532,13 +1532,16 @@ async def grab_selected(
                 file_type=file_type,
                 channel_message_id=channel_msg_id,
             )
+            # Capture before commit/exit — the session expires instances on
+            # commit and db_user must not be touched after the block.
+            auth_version = db_user.auth_version
             db.add(file_record)
             await db.commit()
             await db.refresh(file_record)
             db_file_id = file_record.id
 
         from .auth import create_download_token
-        token = create_download_token(str(telegram_id), db_file_id)
+        token = create_download_token(str(telegram_id), db_file_id, version=auth_version)
         s = get_settings()
         stream_url = f"{s.web_base_url.rstrip('/')}/api/stream/{db_file_id}?token={token}"
 

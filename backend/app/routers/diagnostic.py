@@ -122,12 +122,20 @@ async def _diag_media_response(request: Request, msg: int, chat: int | None, hea
         import re
         match = re.match(r'bytes=(\d+)-(\d*)', range_header)
         if match:
-            has_range = True
             from_bytes = int(match.group(1))
             end_str = match.group(2)
             until_bytes = int(end_str) if end_str else file_size - 1
             if until_bytes >= file_size:
                 until_bytes = file_size - 1
+            # Zero-byte file or unsatisfiable start → 416 instead of a
+            # negative/empty chunk window downstream.
+            if file_size == 0 or from_bytes >= file_size or from_bytes > until_bytes:
+                raise HTTPException(
+                    status_code=416,
+                    detail="Range not satisfiable",
+                    headers={"Content-Range": f"bytes */{file_size}"},
+                )
+            has_range = True
 
     if not head:
         asyncio.create_task(prefetch_first_batch_safe(tg_client, message, from_bytes))

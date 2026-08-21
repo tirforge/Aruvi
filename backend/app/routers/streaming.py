@@ -26,10 +26,9 @@ router = APIRouter(prefix="/stream", tags=["Streaming"])
 
 async def _user_from_download_token(request: Request, file_id: int, db: AsyncSession):
     """Resolve a user from a ``?token=`` download JWT, enforcing the token's
-    file_id binding. Tokens minted without a ``file_id`` claim (the 30-day
-    user-wide links from the grab/bot flows, create_download_token) are honored
-    for any of the user's files; file-bound tokens (create_file_download_token)
-    are strict and rejected with 403 for any other file."""
+    file_id binding. Every token must carry a ``file_id`` claim; tokens bound
+    to a different file are rejected with 403 (this includes the grab/bot
+    flow links, which mint file-bound tokens via create_download_token)."""
     token = request.query_params.get("token")
     if not token:
         return None
@@ -121,7 +120,7 @@ async def streaming_debug(request: Request):
         cache_info = _cache_manager.info
         per_video = _cache_manager.per_video
 
-        disk_bytes = _dc_disk_size()
+        disk_bytes = await asyncio.to_thread(_dc_disk_size)
         disk_mb = round(disk_bytes / 1024 / 1024, 1)
 
         bots = []
@@ -306,10 +305,10 @@ async def stream_file(
 
     # Parse range header
     range_header = request.headers.get("range")
-    from_bytes, until_bytes = parse_range_header(range_header, file_size)
+    parsed = parse_range_header(range_header, file_size)
 
     # Validate range
-    if from_bytes is None:
+    if parsed is None:
         # Multipart ranges (bytes=a-b,c-d) aren't supported; tell the client
         # plainly instead of silently serving only the first range as a 206.
         return Response(
@@ -317,6 +316,7 @@ async def stream_file(
             content="416: Range not satisfiable",
             headers={"Content-Range": f"bytes */{file_size}"},
         )
+    from_bytes, until_bytes = parsed
 
     if until_bytes == -1:
         # Zero-byte file: satisfy a plain GET with an empty 200 body; a Range
@@ -374,7 +374,9 @@ async def stream_file(
 
     # Determine content disposition
     mime_type = file.mime_type or "application/octet-stream"
-    disposition = "attachment" if download else ("inline" if ("video/" in mime_type or "audio/" in mime_type or "image/" in mime_type) else "attachment")
+    # SVG is excluded from inline serving: it can carry scripts, so a shared
+    # link would execute in our origin (stored XSS). Force download instead.
+    disposition = "attachment" if download else ("inline" if ("video/" in mime_type or "audio/" in mime_type or ("image/" in mime_type and "svg" not in mime_type)) else "attachment")
 
     from urllib.parse import quote
     encoded_filename = quote(file.file_name)
@@ -526,9 +528,37 @@ async def stream_public_file(
     
     # Parse range header
     range_header = request.headers.get("range")
-    from_bytes, until_bytes = parse_range_header(range_header, file_size)
-    
+    parsed = parse_range_header(range_header, file_size)
+
     # Validate range
+    if parsed is None:
+        # Multipart ranges (bytes=a-b,c-d) aren't supported; tell the client
+        # plainly instead of crashing with a TypeError on tuple unpacking.
+        return Response(
+            status_code=416,
+            content="416: Range not satisfiable",
+            headers={"Content-Range": f"bytes */{file_size}"},
+        )
+    from_bytes, until_bytes = parsed
+
+    if until_bytes == -1:
+        # Zero-byte file: satisfy a plain GET with an empty 200 body; a Range
+        # on a zero-byte file can't be satisfied per RFC 7233 → 416.
+        if range_header:
+            return Response(
+                status_code=416,
+                content="416: Range not satisfiable",
+                headers={"Content-Range": "bytes */0"},
+            )
+        headers = {
+            "Content-Type": file.mime_type or "application/octet-stream",
+            "Content-Disposition": "attachment",
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "public, max-age=86400",
+            "Content-Length": "0",
+        }
+        return Response(status_code=200, content=b"", headers=headers)
+
     if (until_bytes > file_size) or (from_bytes < 0) or (from_bytes > until_bytes):
         return Response(
             status_code=416,
@@ -563,7 +593,9 @@ async def stream_public_file(
 
     # Determine content disposition
     mime_type = file.mime_type or "application/octet-stream"
-    disposition = "attachment" if download else ("inline" if ("video/" in mime_type or "audio/" in mime_type or "image/" in mime_type) else "attachment")
+    # SVG is excluded from inline serving: it can carry scripts, so a shared
+    # link would execute in our origin (stored XSS). Force download instead.
+    disposition = "attachment" if download else ("inline" if ("video/" in mime_type or "audio/" in mime_type or ("image/" in mime_type and "svg" not in mime_type)) else "attachment")
 
     from urllib.parse import quote
     encoded_filename = quote(file.file_name)

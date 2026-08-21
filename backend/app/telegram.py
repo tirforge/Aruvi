@@ -113,6 +113,18 @@ def get_start_lock(i: int) -> asyncio.Lock:
     return _start_locks[i]
 
 
+# Fire-and-forget tasks are tracked so shutdown can cancel them instead of
+# leaving orphaned coroutines (retries, warmups) running mid-teardown.
+_bg_tasks: set[asyncio.Task] = set()
+
+
+def _spawn(coro) -> asyncio.Task:
+    t = asyncio.create_task(coro)
+    _bg_tasks.add(t)
+    t.add_done_callback(_bg_tasks.discard)
+    return t
+
+
 async def start_one_client(i, c):
     max_attempts = 3
     # Full logins (ImportBotAuthorization on a fresh session) + crypto cold
@@ -199,9 +211,13 @@ async def reconnect_client(client: Client) -> bool:
         diag_log(f"Client {idx}: reconnect on cooldown, skipping")
         return False
     try:
-        if client.is_connected:
-            await client.disconnect()
-        await client.start()
+        # Serialize with start_one_client/_retry_bot_0 on the same client —
+        # two concurrent starts strand the loser in connect()'s
+        # "already connected" guard.
+        async with get_start_lock(idx):
+            if client.is_connected:
+                await client.disconnect()
+            await client.start()
         diag_log(f"Client {getattr(client, 'pool_index', '?')} re-authorized successfully")
         return True
     except Exception as e:
@@ -243,7 +259,7 @@ async def start_telegram_client():
         diag_log("Main bot DC warmup skipped (no channel or not connected)")
 
     # Fire helpers in background (non-blocking)
-    task = asyncio.create_task(_finish_startup())
+    task = _spawn(_finish_startup())
     return task
 
 
@@ -268,11 +284,15 @@ async def _warmup_messages():
                 try:
                     msg = await client.get_messages(channel_id, mid)
                     if msg:
-                        key = (getattr(client, "pool_index", 0), msg.id)
-                        if key not in _msg_cache:
-                            _msg_cache[key] = (time.monotonic(), msg)
-                            count += 1
-                            _msg_cache_evict()
+                        # Only cache keys the reader can actually hit —
+                        # get_message_from_channel reads tg_client's pool_index
+                        # only, so per-helper keys would be dead weight.
+                        if getattr(client, "pool_index", 0) == getattr(tg_client, "pool_index", 0):
+                            key = (getattr(client, "pool_index", 0), msg.id)
+                            if key not in _msg_cache:
+                                _msg_cache[key] = (time.monotonic(), msg)
+                                count += 1
+                                _msg_cache_evict()
                 except Exception:
                     pass
             return count
@@ -289,7 +309,7 @@ async def _finish_startup():
     if len(clients) > 1:
         # Fire all helpers as background tasks (never block on all)
         for i, c in enumerate(clients[1:], 1):
-            asyncio.create_task(start_one_client(i, c))
+            _spawn(start_one_client(i, c))
 
         # Poll until at least MIN_HELPERS are connected (or 30s timeout).
         # Clamp to the actual helper count so a low-bot deployment doesn't
@@ -326,10 +346,10 @@ async def _finish_startup():
 
     # Retry bot 0 if it failed earlier (transient Telegram DC issue)
     if not clients[0].is_connected:
-        asyncio.create_task(_retry_bot_0())
+        _spawn(_retry_bot_0())
 
     # Warm up: pre-fetch recent messages so first user request is fast
-    asyncio.create_task(_warmup_messages())
+    _spawn(_warmup_messages())
 
     # Warm media sessions SERIALLY. Telegram rate-limits the auth.ExportAuthorization /
     # auth.ImportAuthorization RPC that establishes a media session. If N concurrent
@@ -337,7 +357,7 @@ async def _finish_startup():
     # every stream stalls (~0 progress). Warming one bot at a time at boot absorbs
     # that one-time throttle risk before any user traffic, so streams reuse the
     # warmed sessions (Pyrogram caches them in client.media_sessions[dc_id]).
-    asyncio.create_task(_warm_media_sessions())
+    _spawn(_warm_media_sessions())
 
 
 _WARM_PROBE_N = 40            # recent channel messages probed to discover DCs
@@ -474,7 +494,8 @@ async def _retry_bot_0():
             return
         diag_log(f"Retrying bot 0 connection (attempt {attempt}/10)...")
         try:
-            await asyncio.wait_for(clients[0].start(), timeout=20)
+            async with get_start_lock(0):
+                await asyncio.wait_for(clients[0].start(), timeout=20)
             if clients[0].is_connected:
                 me = await clients[0].get_me()
                 diag_log(f"Bot 0 reconnected → @{me.username}")
@@ -485,7 +506,12 @@ async def _retry_bot_0():
 
 
 async def stop_telegram_client():
-    """Called from app lifespan — stops the full pool."""
+    """Called from app lifespan — cancels tracked background tasks, then
+    stops the full pool."""
+    for t in list(_bg_tasks):
+        t.cancel()
+    if _bg_tasks:
+        await asyncio.gather(*_bg_tasks, return_exceptions=True)
     await stop_all_clients()
 
 
@@ -538,8 +564,11 @@ async def get_message_from_channel(message_id: int) -> Message:
         settings.telegram_storage_channel_id,
         message_id,
     )
-    _msg_cache[key] = (now, msg)
-    _msg_cache_evict()
+    # Don't cache empty/missing messages — a transient fetch failure would
+    # otherwise pin a useless (or wrong) result for the full TTL hour.
+    if msg and not getattr(msg, "empty", False):
+        _msg_cache[key] = (now, msg)
+        _msg_cache_evict()
     return msg
 
 
