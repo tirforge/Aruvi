@@ -1,5 +1,10 @@
 # Aruvi
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/tirforge/Aruvi?include_prereleases)](https://github.com/tirforge/Aruvi/releases)
+[![Stars](https://img.shields.io/github/stars/tirforge/Aruvi?style=social)](https://github.com/tirforge/Aruvi/stargazers)
+![Platforms](https://img.shields.io/badge/platform-Web%20%7C%20Android%20%7C%20TV%20%7C%20Win%20%7C%20Linux-blue)
+
 Self-hosted media platform that streams your Telegram files (movies, series, audio) to the
 browser, Android phone, and Android TV — powered by multi-bot parallel streaming with a
 two-tier (RAM + disk) cache.
