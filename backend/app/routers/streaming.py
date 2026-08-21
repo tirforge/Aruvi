@@ -553,7 +553,7 @@ async def stream_public_file(
             )
         headers = {
             "Content-Type": file.mime_type or "application/octet-stream",
-            "Content-Disposition": "attachment",
+            "Content-Disposition": "attachment" if download else "inline",
             "Accept-Ranges": "bytes",
             "Cache-Control": "public, max-age=86400",
             "Content-Length": "0",
