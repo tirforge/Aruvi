@@ -797,5 +797,22 @@ class TestStatusAuthGate:
         assert ok["status"] == "ok"
 
 
+class TestDisconnectProbeWiring:
+    """Stream generators must accept a request for liveness polling."""
+
+    def test_generators_accept_request_param(self):
+        import inspect
+        from app.streaming import stream_file, parallel_stream_generator
+        assert "request" in inspect.signature(stream_file).parameters
+        assert "request" in inspect.signature(parallel_stream_generator).parameters
+
+    def test_router_wrappers_pass_request(self):
+        # Source check: both file_streamer wrappers forward request=request
+        import inspect
+        from app.routers import streaming as rs
+        src = inspect.getsource(rs)
+        assert src.count("request=request") >= 2
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -363,6 +363,7 @@ async def stream_file(
                 message,
                 from_bytes,
                 until_bytes,
+                request=request,
             ):
                 yield chunk
         except asyncio.TimeoutError:
@@ -582,6 +583,7 @@ async def stream_public_file(
                 message,
                 from_bytes,
                 until_bytes,
+                request=request,
             ):
                 yield chunk
         except asyncio.TimeoutError:

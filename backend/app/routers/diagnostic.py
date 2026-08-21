@@ -142,7 +142,7 @@ async def _diag_media_response(request: Request, msg: int, chat: int | None, hea
 
     async def _stream():
         try:
-            async for chunk in stream_file_chunks(tg_client, message, from_bytes, until_bytes):
+            async for chunk in stream_file_chunks(tg_client, message, from_bytes, until_bytes, request=request):
                 yield chunk
         except asyncio.TimeoutError:
             logger.warning("Diag stream timed out for chat=%s msg=%d", chat_id, msg)

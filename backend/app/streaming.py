@@ -1087,6 +1087,7 @@ async def parallel_stream_generator(
     length: int,
     chunk_size: int = 1024 * 1024,
     concurrency: int = None,
+    request=None,
 ):
     """
     Fetch file chunks in parallel using the client pool.
@@ -1593,6 +1594,19 @@ async def parallel_stream_generator(
                 elapsed = time.perf_counter() - stream_start
                 logger.info("Chunk %d in %.1fs (cached=%s)", chunk_idx, elapsed, cached_data is not None)
                 first_chunk_logged = True
+
+            # Active client-liveness probe: uvicorn only pushes http.disconnect
+            # when it notices the socket died, and half-closed TCP can go
+            # unnoticed for a whole range. Poll between chunks so an abandoned
+            # stream stops fetching instead of draining the pool to the end.
+            if request is not None:
+                try:
+                    if await request.is_disconnected():
+                        logger.info("Streamgen msg %d ended: client disconnected (polled)", message_id)
+                        return
+                except Exception:
+                    pass  # never let a liveness check kill a healthy stream
+
             yield chunk_data
             # Release backpressure permit — next in-flight chunk may resolve
             _backpressure.release()
@@ -1655,6 +1669,7 @@ async def stream_file(
     message,
     from_bytes: int,
     until_bytes: int,
+    request=None,
 ) -> AsyncGenerator[bytes, None]:
     """Stream a file range using the multi-client pool.
     Limits concurrent streams to prevent OOM from prebuffers stacking.
@@ -1671,7 +1686,7 @@ async def stream_file(
     await _stream_semaphore.acquire()
     try:
         async for chunk in parallel_stream_generator(
-            message, from_bytes, total_bytes_needed
+            message, from_bytes, total_bytes_needed, request=request
         ):
             if bytes_to_skip > 0:
                 chunk = chunk[bytes_to_skip:]
