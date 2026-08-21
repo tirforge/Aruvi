@@ -1607,10 +1607,15 @@ async def parallel_stream_generator(
         # _resolve_chunk, or a CancelledError from the ASGI/response layer).
         ei = sys.exc_info()
         if ei[0] is not None:
-            import traceback as _tb
-            logger.error("Streamgen msg %d aborted: %s: %s\n%s",
-                         message_id, ei[0].__name__, ei[1],
-                         "".join(_tb.format_tb(ei[2])))
+            if ei[0] is GeneratorExit:
+                # Client went away mid-stream (seek/stop/close) — routine,
+                # not an error. Don't spam the log with tracebacks.
+                logger.info("Streamgen msg %d ended: client disconnected", message_id)
+            else:
+                import traceback as _tb
+                logger.error("Streamgen msg %d aborted: %s: %s\n%s",
+                             message_id, ei[0].__name__, ei[1],
+                             "".join(_tb.format_tb(ei[2])))
         # Cancel workers, await drain, then clear results (avoids "Task destroyed but pending").
         # Bounded: a worker wedged in a Telegram RPC (flood wait, broken DC) must
         # never hold the HTTP response open for minutes — abandon it after 5s.
