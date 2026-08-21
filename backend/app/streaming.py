@@ -1625,6 +1625,10 @@ async def parallel_stream_generator(
                 # Client went away mid-stream (seek/stop/close) — routine,
                 # not an error. Don't spam the log with tracebacks.
                 logger.info("Streamgen msg %d ended: client disconnected", message_id)
+            elif ei[0] is asyncio.CancelledError:
+                # ASGI layer cancelled us — uvicorn tears down the response
+                # task the moment the client socket dies (or on shutdown).
+                logger.info("Streamgen msg %d ended: cancelled (client disconnect/shutdown)", message_id)
             else:
                 import traceback as _tb
                 logger.error("Streamgen msg %d aborted: %s: %s\n%s",
