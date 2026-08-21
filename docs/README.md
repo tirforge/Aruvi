@@ -1,27 +1,34 @@
-# Aruvi Documentation Index
-
-## Architecture
-- [architecture.md](architecture.md) — System context, component diagram, data flow
-- [streaming.md](streaming.md) — Two-tier cache, prefetcher, worker pool, circuit breakers
-- [auth.md](auth.md) — JWT access/refresh rotation, login codes, download tokens, logout-all
-- [data-model.md](data-model.md) — SQLAlchemy tables, relationships, migrations
-- [deployment.md](deployment.md) — Runbook, restart procedure, health checks, scaling knobs
+# Aruvi Documentation
 
 ## Quick Links
 
 | Topic | File |
 |-------|------|
-| How streaming works | [streaming.md](streaming.md#two-tier-cache) |
-| Token rotation & replay protection | [auth.md](auth.md#rotation-flow) |
-| Database schema | [data-model.md](data-model.md#core-tables) |
-| Restarting the live service | [deployment.md](deployment.md#start--restart-critical) |
-| Environment variables | [deployment.md](deployment.md#required-env-variables) |
-| Log analysis | [deployment.md](deployment.md#log-analysis) |
+| **How it works (5 min read)** | [architecture.md](architecture.md) |
+| **Streaming engine** | [streaming.md](streaming.md) |
+| **Auth & tokens** | [auth.md](auth.md) |
+| **Database schema** | [data-model.md](data-model.md) |
+| **Deploy & runbook** | [deployment.md](deployment.md) |
+| **Agent instructions** | [../AGENTS.md](../AGENTS.md) |
 
-## Key Invariants
+---
 
-1. **Disk is authoritative** — RAM hot layer evicts freely; disk persists 30 min after last activity
-2. **Refresh tokens rotate** — replaying old token = 401; server stores only SHA256 hash
-3. **Download tokens bind to file_id** — prevents cross-user access (IDOR fix)
-4. **Media sessions serialize** — single `ImportBotAuthorization` at a time via global lock
-5. **Daily re-clone wipes state** — push fixes before 3:30 AM IST or they're lost
+## TL;DR
+
+**Aruvi** = Your media library stored in a Telegram channel, streamed via FastAPI with a two-tier cache (RAM + disk).
+
+- **11 bots** download chunks in parallel
+- **RAM cache** (200 MB/video) = instant replay
+- **Disk cache** (8 GB) = survives restarts
+- **Refresh tokens rotate** = replay attacks impossible
+- **Daily re-clone at 3:30 AM** = push before then or lose changes
+
+---
+
+## Start Here
+
+1. **New to the project?** → [architecture.md](architecture.md)
+2. **Fixing a streaming bug?** → [streaming.md](streaming.md)
+3. **Auth issue?** → [auth.md](auth.md)
+4. **Deploying to live?** → [deployment.md](deployment.md#start--restart---critical)
+5. **Coding agent?** → [AGENTS.md](../AGENTS.md)

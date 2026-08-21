@@ -1,77 +1,113 @@
-# Streaming Engine Architecture
+# Streaming Engine — Simple Explanation
 
-## Two-Tier Cache
+## The Problem
 
-### L1: RAM Hot Layer (`ChunkCache`)
-- Per-video capacity: `STREAM_RAM_PER_VIDEO_MB` (default 200 MB)
-- LRU eviction when video exceeds cap
-- Hit = instant memory `yield chunk`
-- Miss = spawn worker to fetch from L2 or Telegram
+Streaming a 2 GB movie from Telegram is slow. We can't make the user wait 30 seconds for the first byte.
 
-### L2: Disk Tier (`DiskChunkCache` at `/home/container/vcache/`)
-- Global cap: `DISK_CACHE_MAX_BYTES` (8 GB)
-- Per-video cap: `DISK_CACHE_PER_VIDEO_BYTES` (2 GB)
-- TTL: `DISK_CACHE_TTL` (30 min) after **last activity** (stream start or write touch)
-- Layout: `vcache/{chat_id}_{message_id}/{chunk_index}.bin`
-- Atomic write: unique temp file → `os.replace(tmp, final)`
-- Reads: `os.scandir()` once per movie to list resident chunks (fast range checks)
+## The Solution: Two-Tier Cache
 
-## Prefetcher (`AheadPrefetcher`)
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    USER REQUESTS BYTE 0                     │
+└─────────────────────────────────────────────────────────────┘
+                              │
+              ┌───────────────┴───────────────┐
+              ▼                               ▼
+       ┌─────────────┐                   ┌─────────────┐
+       │  RAM Cache  │  (200 MB/video)   │  Disk Cache │  (8 GB total)
+       │  (Instant)  │                   │  (Fast SSD) │
+       └─────────────┘                   └─────────────┘
+              │                               │
+              │  MISS                         │  MISS
+              ▼                               ▼
+       ┌─────────────────────────────────────┐
+       │     FETCH FROM TELEGRAM (slow)      │
+       │  → Save to RAM + Disk               │
+       │  → Stream to user                   │
+       └─────────────────────────────────────┘
+```
 
-Triggered on first byte request for a video:
-1. Background task computes chunk indices ahead of playhead
-2. Bounded by:
-   - `STREAM_PREFETCH_CONCURRENCY` (1 bot at a time)
-   - `STREAM_INFLIGHT_MB` (200 MB unbacklogged data)
-   - `STREAM_PREFETCH_AHEAD_MB` (128 MB ahead of playhead)
-   - `_memory_pressure()` gate (cgroup mem > 60% → back off)
-3. Writes to **both** RAM (if space) and disk (thread pool)
-4. Idle timeout: ~30 s of no reads → cancels itself
+---
 
-## Worker Pool (`parallel_stream_generator`)
+## Three Tiers of Speed
 
-For cold ranges not in RAM/disk:
-- Launches `STREAM_MAX_CONCURRENT` workers (default 3: 2 users + 1 prefetch)
-- Each worker processes a chunk range via `stream_file_chunks()`
-- Chunk fetch: `client.stream_media(message, limit=1, offset=chunk)`
-- Results gathered in `results: dict[chunk_idx, asyncio.Future]`
-- **Backpressure**: `CappedSemaphore(STREAM_INFLIGHT_MB)` acquired **only on successful chunk delivery** via `_resolve_chunk_now()`
-- Reconnect/refresh loops release permits on failure; only completed chunks consume permits
+| Tier | When | Speed |
+|------|------|-------|
+| **RAM Hit** | Rewatching recent video | ~0 ms (memory copy) |
+| **Disk Hit** | Watched yesterday | ~5-10 ms (local SSD) |
+| **Telegram Fetch** | First time / cold | ~2-15 s (network) |
 
-## Message Cache (`_msg_cache` in `streaming.py`)
+---
 
-- Key: `(bot_pool_index, chat_id, message_id)`
-- TTL: 15 s throttle window (`_MSG_REFRESH_MIN_INTERVAL`)
-- Poison tracking: `_msg_poisoned` set for dead `FILE_REFERENCE` errors
-- Force refetch bypasses throttle when poisoned
-- Count cap: 4096 keys, oldest-evict prune
+## The Prefetcher (Reads Your Mind)
 
-## Media Session Serialization
+While you watch byte 0-100 MB, we **quietly download bytes 100-228 MB** in the background.
 
-- Process-wide lock: `_media_session_lock` (asyncio.Lock)
-- Boot warmup: `_warm_media_sessions()` serially imports authorization on **all 11 bots**
-- Prevents N concurrent cold streams from flooding Telegram with `ImportBotAuthorization`
+- **Ahead:** 128 MB (`STREAM_PREFETCH_AHEAD_MB`)
+- **Concurrency:** 1 bot at a time (`STREAM_PREFETCH_CONCURRENCY`)
+- **Cap:** 200 MB in-flight (`STREAM_INFLIGHT_MB`)
+- **Backs off if:** System memory > 60% (`_memory_pressure()`)
 
-## Circuit Breakers
+Result: User seeks forward → **instant** (already in RAM/disk).
 
-| Breaker | Trigger | Action |
-|---------|---------|--------|
-| Per-DC auth cooldown (`_dc_auth_failure_until`) | `ImportBotAuthorization` fails | 30 s cooldown, skip DC |
-| Per-client reconnect cooldown | `AuthKeyUnregistered` / `AuthBytesInvalid` | 60 s before reconnect |
-| Force-refresh throttle (`_MSG_REFRESH_MIN_INTERVAL`) | `FILE_REFERENCE` errors | 15 s min interval per (bot, chat, msg) |
+---
 
-## Disk Write Pipeline
+## Worker Pool (For Cold Starts)
 
-- 4-worker `ThreadPoolExecutor` (`diskw-*`)
-- Max 96 pending writes (backpressure into prefetcher)
-- Slow SATA never blocks event loop
-- Single `fsync(fd)` per slot on completion
+When neither RAM nor disk has the chunk:
 
-## Failure Modes & Recovery
+```
+1. Launch up to 3 workers (2 stream + 1 prefetch)
+2. Each worker grabs 5 chunks/batch (STREAM_BATCH_SIZE)
+3. Fetch via: client.stream_media(message, limit=1, offset=chunk)
+4. On success: _resolve_chunk_now() → acquires backpressure permit
+5. On failure: Release permit, retry with fresh message ref
+```
 
-| Scenario | Behavior |
-|----------|----------|
-| Chunk vanishes from disk mid-stream | `_fetch_chunk_now` fallback fetches single chunk from Telegram |
-| Worker batch timeout (30 s) | Batch cancelled, worker exits, next worker retries |
-| Telegram `FLOOD_WAIT` | `sleep_threshold=15` absorbs short waits; longer waits trigger reconnect |
-| OOM (cgroup > 90%) | `_memory_pressure()` true → prefetcher pauses, LRU evicts aggressively |
+**Backpressure:** We only "pay" a permit when a chunk **actually arrives**. Failed fetches don't consume permits.
+
+---
+
+## Message Cache (Don't Ask Telegram Twice)
+
+- Key: `(bot_index, chat_id, message_id)`
+- TTL: 15 seconds (`_MSG_REFRESH_MIN_INTERVAL`)
+- **Poison tracking:** If a message ref dies (`FILE_REFERENCE`), mark it poisoned → next force-refresh hits Telegram for real
+
+---
+
+## Circuit Breakers (Don't Make Things Worse)
+
+| Breaker | Trigger | Cooldown |
+|---------|---------|----------|
+| Per-DC media auth | `ImportBotAuthorization` fails | 30 s |
+| Per-client reconnect | `AuthKeyUnregistered` / `AuthBytesInvalid` | 60 s |
+| Force-refresh throttle | Too many refetches for same message | 15 s |
+
+---
+
+## Disk Write Pipeline (Never Block the Event Loop)
+
+```
+Worker thread (diskw-1..4)          Event Loop
+     │                                  │
+     ├── write chunk to temp file ─────▶│
+     │                                  │
+     ├── os.replace(tmp, final) ──────▶│ (atomic)
+     │                                  │
+     └── single fsync(fd) ────────────▶│ (on slot complete)
+```
+
+- 4 worker threads, max 96 pending writes
+- Slow SATA never stalls streaming
+
+---
+
+## Failure Modes (What Happens When Things Break)
+
+| Scenario | What Happens |
+|----------|--------------|
+| Chunk missing from disk mid-stream | Fallback: fetch single chunk from Telegram (`_fetch_chunk_now`) |
+| Batch times out (30 s) | Cancel batch, worker exits, next worker retries |
+| Telegram `FLOOD_WAIT` | Client `sleep_threshold=15` absorbs short waits |
+| OOM (container > 90%) | `_memory_pressure()` → pause prefetch, aggressive LRU evict |

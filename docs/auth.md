@@ -1,87 +1,134 @@
-# Authentication & Token Flow
+# Auth System — Simple Explanation
 
-## Token Types
-
-### Access Token (JWT)
-- Short-lived: `JWT_EXPIRY_MINUTES` (default 15 min)
-- Payload: `sub` (telegram_id), `ver` (auth_version), `iat`, `exp`
-- Used in `Authorization: Bearer <access>` for API calls
-- Verified by `get_current_user` / `get_current_user_opt` dependencies
-
-### Refresh Token (JWT + server-side session)
-- Long-lived: `REFRESH_TOKEN_DURATION = jwt_expiry_minutes * 4` (default 60 min)
-- Payload: `sub`, `jti` (unique ID), `ver`, `iat`, `exp`
-- **Server-side session table**: `refresh_sessions`
-  - `token_hash` = SHA256(refresh_token)
-  - `expires_at`, `last_used_at`
-  - FK to `users.id` with CASCADE delete
-
-## Rotation Flow
+## Three Token Types
 
 ```
+┌─────────────────────┬────────────┬─────────────────────────────────┐
+│ Token               │ Lifetime   │ Purpose                         │
+├─────────────────────┼────────────┼─────────────────────────────────┤
+│ Access Token (JWT)  │ 15 min     │ Every API call                  │
+│ Refresh Token       │ 60 min     │ Get new access tokens           │
+│ Download Token      │ 30 days    │ Streaming URLs (?token=...)     │
+└─────────────────────┴────────────┴─────────────────────────────────┘
+```
+
+---
+
+## How Refresh Rotation Works (Replay Protection)
+
+```
+User has: access_token (expired) + refresh_token (valid)
+          │
+          ▼
 POST /auth/refresh  (Bearer refresh_token)
-       │
-       ▼
-1. sha256(refresh_token) → lookup RefreshSession
-       │
-       ├─ Not found → 401 "Refresh token has been invalidated"
-       ├─ Expired (now > expires_at) → delete row, 401
-       └─ Valid →
-            │
-            ▼
-2. ROTATE in place:
-   - new_access = create_access_token(user)
-   - new_refresh = create_refresh_token(user)  (new jti)
-   - UPDATE refresh_sessions SET token_hash=sha256(new_refresh),
-                                  expires_at=now+duration,
-                                  last_used_at=now
-   - return {access_token, refresh_token, token_type, expires_in}
+          │
+          ▼
+Server:
+  1. SHA256(refresh_token) → look up in refresh_sessions table
+  2. NOT FOUND? → 401 "Refresh token has been invalidated"
+  3. EXPIRED?   → delete row, 401
+  4. VALID?     → ROTATE IN PLACE:
+       • new_access  = create_access_token(user)
+       • new_refresh = create_refresh_token(user)  ← NEW jti (unique ID)
+       • UPDATE refresh_sessions SET token_hash=SHA256(new_refresh),
+                                     expires_at=now+60min,
+                                     last_used_at=now
+       • Return {access_token, refresh_token, ...}
 ```
 
-## Replay Protection
+**Key point:** Old refresh token's hash is **overwritten**. Replaying it → lookup fails → 401.
 
-- Old refresh token's `token_hash` is **overwritten** on rotation
-- Replaying the old token → lookup fails → 401
-- Only the **latest** refresh token works
+---
 
-## Login Code Flow (TV Pairing)
+## Login Code Flow (TV App Pairing)
 
 ```
-1. TV app calls POST /auth/login-code  → returns {code, bot_username, expires_in}
-2. User opens Telegram, sends /start <CODE>
-3. Bot handler:
-   - Atomic claim: UPDATE login_codes SET telegram_id=? WHERE code=? AND expires>now AND telegram_id IS NULL
-   - On success: create RefreshSession, return access+refresh to TV via polling
-   - On failure: distinct errors (already used / expired / invalid)
+1. TV app: POST /auth/login-code
+   → Returns: {code: "ABC123", bot_username: "@Aaruvi_movie_bot", expires_in: 600}
+
+2. User opens Telegram, sends: /start ABC123
+
+3. Bot handler (atomic):
+   UPDATE login_codes
+   SET telegram_id = <user_id>
+   WHERE code = "ABC123"
+     AND expires_at > now()
+     AND telegram_id IS NULL
+   
+   • Row updated (rowcount=1) → SUCCESS
+   • Row exists but telegram_id set → "Already used"
+   • Row exists but expired → "Code expired"
+   • No row → "Invalid code"
+
+4. On success: create RefreshSession, TV polls for tokens
 ```
 
-## Logout All
+---
+
+## Logout All (Nuclear Option)
 
 ```
 POST /auth/logout-all
-   │
-   ▼
-1. Bump user.auth_version += 1  (invalidates all existing access tokens)
-2. DELETE FROM refresh_sessions WHERE user_id=?
+  │
+  ▼
+1. user.auth_version += 1          → All existing access tokens INSTANTLY invalid
+2. DELETE FROM refresh_sessions    → All refresh tokens GONE
 3. Return 204
 ```
 
-## Download Tokens (Streaming Auth)
+---
 
-- Separate mint: `create_download_token(telegram_id, file_id, version)`
-- 30-day TTL, bound to **specific file_id** (fixes IDOR)
-- Used by bot/grabber to generate streaming URLs: `?token=<download_token>`
-- Verified in `_user_from_download_token(request, file_id)` — matches file_id claim
+## Download Tokens (For Streaming URLs)
 
-## Token Versioning
+```
+create_download_token(telegram_id, file_id, version=0)
+  → JWT with: sub=telegram_id, fid=file_id, ver=auth_version
+  → 30-day TTL
+```
 
-- `User.auth_version` increments on logout-all / password change
-- Access/refresh tokens embed `ver = auth_version` at mint
-- Verification rejects tokens with `ver < current_auth_version`
+**Used by:** Bot/grabber to give you `https://api/stream/123?token=xyz`
 
-## Security Notes
+**Verified by:** `_user_from_download_token(request, file_id)`
+- Checks `fid` claim matches requested `file_id` → **prevents IDOR**
+- Checks `ver` >= user's current `auth_version` → respects logout-all
 
-- `JWT_SECRET` from env (32+ chars recommended)
-- Refresh tokens hashed at rest (SHA256) — DB leak ≠ token leak
-- `httponly` cookies not used; SPA stores in memory/localStorage
-- Android app compatible: `AuthRepository.saveTokens(access, refresh)` persists rotation
+---
+
+## Token Versioning (Single Source of Truth)
+
+| Event | `user.auth_version` | Effect |
+|-------|---------------------|--------|
+| Login | 0 | Baseline |
+| Password change | +1 | Old access tokens rejected |
+| Logout all | +1 | All tokens + refresh sessions dead |
+
+Access/refresh tokens embed `ver` at mint. Verification: `token.ver >= user.auth_version`.
+
+---
+
+## Database: `refresh_sessions` Table
+
+```sql
+CREATE TABLE refresh_sessions (
+    id            SERIAL PRIMARY KEY,
+    user_id       INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    token_hash    CHAR(64) UNIQUE NOT NULL,   -- SHA256(refresh_token)
+    expires_at    TIMESTAMP NOT NULL,
+    last_used_at  TIMESTAMP NOT NULL,
+    created_at    TIMESTAMP NOT NULL
+);
+```
+
+- One row per **active** refresh token
+- Rotation = `UPDATE token_hash` (not INSERT + DELETE)
+- DB leak ≠ token leak (only hashes stored)
+
+---
+
+## Android App Compatibility
+
+`AuthRepository.kt:116`:
+```kotlin
+saveTokens(body.accessToken, body.refreshToken)
+```
+Just persists the new pair — rotation works transparently.

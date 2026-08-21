@@ -1,62 +1,115 @@
-# Aruvi Architecture Overview
+# Aruvi Architecture — Simple Explanation
 
-## System Context
+## What is Aruvi?
 
-Aruvi is a Telegram-backed media streaming platform:
-- **Storage**: Files stored as messages in a private Telegram channel
-- **Delivery**: FastAPI + Kurigram (Telegram MTProto) streaming to clients
-- **Frontend**: React 18 SPA served from `backend/app/static/`
-- **Auth**: JWT access + rotating refresh tokens (per-user session table)
-- **Database**: PostgreSQL (Supabase) via SQLAlchemy 2.0 async
+Aruvi is a **media streaming platform** that stores files in Telegram and streams them to web/TV apps.
 
-## High-Level Data Flow
+**Think of it like:** Netflix, but your "video library" lives in a private Telegram channel instead of S3.
 
-```
-┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
-│   Client    │────▶│  FastAPI     │────▶│  Telegram Channel│
-│  (Web/TV)   │◀───│  (Port 7680) │◀───│  (Storage)       │
-└─────────────┘     └──────────────┘     └─────────────────┘
-                           │
-                    ┌──────┴──────┐
-                    │  Disk Cache │
-                    │ /vcache/    │
-                    └─────────────┘
-```
+---
 
-## Component Diagram
+## The Big Picture (3 Parts)
 
 ```
-backend/
-├── app/
-│   ├── main.py              # FastAPI app, lifespan, SPA catch-all
-│   ├── config.py            # Pydantic Settings (.env driven)
-│   ├── database.py          # Async SQLAlchemy engine/session
-│   ├── models.py            # ORM models (User, File, Folder, LoginCode, RefreshSession)
-│   ├── auth.py              # JWT creation/verification, token minting
-│   ├── routers/
-│   │   ├── auth.py          # /auth/* — login, refresh, logout, verify-code
-│   │   ├── streaming.py     # /stream/* — file streaming with Range support
-│   │   ├── files.py         # /files/* — CRUD, upload, search
-│   │   ├── folders.py       # /folders/* — folder tree ops
-│   │   ├── grab.py          # /grab/* — movie search via Telegram bots
-│   │   ├── tv.py            # /tv/* — TV app pairing
-│   │   ├── subtitles.py     # /subtitles/* — OpenSubtitles search/download
-│   │   └── diagnostic.py    # /diag/* — health, range test, cache mgmt
-│   ├── streaming.py         # Core: ChunkCache, prefetcher, worker pool, disk tier bridge
-│   ├── telegram.py          # Client pool lifecycle, message cache, warmup
-│   ├── disk_cache.py        # Lazy disk tier (TTL on inactivity)
-│   ├── grabber.py           # Movie search via helper bots
-│   ├── patch.py             # Pyrogram listener queue (multi-listener FIFO + cmd routing)
-│   ├── bot.py               # Telegram bot handlers (user-facing commands)
-│   └── gdrive.py            # Google Drive upload (async I/O, sibling abort)
-├── frontend/                # React source (built to backend/app/static/)
-└── run.py                   # Uvicorn bootstrap (uvloop, housekeeping)
+┌──────────────┐     ┌──────────────┐     ┌────────────────────┐
+│   Your TV    │────▶│  Aruvi API   │────▶│  Telegram Channel  │
+│  / Browser   │◀───│  (Port 7680) │◀───│  (Your Storage)    │
+└──────────────┘     └──────────────┘     └────────────────────┘
+                            │
+                     ┌──────┴──────┐
+                     │  Disk Cache │
+                     │  /vcache/   │  ← persists across restarts
+                     └─────────────┘
 ```
 
-## Key Design Principles
+1. **Client** — Web browser, Android TV app, or mobile web
+2. **Aruvi API** — FastAPI server that handles auth, streaming, search
+3. **Telegram Channel** — Where files actually live (each file = 1 message)
+4. **Disk Cache** — Local SSD cache so we don't re-download from Telegram every time
 
-1. **Disk-first streaming** — RAM is a hot layer; disk is authoritative
-2. **Backpressure everywhere** — bounded RAM, bounded in-flight, memory-pressure gate
-3. **Serialization of Telegram media sessions** — one ImportAuthorization at a time
-4. **Fail-fast with bounded retries** — wall-clock timeouts, per-DC cooldowns
-5. **Stateless horizontal scaling** — multiple bot clients share nothing; pool round-robin
+---
+
+## How a Video Plays
+
+```
+User clicks "Play" on movie.mp4
+         │
+         ▼
+┌─────────────────────────────────────┐
+│ 1. API checks: "Do I have this in   │
+│    RAM cache?" → Yes → Stream fast  │
+└─────────────────────────────────────┘
+         │ No
+         ▼
+┌─────────────────────────────────────┐
+│ 2. Check disk cache (/vcache/)      │
+│    → Yes → Stream from SSD          │
+└─────────────────────────────────────┘
+         │ No
+         ▼
+┌─────────────────────────────────────┐
+│ 3. Fetch from Telegram (slow)       │
+│    → Save to RAM + Disk             │
+│    → Stream to user                 │
+└─────────────────────────────────────┘
+```
+
+**Key insight:** First play is slow (Telegram download). Second play is instant (local cache).
+
+---
+
+## The 11 Bots (Why So Many?)
+
+Telegram limits how fast one bot can download. Solution: **11 bot accounts** working in parallel.
+
+- **Bot 0 (Main)** — Handles user commands, uploads, login
+- **Bots 1-10 (Helpers)** — Only download chunks for streaming
+
+They all connect to the same storage channel. Round-robin load balancing.
+
+---
+
+## Two-Tier Cache (The Secret Sauce)
+
+| Layer | Size | Speed | Persists? |
+|-------|------|-------|-----------|
+| **RAM (Hot)** | 200 MB per video | ~Memory speed | ❌ Lost on restart |
+| **Disk (Cold)** | 8 GB total / 2 GB per video | ~SSD speed | ✅ 30 min after last use |
+
+**Prefetcher:** While you watch, we silently download the next 128 MB ahead of you — so seeking is instant.
+
+---
+
+## Auth in 30 Seconds
+
+| Token | Lifetime | Purpose |
+|-------|----------|---------|
+| **Access Token (JWT)** | 15 min | API calls (`Authorization: Bearer ...`) |
+| **Refresh Token** | 60 min | Get new access tokens (rotates each use!) |
+| **Download Token** | 30 days | Streaming URLs (`?token=...` bound to one file) |
+
+**Rotation:** Every refresh = old token dies. Replay attack = impossible.
+
+---
+
+## Key Files (Where to Look)
+
+| Feature | File |
+|---------|------|
+| Streaming engine | `backend/app/streaming.py` |
+| Telegram bots | `backend/app/telegram.py` |
+| Disk cache | `backend/app/disk_cache.py` |
+| API routes | `backend/app/routers/streaming.py` |
+| Auth logic | `backend/app/auth.py` + `routers/auth.py` |
+| Movie search | `backend/app/grabber.py` |
+| Bot commands | `backend/app/bot.py` |
+
+---
+
+## Design Principles (TL;DR)
+
+1. **Disk is truth** — RAM caches are disposable
+2. **Backpressure everywhere** — Never unbounded queues
+3. **One media session at a time** — Serializes Telegram auth
+4. **Fail fast, retry bounded** — Timeouts + cooldowns, not infinite retries
+5. **Stateless workers** — Bots share nothing; safe to restart any time
