@@ -1,0 +1,106 @@
+name: Desktop Apps
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Web app URL to wrap"
+        required: false
+        default: "https://movie.aaruvi.space"
+      version:
+        description: "Release tag"
+        required: false
+        default: "desktop-v1.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  platform: linux }
+          - { os: windows-latest, platform: windows }
+    steps:
+      - name: Checkout pake toolkit
+        uses: actions/checkout@v4
+        with:
+          repository: tw93/pake
+
+      - name: Checkout Aruvi (icon source)
+        uses: actions/checkout@v4
+        with:
+          path: aruvi
+
+      - name: Setup environment (node + rust + system deps)
+        uses: ./.github/actions/setup-env
+        with:
+          mode: build
+
+      - name: Install mold linker (faster Linux rust builds)
+        if: matrix.platform == 'linux'
+        uses: rui314/setup-mold@v1
+
+      - name: Build pake CLI
+        run: pnpm run cli:build
+
+      - name: Build Linux packages (.deb + .AppImage)
+        if: matrix.platform == 'linux'
+        timeout-minutes: 30
+        shell: bash
+        run: |
+          set -e
+          ICON="$GITHUB_WORKSPACE/aruvi/frontend/public/logo.png"
+          node dist/cli.js "${{ inputs.url }}" --name Aruvi --icon "$ICON" \
+            --width 1280 --height 800 --targets deb,appimage
+          mkdir -p output/linux
+          mv Aruvi.deb output/linux/ 2>/dev/null || mv src-tauri/target/release/bundle/deb/*.deb output/linux/
+          mv Aruvi.AppImage output/linux/ 2>/dev/null || mv src-tauri/target/release/bundle/appimage/*.AppImage output/linux/
+
+      - name: Build Windows installer (.exe)
+        if: matrix.platform == 'windows'
+        timeout-minutes: 45
+        shell: pwsh
+        run: |
+          $icon = "$env:GITHUB_WORKSPACE\aruvi\frontend\public\logo.png"
+          $args = "${{ inputs.url }}", "--name", "Aruvi", "--icon", $icon,
+                  "--width", "1280", "--height", "800", "--targets", "nsis"
+          node dist/cli.js $args
+          New-Item -Path "output\windows" -ItemType Directory -Force
+          $rootExe = Get-ChildItem -Path "." -Filter "Aruvi*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($rootExe) {
+            Move-Item $rootExe.FullName "output\windows\"
+          } else {
+            $nsis = Get-ChildItem -Path "src-tauri\target\release\bundle\nsis" -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $nsis) { Write-Error "No .exe produced"; exit 1 }
+            Move-Item $nsis.FullName "output\windows\"
+          }
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aruvi-${{ matrix.platform }}
+          path: output/**
+
+  release:
+    name: Attach to GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          name: Aruvi Desktop ${{ inputs.version }}
+          files: dist/**
+          generate_release_notes: true
