@@ -10,6 +10,13 @@ from sqlalchemy import event, inspect as sa_inspect
 from .config import get_settings
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    _h = logging.StreamHandler()
+    _h.setLevel(logging.DEBUG)
+    _h.setFormatter(logging.Formatter("database %(levelname)s: %(message)s"))
+    logger.addHandler(_h)
+    logger.propagate = False
 settings = get_settings()
 
 # Convert database URL for async drivers and handle query params
