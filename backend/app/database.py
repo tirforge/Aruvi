@@ -75,6 +75,45 @@ async def get_db():
             await session.close()
 
 
+def _apply_rls_lockdown(sync_conn):
+    """Postgres-only defense-in-depth for Supabase deployments.
+
+    Enables Row Level Security (default-deny: enabled but with NO policies)
+    on every model table and strips grants from Supabase's public API roles,
+    so PostgREST / supabase-js clients can never read or write app data even
+    with valid anon/service keys. The backend connects as the table owner,
+    which bypasses RLS unless FORCE is used (we never force).
+
+    Idempotent; runs on every startup so tables added by new models are
+    locked automatically. No-op on other dialects (e.g. SQLite in tests).
+    See sql/001_tier1_rls_lockdown.sql for the standalone equivalent.
+    """
+    if sync_conn.dialect.name != "postgresql":
+        return
+    for table_name in Base.metadata.tables:
+        enabled = sync_conn.exec_driver_sql(
+            "SELECT c.relrowsecurity FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            f"WHERE n.nspname = 'public' AND c.relname = '{table_name}'"
+        ).scalar()
+        sync_conn.exec_driver_sql(
+            f'ALTER TABLE public."{table_name}" ENABLE ROW LEVEL SECURITY'
+        )
+        if not enabled:
+            logger.info("RLS: enabled row level security on %s", table_name)
+    for role in ("anon", "authenticated", "service_role"):
+        exists = sync_conn.exec_driver_sql(
+            f"SELECT 1 FROM pg_roles WHERE rolname = '{role}'"
+        ).scalar()
+        if exists:
+            sync_conn.exec_driver_sql(
+                f'REVOKE ALL ON ALL TABLES IN SCHEMA public FROM "{role}"'
+            )
+            sync_conn.exec_driver_sql(
+                f'REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM "{role}"'
+            )
+
+
 async def init_db():
     """Create all tables and auto-migrate missing columns."""
     async with engine.begin() as conn:
@@ -131,6 +170,11 @@ async def init_db():
                     sql = f"CREATE {unique}INDEX IF NOT EXISTS {idx.name} ON {table_name} ({cols})"
                     sync_conn.exec_driver_sql(sql)
                     logger.info("Migrated: created index %s on %s (%s)", idx.name, table_name, cols)
+
+            # Keep every table (including newly added models) locked down.
+            _apply_rls_lockdown(sync_conn)
+
+    async with engine.begin() as conn:
         await conn.run_sync(_migrate)
 
     # Data migration: reclassify files whose stored file_type doesn't match

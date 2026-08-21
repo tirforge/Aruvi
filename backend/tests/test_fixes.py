@@ -814,5 +814,61 @@ class TestDisconnectProbeWiring:
         assert src.count("request=request") >= 2
 
 
+class TestRlsAutoLockdown:
+    """init_db must keep every table RLS-locked on postgres, no-op elsewhere."""
+
+    def _fake_conn(self, dialect, rls_state=None, roles=()):
+        calls = []
+        state = dict(rls_state or {})
+
+        class _Res:
+            def __init__(self, v):
+                self._v = v
+
+            def scalar(self):
+                return self._v
+
+        class _Conn:
+            class dialect:
+                name = dialect
+
+            def exec_driver_sql(self, sql):
+                calls.append(sql)
+                if "relrowsecurity" in sql:
+                    t = sql.split("c.relname = '")[1].rstrip("'")
+                    return _Res(state.get(t))
+                if "pg_roles" in sql:
+                    role = sql.split("rolname = '")[1].rstrip("'")
+                    return _Res(1 if role in roles else None)
+                return _Res(None)
+
+        return _Conn(), calls
+
+    def test_noop_on_sqlite(self):
+        from app.database import _apply_rls_lockdown
+        conn, calls = self._fake_conn("sqlite")
+        _apply_rls_lockdown(conn)
+        assert calls == []
+
+    def test_enables_rls_on_all_model_tables(self):
+        from app.database import _apply_rls_lockdown, Base
+        conn, calls = self._fake_conn("postgresql")
+        _apply_rls_lockdown(conn)
+        enables = [c for c in calls if c.startswith("ALTER TABLE")]
+        assert len(enables) == len(Base.metadata.tables) > 0
+        for t in Base.metadata.tables:
+            assert f'ALTER TABLE public."{t}" ENABLE ROW LEVEL SECURITY' in enables
+
+    def test_revoke_only_existing_api_roles(self):
+        from app.database import _apply_rls_lockdown
+        # service_role absent -> only anon+authenticated revoked (2 statements each)
+        conn, calls = self._fake_conn("postgresql", roles=("anon", "authenticated"))
+        _apply_rls_lockdown(conn)
+        revokes = [c for c in calls if c.startswith("REVOKE")]
+        assert len(revokes) == 4
+        assert any('"anon"' in c and "SEQUENCES" not in c for c in revokes)
+        assert not any("service_role" in c for c in revokes)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
