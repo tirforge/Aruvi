@@ -382,6 +382,7 @@ async def batch_delete_folders(
     from sqlalchemy.orm import aliased
 
     folder_id_list = [f.id for f in folders]
+    message_ids: list[int] = []
     subfolders_cte = (
         select(Folder.id)
         .where(Folder.id.in_(folder_id_list))

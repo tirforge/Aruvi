@@ -3,6 +3,7 @@ Authentication API endpoints.
 """
 import logging
 import time
+from hashlib import sha256
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -96,7 +97,6 @@ async def refresh_token(
     if token_version is not None and token_version < user.auth_version:
         raise HTTPException(status_code=401, detail="Refresh token has been invalidated")
     
-    from hashlib import sha256
     presented_hash = sha256(request.refresh_token.encode()).hexdigest()
     session_result = await db.execute(
         select(RefreshSession).where(
@@ -271,7 +271,24 @@ async def verify_login_code(
             content={"detail": "Code not yet verified", "status": "pending"},
             headers={"Retry-After": "3"},
         )
-        
+
+    # Atomically consume the code so two concurrent pollers can't both mint
+    # tokens (the SELECT above is shared by every poller of the same code).
+    claim = await db.execute(
+        delete(LoginCode).where(
+            LoginCode.id == login_code.id,
+            LoginCode.telegram_id.is_not(None),
+        )
+    )
+    if claim.rowcount != 1:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={"detail": "Code not yet verified", "status": "pending"},
+            headers={"Retry-After": "3"},
+        )
+    await db.commit()
+
     # Get user
     result = await db.execute(
         select(User).where(User.telegram_id == login_code.telegram_id)
@@ -285,15 +302,12 @@ async def verify_login_code(
     # Generate tokens
     access_token = create_access_token(user.telegram_id, version=user.auth_version)
     refresh_token = create_refresh_token(user.telegram_id, version=user.auth_version)
-    from hashlib import sha256
     db.add(RefreshSession(
         user_id=user.id,
         token_hash=sha256(refresh_token.encode()).hexdigest(),
         expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + REFRESH_TOKEN_DURATION,
     ))
     
-    # Delete code after successful login
-    await db.delete(login_code)
     await db.commit()
     
     return AuthResponse(

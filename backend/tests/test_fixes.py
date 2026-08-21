@@ -428,5 +428,105 @@ class TestGrabberCollectReplies:
         pass  # Logic verified in code review
 
 
+class TestTokenVersionBinding:
+    """Tokens minted with a stale auth_version must be rejected (logout-all)."""
+
+    @pytest.mark.asyncio
+    async def test_stale_access_token_rejected(self, temp_db, sample_user):
+        from app.auth import create_access_token, get_current_user
+        from fastapi import HTTPException
+
+        sample_user.auth_version = 2
+        await temp_db.commit()
+
+        stale = create_access_token(sample_user.telegram_id, version=1)
+        req = _make_mock_request(stale)
+        with pytest.raises(HTTPException) as exc_info:
+            await get_current_user(request=req, credentials=None, db=temp_db)
+        assert exc_info.value.status_code == 401
+
+        fresh = create_access_token(sample_user.telegram_id, version=2)
+        req2 = _make_mock_request(fresh)
+        user = await get_current_user(request=req2, credentials=None, db=temp_db)
+        assert user.id == sample_user.id
+
+    @pytest.mark.asyncio
+    async def test_download_token_respects_auth_version(self, temp_db, sample_user):
+        """A ver=0 download token must not outlive logout-all (auth_version=1)."""
+        from app.auth import create_download_token
+        from app.routers.streaming import _user_from_download_token
+
+        sample_user.auth_version = 1
+        await temp_db.commit()
+
+        stale = create_download_token(sample_user.telegram_id, file_id=42, version=0)
+        result = await _user_from_download_token(
+            _make_mock_request(stale), 42, temp_db
+        )
+        assert result is None
+
+        fresh = create_download_token(sample_user.telegram_id, file_id=42, version=1)
+        result2 = await _user_from_download_token(
+            _make_mock_request(fresh), 42, temp_db
+        )
+        assert result2 is not None
+        assert result2.id == sample_user.id
+
+
+class TestVerifyCodeSingleUse:
+    """A claimed login code must yield tokens exactly once."""
+
+    @pytest.mark.asyncio
+    async def test_code_consumed_after_verify(self, temp_db, sample_user):
+        from app.models import LoginCode
+        from datetime import timedelta
+        from app.routers.auth import verify_login_code
+        from app.schemas import VerifyCodeRequest
+
+        code = LoginCode(
+            code="ABC123",
+            telegram_id=sample_user.telegram_id,
+            expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=5),
+        )
+        temp_db.add(code)
+        await temp_db.commit()
+
+        # slowapi's decorator validates a real starlette Request
+        from starlette.requests import Request as StarletteRequest
+        req = StarletteRequest({
+            "type": "http", "method": "POST",
+            "path": "/api/auth/verify-code",
+            "headers": [], "query_string": b"",
+            "client": ("127.0.0.1", 12345),
+        })
+        first = await verify_login_code(req, VerifyCodeRequest(code="ABC123"), temp_db)
+        assert first.access_token
+        assert first.refresh_token
+
+        # Code row is gone — second poll can't mint another session.
+        remaining = await temp_db.execute(
+            __import__("sqlalchemy").select(LoginCode).where(LoginCode.code == "ABC123")
+        )
+        assert remaining.scalar_one_or_none() is None
+
+        second = await verify_login_code(req, VerifyCodeRequest(code="ABC123"), temp_db)
+        assert second.status_code == 202
+
+
+class TestMarkdownSafety:
+    """User text embedded in Telegram markdown must not break parsing."""
+
+    def test_md_safe_replaces_backticks(self):
+        from app.utils import md_safe
+        assert md_safe("movie`name`.mkv") == "movie'name'.mkv"
+        assert md_safe("") == ""
+        assert md_safe("plain.mp4") == "plain.mp4"
+
+    def test_sanitize_filename_strips_path_separators(self):
+        from app.utils import sanitize_filename
+        assert "/" not in sanitize_filename("../../etc/passwd")
+        assert "\x00" not in sanitize_filename("bad\x00name")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -41,6 +41,7 @@ _GROUP_CHAT_ID_CACHE: dict[str, int] = {}
 
 _BOT_USER_CACHE: dict[str, tuple[float, object]] = {}
 _BOT_USER_CACHE_TTL = 3600  # 1h — resolves the bot once per hour, not per grab
+_BOT_USER_CACHE_MAX = 200
 
 
 MAX_OPTIONS = 30  # merged across channels (final response cap)
@@ -793,6 +794,14 @@ async def _get_bot_user(ivy: Client, username: str):
         _log.warning("grabber: get_users(%s) failed: %s — will auto-detect from replies", username, e)
         return None
     _BOT_USER_CACHE[username] = (now, bot_user)
+    # Evict expired entries and cap size — keys can come from arbitrary
+    # t.me/<name>?start= URLs inside bot messages, so the dict must not be
+    # allowed to grow without bound.
+    if len(_BOT_USER_CACHE) > _BOT_USER_CACHE_MAX:
+        for k in [k for k, (ts, _) in _BOT_USER_CACHE.items() if now - ts >= _BOT_USER_CACHE_TTL]:
+            _BOT_USER_CACHE.pop(k, None)
+        while len(_BOT_USER_CACHE) > _BOT_USER_CACHE_MAX:
+            _BOT_USER_CACHE.pop(next(iter(_BOT_USER_CACHE)))
     return bot_user
 
 
@@ -804,8 +813,11 @@ async def _wait_for_file_auto_join(
 ) -> object | None:
     from pyrogram.enums import MessageMediaType
 
+    # Cap flood-wait sleeps: without a deadline one long FLOOD_WAIT pins an
+    # _ivy_pool slot (and the HTTP request) for minutes.
+    send_deadline = asyncio.get_event_loop().time() + 60
     for attempt in range(max_attempts):
-        await _send_with_retry(ivy, chat_id, start_command)
+        await _send_with_retry(ivy, chat_id, start_command, deadline=send_deadline)
 
         file_msg = None
         pending_approval = False
@@ -829,7 +841,7 @@ async def _wait_for_file_auto_join(
                             if status == "requested":
                                 pending_approval = True
                         if re_start_after_join:
-                            await _send_with_retry(ivy, chat_id, start_command)
+                            await _send_with_retry(ivy, chat_id, start_command, deadline=send_deadline)
                             re_start_after_join = False
                         found_force_sub = True
                         break
@@ -1221,7 +1233,10 @@ async def grab_selected(
 
         if result_msg is None:
             try:
-                sent = await _send_with_retry(ivy, chat_id, query)
+                sent = await _send_with_retry(
+                    ivy, chat_id, query,
+                    deadline=asyncio.get_event_loop().time() + 60,
+                )
             except Exception as e:
                 _log.warning("grabber: search send failed in %s: %s", group_username, e)
                 return None
@@ -1288,7 +1303,10 @@ async def grab_selected(
                     pass
             result_msg = None
             try:
-                sent = await _send_with_retry(ivy, chat_id, query)
+                sent = await _send_with_retry(
+                    ivy, chat_id, query,
+                    deadline=asyncio.get_event_loop().time() + 60,
+                )
             except Exception as e:
                 _log.warning("grabber: search send failed in %s: %s", group_username, e)
                 return None
@@ -1358,14 +1376,16 @@ async def grab_selected(
         param = ""
         file_bot_username = ""
 
-        def _extract_deep_link(url: str):
+        def _extract_deep_link(url: str) -> bool:
             nonlocal param, file_bot_username
             m = _DEEP_LINK_RE.search(url)
-            if m:
-                param = m.group(1)
+            if not m:
+                return False
+            param = m.group(1)
             mb = _DEEP_LINK_BOT_RE.search(url)
             if mb and mb.group(1).lower() not in ("share", "telegram"):
                 file_bot_username = mb.group(1)
+            return True
 
         if isinstance(clicked, str) and "start=" in clicked:
             _extract_deep_link(clicked)
@@ -1375,16 +1395,25 @@ async def grab_selected(
             for _ in range(6):
                 await asyncio.sleep(1)
                 try:
+                    # History is newest-first; take the FIRST matching message
+                    # and stop — older matches are leftovers from previous grabs
+                    # and would overwrite the fresh param with a stale one.
                     async for msg in ivy.get_chat_history(bot_user.id, limit=5):
+                        saw_link = False
                         if msg.text and "start=" in msg.text:
                             _extract_deep_link(msg.text)
-                            break
-                        if msg.reply_markup:
+                            saw_link = True
+                        if not saw_link and msg.reply_markup:
                             for row_b in msg.reply_markup.inline_keyboard:
                                 for btn in row_b:
                                     if btn.url and "start=" in btn.url:
                                         _extract_deep_link(btn.url)
+                                        saw_link = True
                                         break
+                                if saw_link:
+                                    break
+                        if saw_link or param:
+                            break
                 except Exception:
                     pass
                 if param:

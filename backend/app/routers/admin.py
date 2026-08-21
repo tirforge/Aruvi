@@ -119,6 +119,28 @@ async def admin_delete_user(
         raise HTTPException(status_code=404, detail="User not found")
     if user.id == admin.id:
         raise HTTPException(status_code=400, detail="Cannot delete yourself")
+
+    # Collect storage-channel message ids BEFORE the cascade delete removes
+    # the file rows, so the Telegram copies can be cleaned up after commit.
+    from ..telegram import delete_from_storage_channel, invalidate_message_cache_batch
+    msg_result = await db.execute(
+        select(File.channel_message_id).where(File.user_id == user.id)
+    )
+    msg_ids = [mid for (mid,) in msg_result.all() if mid]
+    if msg_ids:
+        invalidate_message_cache_batch(msg_ids)
+
     await db.delete(user)
     await db.commit()
+
+    # Best-effort cleanup from Telegram AFTER commit so slow network deletes
+    # never hold the DB transaction open. DB rows are already gone either way.
+    if msg_ids:
+        for i in range(0, len(msg_ids), 100):
+            batch = msg_ids[i:i + 100]
+            try:
+                await delete_from_storage_channel(batch)
+            except Exception:
+                pass
+
     return {"deleted": True}

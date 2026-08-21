@@ -230,7 +230,10 @@ async def tv_folder_detail(
         folder_map: dict[int, Folder] = {f.id: f for f in all_folders_result.scalars().all()}
         current = folder
         chain: list[int] = []
-        while current.parent_id and current.parent_id in folder_map:
+        seen: set[int] = {folder.id}
+        while current.parent_id and current.parent_id in folder_map and current.parent_id not in seen:
+            # `seen` guards against a corrupted parent chain looping forever.
+            seen.add(current.parent_id)
             chain.append(current.parent_id)
             current = folder_map[current.parent_id]
         for pid in reversed(chain):

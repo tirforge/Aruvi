@@ -17,3 +17,13 @@ def sanitize_filename(name: str) -> str:
             name = name[:255]
 
     return name if name else "unnamed_file"
+
+
+def md_safe(text: str) -> str:
+    """Make user text safe to embed in Pyrogram's default Markdown parse mode.
+
+    Backticks are the dangerous one: inside a `` `code span` `` an unbalanced
+    backtick breaks the whole message parse (MessageParseError → send fails).
+    Markdown action characters (**, [], etc.) only render oddly, so they stay.
+    """
+    return text.replace("`", "'") if text else text

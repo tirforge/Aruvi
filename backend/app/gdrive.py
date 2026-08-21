@@ -288,7 +288,7 @@ async def upload_streaming(
         # (and the whole service) for the duration of the task-gather. Page
         # cache + one final fsync below gives the same durability without the
         # per-chunk stall.
-        fd = os.open(tmp, os.O_RDWR)
+        fd = os.open(tmp, os.O_RDWR | os.O_CREAT, 0o644)
 
         # Split file into 1MB slots — each slot is one _byte_accurate_file_stream call
         SLOT_SIZE = 1024 * 1024
@@ -386,7 +386,8 @@ async def upload_streaming(
             )
 
         # ── Phase 2: Upload sequentially to Drive ──
-        access_token = get_access_token(token_dict)
+        # Token refresh does blocking network I/O — keep it off the event loop.
+        access_token = await asyncio.to_thread(get_access_token, token_dict)
         async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=15.0)) as client:
             session_resp = await client.post(
                 "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable",
@@ -430,12 +431,17 @@ async def upload_streaming(
         raise RuntimeError("Upload completed but no file ID returned")
 
     try:
-        service = build_service(token_dict)
-        file_meta = (
-            service.files()
-            .get(fileId=file_id, fields="webViewLink")
-            .execute()
-        )
+        def _fetch_link() -> dict:
+            # build_service may refresh the token and .execute() does blocking
+            # HTTPS — run both on a worker thread.
+            service = build_service(token_dict)
+            return (
+                service.files()
+                .get(fileId=file_id, fields="webViewLink")
+                .execute()
+            )
+
+        file_meta = await asyncio.to_thread(_fetch_link)
         return file_meta.get(
             "webViewLink",
             f"https://drive.google.com/file/d/{file_id}/view",

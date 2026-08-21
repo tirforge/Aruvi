@@ -61,7 +61,7 @@ def format_duration(seconds: int) -> str:
     return f"{minutes}m {secs}s"
 
 
-from .utils import sanitize_filename  # noqa: re-export for backward compat
+from .utils import sanitize_filename, md_safe  # noqa: re-export for backward compat
 
 
 
@@ -114,11 +114,19 @@ async def _resolve_user_id(db, telegram_id: int):
     return result.scalar_one_or_none()
 
 
-def get_web_app_button(telegram_id: int, text: str = "🌐 Open Web") -> InlineKeyboardButton:
+async def get_web_app_button(telegram_id: int, text: str = "🌐 Open Web") -> InlineKeyboardButton:
     """Create a URL button with authenticated link. Uses a regular URL button
-    instead of WebApp because the domain is not registered with BotFather."""
+    instead of WebApp because the domain is not registered with BotFather.
+
+    Embeds the user's current ``auth_version`` so links keep working after
+    /logout_all bumps it (a stale ver=0 token would be rejected forever)."""
     from urllib.parse import quote
-    token = create_access_token(telegram_id)
+    async with async_session() as db:
+        result = await db.execute(
+            select(User.auth_version).where(User.telegram_id == telegram_id)
+        )
+        version = result.scalar_one_or_none() or 0
+    token = create_access_token(telegram_id, version=version)
     encoded_token = quote(token, safe='')
     web_url = f"{settings.web_base_url}/auth?token={encoded_token}"
     return InlineKeyboardButton(text, url=web_url)
@@ -201,7 +209,7 @@ async def start_command(client, message: Message):
             "💡 After uploading, you'll get the **File ID**\n"
             "Use `/file <id>` to rename, move, or delete.",
             reply_markup=InlineKeyboardMarkup([
-                [get_web_app_button(message.from_user.id, "🌐 Open Web Interface")],
+                [await get_web_app_button(message.from_user.id, "🌐 Open Web Interface")],
                 [
                     InlineKeyboardButton("📁 My Files", callback_data="show_files"),
                     InlineKeyboardButton("📂 My Folders", callback_data="back_folders")
@@ -325,7 +333,7 @@ async def myfiles_command(client, message: Message):
     
     for f in files:
         emoji = {"video": "🎬", "audio": "🎵", "document": "📄", "image": "🖼"}.get(f.file_type, "📎")
-        text += f"{emoji} `{f.id}` | {f.file_name}\n   └ {format_size(f.file_size)}"
+        text += f"{emoji} `{f.id}` | {md_safe(f.file_name)}\n   └ {format_size(f.file_size)}"
         if f.duration:
             text += f" • {format_duration(f.duration)}"
         text += "\n\n"
@@ -338,7 +346,7 @@ async def myfiles_command(client, message: Message):
             text,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("📁 My Folders", callback_data="back_folders")],
-                [get_web_app_button(message.from_user.id, "🌐 Open Web")]
+                [await get_web_app_button(message.from_user.id, "🌐 Open Web")]
             ])
         )
     except ButtonUrlInvalid:
@@ -380,7 +388,7 @@ async def folders_command(client, message: Message):
     buttons = []
     for f in folders:
         buttons.append([
-            InlineKeyboardButton(f"📂 {f.name}", callback_data=f"folder:{f.id}")
+            InlineKeyboardButton(f"📂 {f.name[:60]}", callback_data=f"folder:{f.id}")
         ])
     buttons.append([InlineKeyboardButton("➕ Create Folder", callback_data="create_folder")])
     
@@ -440,9 +448,9 @@ async def web_command(client, message: Message):
         message.from_user.last_name,
     )
     
-    token = create_access_token(message.from_user.id)
+    token = create_access_token(message.from_user.id, version=user.auth_version)
     web_url = f"{settings.web_base_url}/auth?token={token}"
-    
+
     await message.reply(
         "🌐 **Web Interface**\n\n"
         "Click the link below to access your files:\n"
@@ -721,6 +729,7 @@ async def handle_callback(client, callback: CallbackQuery):
                 )
             else:
                 await callback.answer("User not found", show_alert=True)
+                return
         await callback.answer()
         
     elif data == "logout_all_cancel":
@@ -731,7 +740,12 @@ async def handle_callback(client, callback: CallbackQuery):
     elif data == "get_web_link":
         # Fallback for old messages - show link and also provide Mini App button
         from pyrogram.errors import ButtonUrlInvalid
-        token = create_access_token(callback.from_user.id)
+        async with async_session() as db:
+            v_result = await db.execute(
+                select(User.auth_version).where(User.telegram_id == callback.from_user.id)
+            )
+            version = v_result.scalar_one_or_none() or 0
+        token = create_access_token(callback.from_user.id, version=version)
         web_url = f"{settings.web_base_url}/auth?token={token}"
         text = (
             f"🌐 **Web Interface**\n\n"
@@ -743,7 +757,7 @@ async def handle_callback(client, callback: CallbackQuery):
             await callback.message.reply(
                 text,
                 reply_markup=InlineKeyboardMarkup([
-                    [get_web_app_button(callback.from_user.id, "🚀 Open Mini App")]
+                    [await get_web_app_button(callback.from_user.id, "🚀 Open Mini App")]
                 ])
             )
         except ButtonUrlInvalid:
@@ -775,7 +789,7 @@ async def handle_callback(client, callback: CallbackQuery):
         
         for f in files:
             emoji = {"video": "🎬", "audio": "🎵", "document": "📄", "image": "🖼"}.get(f.file_type, "📎")
-            text += f"{emoji} `{f.id}` | {f.file_name}\n   └ {format_size(f.file_size)}\n\n"
+            text += f"{emoji} `{f.id}` | {md_safe(f.file_name)}\n   └ {format_size(f.file_size)}\n\n"
         
         text += "💡 Use /file <id> to manage a file"
         
@@ -785,7 +799,7 @@ async def handle_callback(client, callback: CallbackQuery):
                 text,
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("📂 My Folders", callback_data="back_folders")],
-                    [get_web_app_button(callback.from_user.id, "🌐 Open Web")]
+                    [await get_web_app_button(callback.from_user.id, "🌐 Open Web")]
                 ])
             )
         except ButtonUrlInvalid:
@@ -878,7 +892,7 @@ async def handle_callback(client, callback: CallbackQuery):
         buttons = []
         for f in folders:
             buttons.append([
-                InlineKeyboardButton(f"📂 {f.name}", callback_data=f"folder:{f.id}")
+                InlineKeyboardButton(f"📂 {f.name[:60]}", callback_data=f"folder:{f.id}")
             ])
         if not folders:
             text += "No folders yet.\nCreate one with the button below or /newfolder <name>"
@@ -1020,7 +1034,7 @@ async def handle_callback(client, callback: CallbackQuery):
         
         await callback.message.reply(
             f"✏️ **Rename File**\n\n"
-            f"Current name: `{current_name}`\n\n"
+            f"Current name: `{md_safe(current_name)}`\n\n"
             "Send me the new name:\n"
             "__(or send /cancel to abort)__"
         )
@@ -1050,9 +1064,9 @@ async def handle_callback(client, callback: CallbackQuery):
                 file = result.scalar_one_or_none()
                 
                 if file:
-                    file.file_name = new_name
+                    file.file_name = sanitize_filename(new_name)
                     await db.commit()
-                    await reply.reply(f"✅ File renamed to **{new_name}**")
+                    await reply.reply(f"✅ File renamed to **{file.file_name}**")
                 else:
                     await reply.reply("❌ File not found.")
                     
@@ -1080,7 +1094,7 @@ async def handle_callback(client, callback: CallbackQuery):
         await callback.message.edit(
             f"🗑 **Delete File?**\n\n"
             f"Are you sure you want to delete:\n"
-            f"`{file_name}`\n\n"
+            f"`{md_safe(file_name)}`\n\n"
             "⚠️ This action cannot be undone!",
             reply_markup=InlineKeyboardMarkup([
                 [
@@ -1415,7 +1429,7 @@ async def handle_callback(client, callback: CallbackQuery):
                 if not folder:
                     await callback.answer("Folder not found", show_alert=True)
                     return
-                folder_label = f"📁 {folder.name}"
+                folder_label = f"📁 {folder.name[:60]}"
 
             file.folder_id = folder_id
             await db.commit()
@@ -1522,13 +1536,13 @@ async def handle_callback(client, callback: CallbackQuery):
             file_size = file.file_size
             file_type = file.file_type
 
-        token = create_download_token(callback.from_user.id, file_id)
+        token = create_download_token(callback.from_user.id, file_id, version=user.auth_version)
         from urllib.parse import quote
         download_url = f"{settings.web_base_url}/api/stream/dl?id={file_id}&token={quote(token, safe='')}"
 
         emoji = {"video": "🎬", "audio": "🎵", "document": "📄", "image": "🖼"}.get(file_type, "📎")
         await callback.message.edit(
-            f"{emoji} **{file_name}**\n"
+            f"{emoji} **{md_safe(file_name)}**\n"
             f"📦 {format_size(file_size)}\n\n"
             f"🔗 **Download Link:**\n"
             f"{download_url}\n\n"
