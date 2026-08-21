@@ -25,6 +25,22 @@ aruvi/
 - Web player and native Android app (phone + TV flavors)
 - Google Drive integration, thumbnails, continue-watching, folder management
 
+## How It Works — You Bring Your Own Storage
+
+Aruvi ships **no content**. Each deployment is fully self-hosted against *your own*
+private Telegram channel:
+
+1. **Create your storage** — make a private Telegram channel, set its ID in `.env`
+2. **Grab** — use the web UI's Grab tab to search Telegram sources *you configure*.
+   The engine fans out across your bot fleet in parallel, paginates results,
+   auto-handles join walls and rate limits, and caches responses for instant re-search
+3. **Select** — picking a result makes your bot copy that file into *your* channel
+4. **Stream anywhere** — web player, Android phone/tablet, Android TV, or the
+   Windows/Linux desktop apps
+
+Your server never talks to anyone else's instance — files live only in channels
+you control.
+
 ## Quick Start
 
 ### 0. Docker (all-in-one, recommended)
