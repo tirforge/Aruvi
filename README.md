@@ -9,6 +9,17 @@ Self-hosted media platform that streams your own files from a private Telegram c
 to the browser, Android phone, Android TV, and desktop — powered by multi-bot parallel
 streaming with a two-tier (RAM + disk) cache.
 
+<table>
+  <tr>
+    <td><img src="screenshots/home.jpg" alt="Home" width="280"/></td>
+    <td><img src="screenshots/search.jpg" alt="Search" width="280"/></td>
+  </tr>
+  <tr>
+    <td><img src="screenshots/movies.jpg" alt="Movies" width="280"/></td>
+    <td><img src="screenshots/downloads.jpg" alt="Downloads" width="280"/></td>
+  </tr>
+</table>
+
 ```
 aruvi/
 ├── backend/      # FastAPI backend (streaming engine, Telegram bot, API, subtitles)
