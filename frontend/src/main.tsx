@@ -10,6 +10,10 @@ const queryClient = new QueryClient({
         queries: {
             staleTime: 1000 * 60 * 5, // 5 minutes
             retry: 1,
+            // TV/low-bandwidth clients: every tab refocus must not refetch
+            // files/folders/storage. Fresh data comes from explicit refresh
+            // (F5 handler) and mutations' invalidations.
+            refetchOnWindowFocus: false,
         },
     },
 })

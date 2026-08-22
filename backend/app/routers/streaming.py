@@ -430,23 +430,36 @@ async def _download_thumb(msg, thumb_obj):
 
 @router.get("/{file_id}/thumbnail")
 async def get_thumbnail(
+    request: Request,
     file_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get file thumbnail with caching."""
+    """Get file thumbnail with caching.
+
+    Thumbnails are immutable per file id, so the response carries a long
+    private cache policy + ETag — browsers revalidate with a 304 instead of
+    re-downloading every image on every browse (the SPA fetches thumbnails
+    through an authorized fetch, which the HTTP cache honors)."""
     result = await db.execute(
         select(File).where(File.id == file_id, File.user_id == current_user.id)
     )
     file = result.scalar_one_or_none()
-    
+
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
-    
+
+    _thumb_headers = {
+        "Cache-Control": "private, max-age=604800",
+        "ETag": f'"thumb-{file_id}"',
+    }
+    if request.headers.get("if-none-match") == _thumb_headers["ETag"]:
+        return Response(status_code=304, headers=_thumb_headers)
+
     # Serve from cache if available
     if file.thumbnail_data:
         mime = _detect_image_mime(file.thumbnail_data)
-        return Response(content=file.thumbnail_data, media_type=mime)
+        return Response(content=file.thumbnail_data, media_type=mime, headers=_thumb_headers)
     
     if not file.thumbnail_file_id:
         raise HTTPException(status_code=404, detail="Thumbnail not found")
@@ -489,7 +502,7 @@ async def get_thumbnail(
         await db.commit()
 
         mime = _detect_image_mime(data)
-        return Response(content=data, media_type=mime)
+        return Response(content=data, media_type=mime, headers=_thumb_headers)
     except HTTPException:
         raise
     except Exception as e:

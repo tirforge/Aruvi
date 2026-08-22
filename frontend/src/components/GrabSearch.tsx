@@ -23,7 +23,8 @@ export default function GrabSearch() {
   const [grabbed, setGrabbed] = useState<GrabSelectResponse | null>(null);
   const [grabbingIds, setGrabbingIds] = useState<Set<string>>(new Set());
   const [copied, setCopied] = useState(false);
-  const { addToast, setPreviewFile } = useAppStore();
+  const addToast = useAppStore((s) => s.addToast);
+const setPreviewFile = useAppStore((s) => s.setPreviewFile);
   const queryClient = useQueryClient();
 
   // Bumped on every search/clear so stale in-flight responses are dropped.
@@ -104,8 +105,7 @@ export default function GrabSearch() {
       setGrabbed(result);
       // Refresh file list so the new file shows up
       queryClient.invalidateQueries({ queryKey: ['files'] });
-      queryClient.invalidateQueries({ queryKey: ['files', 'recent'] });
-      queryClient.invalidateQueries({ queryKey: ['storage'] });
+            queryClient.invalidateQueries({ queryKey: ['storage'] });
       addToast('Movie grabbed!', 'success');
     } catch (err: any) {
       addToast(errorMessage(err, 'Failed to grab'), 'error');

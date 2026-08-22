@@ -78,7 +78,8 @@ export default function FileBrowser() {
     }, [searchInput, setSearchQuery]);
 
     // Data Fetching
-    const { data: filesList, isLoading: filesLoading, isError: filesError, refetch: refetchFiles } = useFiles(currentFolderId, fileTypeFilter || undefined, searchQuery || undefined, page);
+    const filesSectionActive = activeSection === 'files';
+    const { data: filesList, isLoading: filesLoading, isError: filesError, refetch: refetchFiles } = useFiles(currentFolderId, fileTypeFilter || undefined, searchQuery || undefined, page, filesSectionActive);
     // Only fetch these when their section is active — otherwise every browse
     // view pays for two extra authorized requests (and refetches on focus).
     const { data: recentFiles, isLoading: recentLoading, refetch: refetchRecent } = useRecentFiles(50, activeSection === 'recent');
@@ -102,8 +103,8 @@ export default function FileBrowser() {
     }
 
     // Folders only show in 'files' mode
-    const { data: folders, isLoading: foldersLoading, refetch: refetchFolders } = useFolders(currentFolderId);
-    const showFolders = activeSection === 'files' && !searchQuery && !fileTypeFilter;
+    const { data: folders, isLoading: foldersLoading, refetch: refetchFolders } = useFolders(currentFolderId, filesSectionActive);
+    const showFolders = filesSectionActive && !searchQuery && !fileTypeFilter;
 
     // Combined loading state
     isLoading = isLoading || (activeSection === 'files' && foldersLoading);
@@ -118,6 +119,7 @@ export default function FileBrowser() {
     const updateFolderMutation = useUpdateFolder();
 
     const containerRef = useRef<HTMLDivElement>(null);
+    const closeSidebar = useCallback(() => setSidebarOpen(false), []);
     const [isSelecting, setIsSelecting] = useState(false);
     const [isSidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
     const selectionStart = useRef({ x: 0, y: 0 });
@@ -207,8 +209,9 @@ export default function FileBrowser() {
             }
             setDeleteConfirm(null);
             clearSelection();
-            refetchFiles();
-            refetchFolders();
+            // No manual refetch: the delete mutations' onSuccess already
+            // invalidate ['files']/['folders'] — refetching here duplicated
+            // every round-trip.
             addToast('Items deleted successfully', 'success');
         } catch (error) {
             console.error('Delete failed:', error);
@@ -565,7 +568,7 @@ export default function FileBrowser() {
 
     return (
         <div className="flex h-screen bg-dark-950 text-white selection:bg-primary-500/30 overflow-hidden">
-            <Sidebar isOpen={isSidebarOpen} onClose={() => setSidebarOpen(false)} />
+            <Sidebar isOpen={isSidebarOpen} onClose={closeSidebar} />
             
             <main className={`flex-1 flex flex-col min-w-0 relative bg-gradient-to-br from-dark-950 to-dark-900 transition-[margin] duration-300 ease-in-out ${isSidebarOpen ? 'md:ml-64' : 'ml-0'}`}>
                 {/* Header */}
@@ -580,7 +583,9 @@ export default function FileBrowser() {
                             <Menu className="w-6 h-6" />
                         </button>
 
-                        {/* Search */}
+                        {/* Search — files section only: it drives the files
+                            query, which is disabled in other sections. */}
+                        {filesSectionActive && (
                         <div className="relative w-full max-w-[200px] sm:max-w-xs md:w-64">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-500" />
 <input
@@ -591,6 +596,7 @@ export default function FileBrowser() {
                                     className="w-full bg-dark-800/50 border border-white/[0.06] rounded-lg pl-9 pr-3 py-1.5 text-sm text-white focus:outline-none focus:border-primary-500/50 focus:bg-dark-800 transition-all"
                                 />
                         </div>
+                        )}
                         
                         {/* Vertical Div */}
                         <div className="hidden sm:block w-px h-6 bg-white/[0.1]"></div>

@@ -2,15 +2,19 @@ import { Files, Clock, PlayCircle, LogOut, HardDrive, X, Users, Zap, Shield, Sea
 import logo from '../assets/logo.png';
 import { useAppStore } from '../lib/store';
 import { useStorageStats, formatFileSize, useLogoutAll, useCurrentUser } from '../lib/api';
-import { useState, type ComponentType } from 'react';
+import { memo, useCallback, useState, type ComponentType } from 'react';
 
 interface SidebarProps {
     isOpen: boolean;
     onClose: () => void;
 }
 
-export default function Sidebar({ isOpen, onClose }: SidebarProps) {
-    const { activeSection, setActiveSection, setShowAdminPanel } = useAppStore();
+function Sidebar({ isOpen, onClose }: SidebarProps) {
+    // Narrow selectors: this renders on every FileBrowser render — a
+    // whole-store subscription would re-render it on every store write.
+    const activeSection = useAppStore((s) => s.activeSection);
+    const setActiveSection = useAppStore((s) => s.setActiveSection);
+    const setShowAdminPanel = useAppStore((s) => s.setShowAdminPanel);
     const { data: storage } = useStorageStats();
     const { data: user } = useCurrentUser();
     const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -34,24 +38,10 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         }
     };
 
-    const handleNavClick = (section: 'files' | 'recent' | 'continue_watching' | 'grab') => {
+    const handleNavClick = useCallback((section: 'files' | 'recent' | 'continue_watching' | 'grab') => {
         setActiveSection(section);
         if (window.innerWidth < 768) onClose(); // Close sidebar on mobile when item clicked
-    };
-
-    const NavItem = ({ section, icon: Icon, label }: { section: 'files' | 'recent' | 'continue_watching' | 'grab', icon: ComponentType<{ className?: string }>, label: string }) => (
-        <button
-            onClick={() => handleNavClick(section)}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
-                activeSection === section
-                    ? 'bg-primary-600/10 text-primary-400 font-medium'
-                    : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
-            }`}
-        >
-            <Icon className="w-5 h-5" />
-            {label}
-        </button>
-    );
+    }, [setActiveSection, onClose]);
 
     return (
         <>
@@ -94,10 +84,10 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
 
                 {/* Navigation */}
                 <nav className="flex-1 px-3 space-y-1 overflow-y-auto">
-                    <NavItem section="files" icon={Files} label="My Files" />
-                    <NavItem section="recent" icon={Clock} label="Recently Added" />
-<NavItem section="continue_watching" icon={PlayCircle} label="Continue Watching" />
-<NavItem section="grab" icon={Search} label="Search Movies" />
+                    <NavItem section="files" icon={Files} label="My Files" active={activeSection === 'files'} onClick={handleNavClick} />
+                    <NavItem section="recent" icon={Clock} label="Recently Added" active={activeSection === 'recent'} onClick={handleNavClick} />
+<NavItem section="continue_watching" icon={PlayCircle} label="Continue Watching" active={activeSection === 'continue_watching'} onClick={handleNavClick} />
+<NavItem section="grab" icon={Search} label="Search Movies" active={activeSection === 'grab'} onClick={handleNavClick} />
                     {user?.is_admin && (
                         <button
                             onClick={() => { setShowAdminPanel(true); onClose(); }}
@@ -213,3 +203,32 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         </>
     );
 }
+
+type SectionId = 'files' | 'recent' | 'continue_watching' | 'grab';
+
+// Module scope: a component defined inside Sidebar's render body is a NEW
+// type on every render, so React unmounts/remounts all nav buttons whenever
+// anything re-renders. Props keep it reusable and memoizable.
+const NavItem = memo(function NavItem({ section, icon: Icon, label, active, onClick }: {
+    section: SectionId;
+    icon: ComponentType<{ className?: string }>;
+    label: string;
+    active: boolean;
+    onClick: (section: SectionId) => void;
+}) {
+    return (
+        <button
+            onClick={() => onClick(section)}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
+                active
+                    ? 'bg-primary-600/10 text-primary-400 font-medium'
+                    : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
+            }`}
+        >
+            <Icon className="w-5 h-5" />
+            {label}
+        </button>
+    );
+});
+
+export default memo(Sidebar);

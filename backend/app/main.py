@@ -24,6 +24,7 @@ from .telegram import start_telegram_client, stop_telegram_client
 from .status import get_status, attach_ring_handler, clear_logs, maybe_oom_clear
 from .streaming import _evict_idle_ram_caches
 from .utils import bearer_token_matches
+from .gzip_middleware import CompressibleGZipMiddleware
 
 from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, admin_router, gdrive_router, legal_router, diagnostic_router, grab_router, subtitles_router #JT
 
@@ -199,6 +200,7 @@ class SecurityHeadersMiddleware:
         await self.app(scope, receive, send_wrapper)
 
 
+app.add_middleware(CompressibleGZipMiddleware, minimum_size=1024)
 app.add_middleware(SecurityHeadersMiddleware)
 
 
@@ -356,23 +358,41 @@ async def download_page():
     return FileResponse("app/static/download.html", headers=NO_CACHE_HEADERS)
 
 @app.get("/{full_path:path}")
-async def serve_spa(full_path: str):
+async def serve_spa(request: Request, full_path: str):
     """Serve the React SPA for any non-API routes."""
     if full_path == "api" or full_path.startswith("api/") or ".." in full_path:
         raise HTTPException(status_code=404, detail="Not found")
 
-    # Two stat calls per request — keep them off the event loop (slow disks
-    # under load would stall active streams).
+    # Stats + precompressed lookups off the event loop (slow disks under
+    # load would stall active streams).
     static_file_path = f"app/static/{full_path}"
-    exists, index_exists = await asyncio.to_thread(
-        lambda: (
-            os.path.exists(static_file_path) and os.path.isfile(static_file_path),
-            os.path.exists("app/static/index.html"),
-        )
-    )
-    if exists:
+    import mimetypes
+
+    def _resolve():
+        if os.path.isfile(static_file_path):
+            gz = static_file_path + ".gz"
+            if os.path.isfile(gz):
+                return static_file_path, gz
+            return static_file_path, None
+        return None, None
+
+    accepts_gzip = "gzip" in request.headers.get("accept-encoding", "")
+    static_file, gz_file = await asyncio.to_thread(_resolve)
+    if static_file:
+        if gz_file and accepts_gzip:
+            # Precompressed sibling from the build — ~70% smaller on the wire
+            # (385KB JS -> 116KB, 11MB player -> ~3MB).
+            media_type = mimetypes.guess_type(static_file)[0] or "application/octet-stream"
+            return FileResponse(
+                gz_file,
+                media_type=media_type,
+                headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"},
+            )
         return FileResponse(static_file_path)
 
+    index_exists = await asyncio.to_thread(
+        lambda: os.path.exists("app/static/index.html")
+    )
     if index_exists:
         return FileResponse("app/static/index.html", headers=NO_CACHE_HEADERS)
 

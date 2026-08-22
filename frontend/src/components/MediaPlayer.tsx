@@ -26,15 +26,19 @@ if (typeof window !== 'undefined') {
         // reports idle (busy TVs, background tabs).
         const w = window as typeof window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number };
         if (w.requestIdleCallback) {
-            w.requestIdleCallback(warm, { timeout: 3000 });
+            w.requestIdleCallback(warm, { timeout: 5000 });
         } else {
-            setTimeout(warm, 1500);
+            setTimeout(warm, 11000);
         }
     };
+    // Warm only after the first 10s: the engine is 11MB, and fetching it in
+    // the startup window competed with the initial page + thumbnails for
+    // visitors who never play anything. Anyone who opens a file earlier
+    // triggers the load directly.
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
-        setTimeout(scheduleWarm, 500);
+        setTimeout(scheduleWarm, 10000);
     } else {
-        window.addEventListener('load', () => setTimeout(scheduleWarm, 500));
+        window.addEventListener('load', () => setTimeout(scheduleWarm, 10000));
     }
 }
 
@@ -57,18 +61,26 @@ function loadMoviPlayer(): Promise<boolean> {
     return moviLoadPromise;
 }
 
-export default function MediaPlayer() {
-    const { previewFile: file, setPreviewFile, isPlayerMinimized, setPlayerMinimized } = useAppStore();
+function MediaPlayer() {
+    // Narrow selectors: this wrapper sits at the app root for the whole
+    // session — a whole-store subscription re-rendered the full 900-line
+    // player tree on EVERY store write (toasts, selection drags, search).
+    const file = useAppStore((s) => s.previewFile);
+    const setPreviewFile = useAppStore((s) => s.setPreviewFile);
+    const isPlayerMinimized = useAppStore((s) => s.isPlayerMinimized);
+    const setPlayerMinimized = useAppStore((s) => s.setPlayerMinimized);
+
+    const closePlayer = useCallback(() => {
+        setPreviewFile(null);
+        setPlayerMinimized(false);
+    }, [setPreviewFile, setPlayerMinimized]);
 
     if (!file) return null;
 
-    const closePlayer = () => {
-        setPreviewFile(null);
-        setPlayerMinimized(false);
-    };
-
     return <MediaPlayerContent file={file} onClose={closePlayer} isMinimized={isPlayerMinimized} setMinimized={setPlayerMinimized} />;
 }
+
+export default MediaPlayer;
 
 interface MediaPlayerContentProps {
     file: TelegramFile;
@@ -505,7 +517,10 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         };
         const onTime = () => {
             const t = el.currentTime || 0;
-            setCurrentTime(t);
+            // currentTime state is only read when minimized or in the first
+            // seconds — updating it on every timeupdate (~4x/s) re-rendered
+            // the whole overlay for nothing.
+            if (isMinimizedRef.current || t < 5) setCurrentTime(t);
             if (t > resumeStartRef.current + 1) passedResumeRef.current = true;
         };
         const onLoaded = () => { syncDuration(); setIsLoading(false); };

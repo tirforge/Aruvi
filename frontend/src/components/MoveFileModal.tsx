@@ -16,7 +16,8 @@ export default function MoveFileModal({ items, onClose }: MoveFileModalProps) {
     const { data: folderTree, isLoading } = useFolderTree();
     const { mutateAsync: moveFiles, isPending: isFilesPending } = useMoveFiles();
     const { mutateAsync: moveFolders, isPending: isFoldersPending } = useMoveFolders();
-    const { addToast, clearSelection } = useAppStore();
+    const addToast = useAppStore((s) => s.addToast);
+const clearSelection = useAppStore((s) => s.clearSelection);
 
     const isPending = isFilesPending || isFoldersPending;
     const totalItems = items.files.length + items.folders.length;

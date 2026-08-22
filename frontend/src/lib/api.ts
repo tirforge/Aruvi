@@ -374,9 +374,10 @@ export const fetchSubtitleContent = async (
         { params: { file_id: fileId, provider, subtitle_id: subtitleId, download_id: downloadId, language } },
     );
     return data;
-};export const useFiles = (folderId?: number | null, fileType?: string, search?: string, page = 1) => {
+};export const useFiles = (folderId?: number | null, fileType?: string, search?: string, page = 1, enabled = true) => {
 return useQuery({
 queryKey: ['files', folderId, fileType, search, page],
+enabled,
 queryFn: async () => {
 const params: Record<string, any> = {};
 if (folderId != null) params.folder_id = folderId;

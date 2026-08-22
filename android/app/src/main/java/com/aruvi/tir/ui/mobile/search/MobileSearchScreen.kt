@@ -135,7 +135,7 @@ fun MobileSearchScreen(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(uiState.results) { file ->
+                items(uiState.results, key = { it.id }) { file ->
                      SearchFileCard(
                         file = file, 
                         serverUrl = uiState.serverUrl, 

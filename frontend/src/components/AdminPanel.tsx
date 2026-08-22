@@ -130,7 +130,7 @@ export default function AdminPanel({ onBack }: { onBack: () => void }) {
     const { data: users, isLoading: usersLoading } = useAdminUsers();
     const toggleAdmin = useToggleAdmin();
     const deleteUser = useDeleteUser();
-    const { addToast } = useAppStore();
+    const addToast = useAppStore((s) => s.addToast);
 
     const handleToggleAdmin = async (user: AdminUser) => {
         try {

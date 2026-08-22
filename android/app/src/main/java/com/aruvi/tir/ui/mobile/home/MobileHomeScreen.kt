@@ -98,7 +98,7 @@ fun MobileHomeScreen(
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        items(uiState.continueWatching) { file ->
+                        items(uiState.continueWatching, key = { it.id }) { file ->
                             ContinueWatchingCard(
                                 file = file, 
                                 serverUrl = uiState.serverUrl,
@@ -117,7 +117,7 @@ fun MobileHomeScreen(
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        items(uiState.recentFiles) { file ->
+                        items(uiState.recentFiles, key = { it.id }) { file ->
                             RecentFileCard(
                                 file = file, 
                                 serverUrl = uiState.serverUrl,
@@ -163,7 +163,7 @@ fun MobileHomeScreen(
             }
 
             // 5. Folders List
-            items(uiState.folders) { folder ->
+            items(uiState.folders, key = { it.id }) { folder ->
                 FolderCard(
                     folder = folder,
                     isSelected = uiState.selectedFolderIds.contains(folder.id),
@@ -182,7 +182,7 @@ fun MobileHomeScreen(
             }
 
             // 6. Files List
-            items(uiState.files) { file ->
+            items(uiState.files, key = { it.id }) { file ->
                 FileCard(
                     file = file,
                     serverUrl = uiState.serverUrl,
