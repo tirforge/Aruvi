@@ -818,11 +818,16 @@ async def _wait_for_file_auto_join(
     # _ivy_pool slot (and the HTTP request) for minutes.
     send_deadline = asyncio.get_event_loop().time() + 60
     for attempt in range(max_attempts):
-        await _send_with_retry(ivy, chat_id, start_command, deadline=send_deadline)
+        sent = await _send_with_retry(ivy, chat_id, start_command, deadline=send_deadline)
 
         file_msg = None
         pending_approval = False
         re_start_after_join = True
+        # Only accept media the BOT posts AFTER our /start — file-bot chats
+        # are reused across grabs, so the previous grab's file still sits in
+        # history; without this check a slow/silent bot delivers the WRONG
+        # (previous) file, which then gets stored and streamed as this grab.
+        min_msg_id = sent.id if sent else 0
         for _ in range(15):
             await asyncio.sleep(1)
             found_force_sub = False
@@ -832,8 +837,11 @@ async def _wait_for_file_auto_join(
                         MessageMediaType.VIDEO, MessageMediaType.DOCUMENT,
                         MessageMediaType.AUDIO, MessageMediaType.PHOTO,
                     ):
-                        file_msg = msg
-                        break
+                        if msg.id > min_msg_id and msg.from_user and msg.from_user.id == chat_id:
+                            file_msg = msg
+                            break
+                        # Older media (or echoed forwards) — keep scanning for
+                        # the join-prompt below, but never accept it as the file.
                     if _is_join_required(msg):
                         # Auto-join every channel/group the bot wants, then send
                         # /start once more so the bot re-checks membership.

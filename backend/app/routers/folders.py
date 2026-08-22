@@ -18,23 +18,10 @@ from ..telegram import delete_from_storage_channel, invalidate_message_cache_bat
 router = APIRouter(prefix="/folders", tags=["Folders"])
 
 
-async def get_folder_file_count(db: AsyncSession, folder_id: int) -> int:
-    """Get the total number of files in a folder and all its subfolders."""
-    # This is a recursive CTE approach for efficiency
-    from sqlalchemy import text
-    query = text("""
-        WITH RECURSIVE subfolders AS (
-            SELECT id FROM folders WHERE id = :root_id
-            UNION ALL
-            SELECT f.id FROM folders f
-            INNER JOIN subfolders sf ON f.parent_id = sf.id
-        )
-        SELECT COUNT(*) FROM files
-        WHERE folder_id IN (SELECT id FROM subfolders)
-    """)
-    result = await db.execute(query, {"root_id": folder_id})
-    return result.scalar() or 0
-
+# NOTE: a user-unscoped recursive-CTE file-count helper used to live here.
+# It had no callers and no user_id predicate — removed so it can never be
+# reused as a cross-user data leak. Live endpoints compute counts inline
+# scoped by Folder.user_id == current_user.id.
 
 @router.get("", response_model=List[FolderResponse])
 async def list_folders(

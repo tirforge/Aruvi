@@ -361,11 +361,19 @@ async def serve_spa(full_path: str):
     if full_path == "api" or full_path.startswith("api/") or ".." in full_path:
         raise HTTPException(status_code=404, detail="Not found")
 
+    # Two stat calls per request — keep them off the event loop (slow disks
+    # under load would stall active streams).
     static_file_path = f"app/static/{full_path}"
-    if os.path.exists(static_file_path) and os.path.isfile(static_file_path):
+    exists, index_exists = await asyncio.to_thread(
+        lambda: (
+            os.path.exists(static_file_path) and os.path.isfile(static_file_path),
+            os.path.exists("app/static/index.html"),
+        )
+    )
+    if exists:
         return FileResponse(static_file_path)
 
-    if os.path.exists("app/static/index.html"):
+    if index_exists:
         return FileResponse("app/static/index.html", headers=NO_CACHE_HEADERS)
 
     return JSONResponse(status_code=404, content={"detail": "Not found"})

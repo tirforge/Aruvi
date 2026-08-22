@@ -346,6 +346,11 @@ async def update_progress(
                 else:
                     watch_progress.completed = False
                 await db.commit()
+            else:
+                # The IntegrityError was NOT the (user, file) unique race —
+                # e.g. the file row was deleted between the ownership check
+                # and this commit (FK violation). refresh(None) would 500.
+                raise HTTPException(status_code=404, detail="File not found")
     await db.refresh(watch_progress)
     return watch_progress
 

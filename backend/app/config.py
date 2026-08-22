@@ -1,15 +1,49 @@
 import secrets
 import logging
+import os
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
+# Where the auto-generated JWT secret is persisted so restarts stop
+# invalidating every session. Lives under the persistent data dir (bind-mounted
+# in docker-compose), NOT in the image.
+_JWT_SECRET_FILE = Path(os.environ.get("JWT_SECRET_FILE", "data/.jwt_secret"))
+
 
 def _auto_jwt_secret() -> str:
-    logger.warning("JWT_SECRET not set — auto-generated (sessions invalidate on restart)")
-    return secrets.token_hex(32)
+    """Generate a JWT secret ONCE and persist it.
+
+    A fresh secret per process meant every container restart logged out every
+    user (all access/refresh JWTs failed verification). Persisting the
+    generated secret keeps sessions across restarts while still never being
+    committed to the repo. Set JWT_SECRET explicitly to override."""
+    try:
+        if _JWT_SECRET_FILE.exists():
+            stored = _JWT_SECRET_FILE.read_text().strip()
+            if stored:
+                logger.info("JWT_SECRET not set — using persisted secret from %s", _JWT_SECRET_FILE)
+                return stored
+        _JWT_SECRET_FILE.parent.mkdir(parents=True, exist_ok=True)
+        generated = secrets.token_hex(32)
+        _JWT_SECRET_FILE.write_text(generated)
+        try:
+            os.chmod(_JWT_SECRET_FILE, 0o600)
+        except OSError:
+            pass
+        logger.warning(
+            "JWT_SECRET not set — generated and persisted to %s (set JWT_SECRET "
+            "explicitly for multi-replica deployments)", _JWT_SECRET_FILE,
+        )
+        return generated
+    except OSError:
+        # Read-only filesystem (e.g. ephemeral container storage): fall back
+        # to the old per-process behavior rather than crash the app.
+        logger.warning("JWT_SECRET not set and %s unwritable — sessions invalidate on restart", _JWT_SECRET_FILE)
+        return secrets.token_hex(32)
 
 
 class Settings(BaseSettings):
