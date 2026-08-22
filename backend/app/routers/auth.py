@@ -318,8 +318,16 @@ async def _verify_login_code_once(
     user = result.scalar_one_or_none()
     
     if not user:
-        # Should not happen if bot flow is correct
-        raise HTTPException(status_code=404, detail="User not found")
+        # The claimer's account row is gone (deleted after the code was
+        # claimed, or user creation raced/failed in the bot). Minting tokens
+        # is impossible — fail TERMINALLY (410) so clients stop polling and
+        # tell the user to re-auth with the bot, instead of 404-looping
+        # forever (web showed nothing; Android said "invalid code").
+        raise HTTPException(
+            status_code=410,
+            detail="This code is no longer valid. Send /start to the bot to "
+                   "recreate your account, then generate a new code.",
+        )
         
     # Generate tokens
     access_token = create_access_token(user.telegram_id, version=user.auth_version)

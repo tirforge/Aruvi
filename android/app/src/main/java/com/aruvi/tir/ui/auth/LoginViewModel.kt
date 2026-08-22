@@ -213,7 +213,7 @@ class LoginViewModel @Inject constructor(
                     },
             onFailure = { e ->
                 val msg = e.message.orEmpty()
-                if (msg.contains("expired") || msg.contains("already used")) {
+                if (msg.contains("expired") || msg.contains("already used") || msg.contains("no longer valid")) {
                     _uiState.value = _uiState.value.copy(
                         isPolling = false,
                         error = if (msg.contains("already used")) {

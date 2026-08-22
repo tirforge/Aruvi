@@ -174,8 +174,8 @@ class AuthRepository @Inject constructor(
                     }
                 }
                 202 -> Result.failure(Exception("Code not yet confirmed"))
+                410 -> Result.failure(Exception("Code no longer valid. Please generate a new one."))
                 404 -> Result.failure(Exception("Code invalid or expired. Please generate a new one."))
-                410 -> Result.failure(Exception("Code expired or already used on another device"))
                 429 -> Result.failure(Exception("Too many requests. Please wait a moment."))
                 else -> Result.failure(Exception("Verification failed"))
             }

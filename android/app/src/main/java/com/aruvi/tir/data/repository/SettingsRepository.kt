@@ -65,35 +65,23 @@ class SettingsRepository @Inject constructor(
     fun peekServerUrl(): String = serverUrlCache.get()
 
     /**
-     * Normalize a user-entered server URL: add a scheme when missing so it never
-     * crashes URL parsing / Retrofit at startup.
+     * Normalize a user-entered server URL: add a scheme when missing so it
+     * never crashes URL parsing / Retrofit at startup.
      *
-     * Scheme-less input keeps http:// for LAN self-hosting targets (private
-     * ranges, localhost, raw IPs) where TLS is rare, but defaults to https://
-     * for public hostnames — a typo'd public domain must not silently send
-     * bearer tokens in cleartext.
+     * BOTH http:// and https:// are fully supported (localhost, LAN IPs and
+     * HTTP tunnels are the norm for self-hosting; HTTPS users type the
+     * scheme or paste the full tunnel URL). Scheme-less input defaults to
+     * http:// — guessing https would break plain-HTTP servers and tunnels
+     * with a confusing connection error at login.
      */
     fun normalizeServerUrl(input: String): String {
         val trimmed = input.trim().trimEnd('/')
         if (trimmed.isEmpty()) return trimmed
-        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-            return trimmed
+        return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+            trimmed
+        } else {
+            "http://$trimmed"
         }
-        val host = trimmed.substringAfter("://").substringBefore('/').substringBefore(':')
-        val isLocal = host == "localhost" || host == "127.0.0.1" || host == "::1" ||
-            host.endsWith(".local") || host.endsWith(".lan") || host.endsWith(".internal") ||
-            isPrivateIpv4(host)
-        return if (isLocal) "http://$trimmed" else "https://$trimmed"
-    }
-
-    private fun isPrivateIpv4(host: String): Boolean {
-        val parts = host.split('.')
-        if (parts.size != 4) return false
-        val octets = parts.map { it.toIntOrNull() ?: return false }
-        return (octets[0] == 10) ||
-            (octets[0] == 172 && octets[1] in 16..31) ||
-            (octets[0] == 192 && octets[1] == 168) ||
-            (octets[0] == 169 && octets[1] == 254)
     }
 
     /**
