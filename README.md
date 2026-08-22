@@ -160,6 +160,12 @@ Full list in `.env.example`.
 
 ---
 
+## Credits
+
+Built on the shoulders of [TelePlay](https://github.com/subinps/TelePlay) and [MoviPlayer](https://github.com/mrujjwalg/movi-player). Aruvi started as a fork and grew into its own thing with a rewritten backend, multi-user auth, desktop apps, and heavy reliability work. Huge thanks to those maintainers.
+
+---
+
 ## License
 
 MIT
