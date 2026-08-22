@@ -54,7 +54,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          ICON="$GITHUB_WORKSPACE/aruvi/frontend/public/logo.png"
+          ICON="$GITHUB_WORKSPACE/aruvi/frontend/public/icon-desktop.png"
           node dist/cli.js "${{ inputs.url }}" --name Aruvi --icon "$ICON" \
             --width 1280 --height 800 --targets deb,appimage
           # CLI copies artifacts to project root with lowercased names
@@ -68,7 +68,7 @@ jobs:
         timeout-minutes: 45
         shell: pwsh
         run: |
-          $icon = "$env:GITHUB_WORKSPACE\aruvi\frontend\public\logo.png"
+          $icon = "$env:GITHUB_WORKSPACE\aruvi\frontend\public\icon-desktop.ico"
           $args = "${{ inputs.url }}", "--name", "Aruvi", "--icon", $icon,
                   "--width", "1280", "--height", "800", "--targets", "x64"
           node dist/cli.js $args
