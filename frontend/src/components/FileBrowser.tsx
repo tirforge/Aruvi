@@ -77,8 +77,10 @@ export default function FileBrowser() {
 
     // Data Fetching
     const { data: filesList, isLoading: filesLoading, isError: filesError, refetch: refetchFiles } = useFiles(currentFolderId, fileTypeFilter || undefined, searchQuery || undefined, page);
-    const { data: recentFiles, isLoading: recentLoading, refetch: refetchRecent } = useRecentFiles(50);
-    const { data: cwFiles, isLoading: cwLoading, refetch: refetchCW } = useContinueWatching(50);
+    // Only fetch these when their section is active — otherwise every browse
+    // view pays for two extra authorized requests (and refetches on focus).
+    const { data: recentFiles, isLoading: recentLoading, refetch: refetchRecent } = useRecentFiles(50, activeSection === 'recent');
+    const { data: cwFiles, isLoading: cwLoading, refetch: refetchCW } = useContinueWatching(50, activeSection === 'continue_watching');
     
 
 

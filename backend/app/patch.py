@@ -178,8 +178,13 @@ class PatchedClient(PyroClient):
             )
             return res
         except errors.FloodWait as e:
-            # Single retry after short wait — don't block workers indefinitely
-            await asyncio.sleep(min(e.value, 5))  # type: ignore
+            # Single retry after the REAL wait — the old capped 5s sleep meant
+            # a FLOOD_WAIT_300 retry fired ~295s early and just failed again.
+            # Long waits are re-raised so callers (client pool cooldown) can
+            # react instead of parking the worker for minutes.
+            if e.value > 10:  # type: ignore
+                raise
+            await asyncio.sleep(e.value)  # type: ignore
             return await super().invoke(
                 query=query,
                 retries=retries,

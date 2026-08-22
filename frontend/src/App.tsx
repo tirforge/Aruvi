@@ -315,16 +315,10 @@ function BotLink({ code }: { code?: string }) {
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-    const { data: user, isLoading, error, refetch } = useCurrentUser();
+    const { isLoading, error, refetch } = useCurrentUser();
     const token = localStorage.getItem('access_token');
 
-    console.log('[ProtectedRoute] Token exists:', !!token);
-    console.log('[ProtectedRoute] isLoading:', isLoading);
-    console.log('[ProtectedRoute] error:', error);
-    console.log('[ProtectedRoute] user:', user);
-
     if (!token) {
-        console.log('[ProtectedRoute] No token, redirecting to login');
         return <Navigate to="/login" replace />;
     }
 
@@ -340,7 +334,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     }
 
     if (error) {
-        console.log('[ProtectedRoute] Auth error, showing error message');
         // Show error instead of immediately redirecting
         return (
             <div className="min-h-screen flex items-center justify-center bg-dark-950 p-4">

@@ -7,6 +7,7 @@ provider paginates every result page (huge + 400 blips) and its download
 requires a username/password login — while the REST API works with just an
 API key (free tier: 5 subs/day anonymous).
 """
+import asyncio
 import os
 import logging
 from typing import Optional
@@ -251,7 +252,9 @@ async def search_subtitles(
         raise HTTPException(status_code=404, detail="File not found")
 
     try:
-        info = _guessit(file.file_name)
+        # guessit is pure-Python and slow (100-500 ms on long release names) —
+        # never run it on the event loop.
+        info = await asyncio.to_thread(_guessit, file.file_name)
     except Exception as exc:
         raise HTTPException(status_code=422, detail="Could not parse a title from this file name")
 
@@ -271,13 +274,16 @@ async def search_subtitles(
     if providers:
         _ensure_region()
         try:
-            video = _video_from_name(file.file_name)
-            import asyncio
-            found = await asyncio.to_thread(
-                subliminal.list_subtitles, {video}, langs, providers=providers
-            )
-            subs = found.get(video, [])
-            subs.sort(key=lambda s: subliminal.compute_score(s, video), reverse=True)
+            def _search():
+                video = _video_from_name(file.file_name)
+                found = subliminal.list_subtitles({video}, langs, providers=providers)
+                subs = found.get(video, [])
+                subs.sort(key=lambda s: subliminal.compute_score(s, video), reverse=True)
+                return video, subs
+
+            # Video parsing + score computation are CPU-heavy — keep them off
+            # the event loop together with the (blocking) provider searches.
+            video, subs = await asyncio.to_thread(_search)
             candidates.extend(_serialize(s, video) for s in subs)
         except Exception as exc:
             logger.warning("subtitle search failed: %s", exc)
@@ -349,11 +355,9 @@ async def subtitle_content(
         raise HTTPException(status_code=400, detail=f"Invalid language: {language}")
 
     try:
-        video = _video_from_name(file.file_name)
+        video = await asyncio.to_thread(_video_from_name, file.file_name)
     except Exception as exc:
         raise HTTPException(status_code=422, detail="Could not parse a title from this file name")
-
-    import asyncio
 
     try:
         found = await asyncio.to_thread(subliminal.list_subtitles, {video}, langs, providers=[provider])

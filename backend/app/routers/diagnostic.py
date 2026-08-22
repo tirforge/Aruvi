@@ -4,6 +4,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request, Response, Query
 from fastapi.responses import StreamingResponse
 from ..config import get_settings
+from ..utils import bearer_token_matches, spawn_background
 from ..telegram import tg_client
 from ..streaming import stream_file as stream_file_chunks, prefetch_first_batch_safe, _fetch_message, _cache_manager
 
@@ -15,7 +16,7 @@ router = APIRouter(prefix="/diag", tags=["Diagnostic"])
 
 def _check_auth(request: Request):
     auth = request.headers.get("Authorization", "")
-    if not settings.debug_password or auth != f"Bearer {settings.debug_password}":
+    if not bearer_token_matches(auth, settings.debug_password):
         raise HTTPException(status_code=401, detail="Invalid debug token")
 
 
@@ -138,7 +139,7 @@ async def _diag_media_response(request: Request, msg: int, chat: int | None, hea
             has_range = True
 
     if not head:
-        asyncio.create_task(prefetch_first_batch_safe(tg_client, message, from_bytes))
+        spawn_background(prefetch_first_batch_safe(tg_client, message, from_bytes))
 
     async def _stream():
         try:

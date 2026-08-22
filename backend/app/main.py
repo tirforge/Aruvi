@@ -23,6 +23,7 @@ from .rate_limit import limiter
 from .telegram import start_telegram_client, stop_telegram_client
 from .status import get_status, attach_ring_handler, clear_logs, maybe_oom_clear
 from .streaming import _evict_idle_ram_caches
+from .utils import bearer_token_matches
 
 from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, admin_router, gdrive_router, legal_router, diagnostic_router, grab_router, subtitles_router #JT
 
@@ -100,12 +101,17 @@ async def _cleanup_expired_codes():
 
 async def _oom_guard_loop():
     """Check memory every 15s and clear caches if above 65%."""
+    def _gc_and_trim():
+        gc.collect()
+        _libc.malloc_trim(0)
+
     while True:
         try:
             await asyncio.sleep(15)
             maybe_oom_clear()
-            gc.collect()
-            _libc.malloc_trim(0)
+            # Full collection on a large heap stalls the loop for tens of ms —
+            # run it (and the trim) off the event loop.
+            await asyncio.to_thread(_gc_and_trim)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -234,7 +240,7 @@ async def health():
 async def diagnostic(request: Request):
     """Diagnostic endpoint (logs, client status, env info)."""
     auth = request.headers.get("Authorization", "")
-    if not settings.debug_password or auth != f"Bearer {settings.debug_password}":
+    if not bearer_token_matches(auth, settings.debug_password):
         raise HTTPException(status_code=401, detail="Invalid debug token")
     from .telegram import tg_client, clients, get_diag_logs
     return {
@@ -247,7 +253,7 @@ async def diagnostic(request: Request):
 @app.get("/api/diag/bot-test")
 async def diag_bot_test(request: Request):
     auth = request.headers.get("Authorization", "")
-    if not settings.debug_password or auth != f"Bearer {settings.debug_password}":
+    if not bearer_token_matches(auth, settings.debug_password):
         raise HTTPException(status_code=401, detail="Invalid debug token")
     from .telegram import tg_client, clients
     from pyrogram import handlers
@@ -285,7 +291,7 @@ async def diag_bot_test(request: Request):
 @app.get("/api/diag/bot-send")
 async def diag_bot_send(request: Request, chat_id: int = 0):
     auth = request.headers.get("Authorization", "")
-    if not settings.debug_password or auth != f"Bearer {settings.debug_password}":
+    if not bearer_token_matches(auth, settings.debug_password):
         raise HTTPException(status_code=401, detail="Invalid debug token")
     if not chat_id:
         return {"error": "pass ?chat_id=YOUR_TELEGRAM_ID"}
@@ -303,7 +309,7 @@ async def api_v():
 
 def _has_debug_auth(request: Request) -> bool:
     auth = request.headers.get("Authorization", "")
-    return bool(settings.debug_password) and auth == f"Bearer {settings.debug_password}"
+    return bearer_token_matches(auth, settings.debug_password)
 
 
 @app.get("/api/status")

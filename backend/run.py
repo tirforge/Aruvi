@@ -53,7 +53,8 @@ config = uvicorn.Config(app, host="0.0.0.0", port=int(os.environ.get("SERVER_POR
 server = uvs.Server(config)
 
 async def run():
-    asyncio.create_task(_periodic_housekeeping())
+    from app.utils import spawn_background
+    spawn_background(_periodic_housekeeping())
     await server.serve()
 
 try:

@@ -1,4 +1,27 @@
+import asyncio
+import hmac
 import re
+
+
+def bearer_token_matches(auth_header: str, expected: str) -> bool:
+    """Constant-time check that a Authorization header equals 'Bearer <expected>'.
+    Debug/diag endpoints guard powerful operations, so the comparison must not
+    leak timing information about the secret."""
+    if not expected:
+        return False
+    return hmac.compare_digest(auth_header.encode(), f"Bearer {expected}".encode())
+
+
+# Fire-and-forget tasks must be referenced somewhere, or the event loop only
+# keeps a weak reference and GC can collect (and silently kill) them mid-flight.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def spawn_background(coro) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
 
 
 def sanitize_filename(name: str) -> str:

@@ -134,6 +134,8 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
 
     const handleSubtitleFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
+        // Reset so picking the SAME file again still fires a change event
+        e.target.value = '';
         if (!file) return;
         // MicroDVD (.sub) is not supported — the SRT→VTT converter would mangle it
         if (file.name.toLowerCase().endsWith('.sub')) return;

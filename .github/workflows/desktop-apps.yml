@@ -6,7 +6,7 @@ on:
       url:
         description: "Web app URL to wrap"
         required: false
-        default: "https://movie.aaruvi.space"
+        default: "http://localhost:7680"
       version:
         description: "Release tag"
         required: false
