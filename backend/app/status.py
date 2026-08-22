@@ -2,6 +2,7 @@ import asyncio
 import os
 import time
 import logging
+import threading
 from collections import deque
 from .streaming import _cache_manager, get_forward_snapshot, _forward_streams, _dc_disk_size
 
@@ -10,6 +11,9 @@ logger = logging.getLogger("streamer")
 _app_start = time.monotonic()
 _prev_cpu = None
 _prev_net = None
+# get_cpu/get_net mutate those baselines and now run on worker threads
+# (asyncio.to_thread) — concurrent status polls raced on them.
+_sample_lock = threading.Lock()
 _history = deque(maxlen=60)
 _last_oom_clear = 0.0
 _OOM_CLEAR_COOLDOWN = 20  # seconds
@@ -64,45 +68,46 @@ def _cgroup_v1_cpu_cores() -> float | None:
 
 def get_cpu() -> float:
     global _prev_cpu
-    try:
-        usage = _read_key("/sys/fs/cgroup/cpu.stat", "usage_usec")
-        if usage is None:
-            usage = _cgroup_v1_cpu_usage()
-            if usage is not None:
-                usage //= 1000  # v1 is in nanoseconds → microseconds
-        if usage is None:
-            return 0.0
-
-        cores = None
-        # cgroup v2: cpu.max is "<quota> <period>" where quota may be "max"
-        # (unlimited). _read_int can't parse the two-token format, so split it.
+    with _sample_lock:
         try:
-            with open("/sys/fs/cgroup/cpu.max") as f:
-                parts = f.read().split()
-            if len(parts) == 2 and parts[0] != "max":
-                q, p = int(parts[0]), int(parts[1])
-                if q > 0 and p > 0:
-                    cores = q / p
-        except (OSError, ValueError):
-            cores = None
-        if cores is None:
-            cores = _cgroup_v1_cpu_cores()
-        if cores is None:
-            cores = os.cpu_count() or 1
+            usage = _read_key("/sys/fs/cgroup/cpu.stat", "usage_usec")
+            if usage is None:
+                usage = _cgroup_v1_cpu_usage()
+                if usage is not None:
+                    usage //= 1000  # v1 is in nanoseconds → microseconds
+            if usage is None:
+                return 0.0
 
-        now = time.monotonic()
-        if _prev_cpu is not None:
-            pu, pt = _prev_cpu
-            dt = now - pt
-            du = usage - pu
+            cores = None
+            # cgroup v2: cpu.max is "<quota> <period>" where quota may be "max"
+            # (unlimited). _read_int can't parse the two-token format, so split it.
+            try:
+                with open("/sys/fs/cgroup/cpu.max") as f:
+                    parts = f.read().split()
+                if len(parts) == 2 and parts[0] != "max":
+                    q, p = int(parts[0]), int(parts[1])
+                    if q > 0 and p > 0:
+                        cores = q / p
+            except (OSError, ValueError):
+                cores = None
+            if cores is None:
+                cores = _cgroup_v1_cpu_cores()
+            if cores is None:
+                cores = os.cpu_count() or 1
+
+            now = time.monotonic()
+            if _prev_cpu is not None:
+                pu, pt = _prev_cpu
+                dt = now - pt
+                du = usage - pu
+                _prev_cpu = (usage, now)
+                if dt > 0:
+                    return round(du / 1_000_000 / dt * 100 / cores, 1)
+                return 0.0
             _prev_cpu = (usage, now)
-            if dt > 0:
-                return round(du / 1_000_000 / dt * 100 / cores, 1)
             return 0.0
-        _prev_cpu = (usage, now)
-        return 0.0
-    except Exception:
-        return 0.0
+        except Exception:
+            return 0.0
 
 
 def _parse_mem_env(val: str) -> int:
@@ -292,30 +297,33 @@ def get_ram() -> dict:
 
 def get_net() -> dict:
     global _prev_net
-    try:
-        with open("/proc/net/dev") as f:
-            f.readline()
-            f.readline()
-            rx = tx = 0
-            for line in f:
-                parts = line.strip().split()
-                iface = parts[0].rstrip(":")
-                if iface == "eth0":
-                    rx = int(parts[1])
-                    tx = int(parts[9])
-                    break
-        now = time.time()
-        rx_mbps = tx_mbps = 0.0
-        if _prev_net is not None:
-            pt, pr, pt_ = _prev_net
-            dt = now - pt
-            if dt > 0:
-                rx_mbps = round((rx - pr) * 8 / dt / 1024 / 1024, 1)
-                tx_mbps = round((tx - pt_) * 8 / dt / 1024 / 1024, 1)
-        _prev_net = (now, rx, tx)
-        return {"rx_mbps": rx_mbps, "tx_mbps": tx_mbps}
-    except Exception:
-        return {"rx_mbps": 0, "tx_mbps": 0}
+    with _sample_lock:
+        try:
+            with open("/proc/net/dev") as f:
+                f.readline()
+                f.readline()
+                rx = tx = 0
+                for line in f:
+                    parts = line.strip().split()
+                    iface = parts[0].rstrip(":")
+                    if iface == "lo" or iface.startswith(("lo:", "docker", "veth", "br-", "vibr")):
+                        continue
+                    # Sum every real interface — hosts use ens5/wlan0/enp0s*, not
+                    # just eth0 (rx/tx stayed 0 forever there).
+                    rx += int(parts[1])
+                    tx += int(parts[9])
+            now = time.time()
+            rx_mbps = tx_mbps = 0.0
+            if _prev_net is not None:
+                pt, pr, pt_ = _prev_net
+                dt = now - pt
+                if dt > 0:
+                    rx_mbps = round((rx - pr) * 8 / dt / 1024 / 1024, 1)
+                    tx_mbps = round((tx - pt_) * 8 / dt / 1024 / 1024, 1)
+            _prev_net = (now, rx, tx)
+            return {"rx_mbps": rx_mbps, "tx_mbps": tx_mbps}
+        except Exception:
+            return {"rx_mbps": 0, "tx_mbps": 0}
 
 
 def get_uptime() -> int:

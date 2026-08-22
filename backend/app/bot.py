@@ -16,7 +16,7 @@ from sqlalchemy import select, func, update
 from sqlalchemy.exc import IntegrityError
 
 from .patch import ListenerCanceled
-from .telegram import tg_client, forward_to_storage_channel, invalidate_message_cache
+from .telegram import tg_client, forward_to_storage_channel, invalidate_message_cache, delete_from_storage_channel
 from .database import async_session
 from .models import User, File, Folder, LoginCode
 from .config import get_settings
@@ -183,7 +183,7 @@ async def start_command(client, message: Message):
             else:
                 await message.reply("❌ Invalid login code. Use /login on your TV app to generate a fresh one.")
 
-    from pyrogram.errors import ButtonUrlInvalid
+    from pyrogram.errors import ButtonUrlInvalid, MessageNotModified
     try:
         await message.reply(
             "📺 **Welcome to Aruvi!**\n\n"
@@ -216,7 +216,7 @@ async def start_command(client, message: Message):
                 ]
             ])
         )
-    except ButtonUrlInvalid:
+    except (ButtonUrlInvalid, MessageNotModified):
         await message.reply(
             "📺 **Welcome to Aruvi!**\n\n"
             "Your personal media streaming platform.\n"
@@ -340,7 +340,7 @@ async def myfiles_command(client, message: Message):
     
     text += "💡 Use /file <id> to manage a file"
     
-    from pyrogram.errors import ButtonUrlInvalid
+    from pyrogram.errors import ButtonUrlInvalid, MessageNotModified
     try:
         await message.reply(
             text,
@@ -349,7 +349,7 @@ async def myfiles_command(client, message: Message):
                 [await get_web_app_button(message.from_user.id, "🌐 Open Web")]
             ])
         )
-    except ButtonUrlInvalid:
+    except (ButtonUrlInvalid, MessageNotModified):
         await message.reply(text)
 
 
@@ -405,7 +405,7 @@ async def newfolder_command(client, message: Message):
         await message.reply("Usage: /newfolder <folder_name>")
         return
     
-    folder_name = " ".join(message.command[1:])
+    folder_name = " ".join(message.command[1:]).strip()[:255]
     
     async with async_session() as db:
         # Get user
@@ -636,7 +636,26 @@ async def handle_file(client, message: Message):
     
     status_msg = await message.reply("📥 Processing file...")
     
+    forwarded = None
     try:
+        # Upload dedup: re-sending the same media must not create a second
+        # storage-channel copy + library row — reply with the existing one.
+        from sqlalchemy import select as _sel
+        async with async_session() as db:
+            dup = (await db.execute(
+                _sel(File).where(File.user_id == user.id, File.file_unique_id == media.file_unique_id)
+            )).scalar_one_or_none()
+            if dup is not None:
+                emoji = {"video": "🎬", "audio": "🎵", "document": "📄", "image": "🖼"}.get(file_type, "📎")
+                await status_msg.edit(
+                    f"✅ **Already in your library**\n\n"
+                    f"{emoji} **{md_safe(dup.file_name)}**\n"
+                    f"🆔 File ID: `{dup.id}`\n"
+                    f"📦 Size: {format_size(dup.file_size)}\n\n"
+                    f"💡 Use `/file {dup.id}` to manage this file"
+                )
+                return
+
         # Forward to storage channel
         forwarded = await forward_to_storage_channel(message)
         
@@ -671,7 +690,7 @@ async def handle_file(client, message: Message):
         
         response = (
             f"✅ **File saved!**\n\n"
-            f"{emoji} **{file_info['file_name']}**\n"
+            f"{emoji} **{md_safe(file_info['file_name'])}**\n"
             f"🆔 File ID: `{file.id}`\n"
             f"📦 Size: {format_size(file_info['file_size'])}\n"
             f"🎭 Type: {file_type}\n"
@@ -702,6 +721,13 @@ async def handle_file(client, message: Message):
         )
         
     except Exception as e:
+        # The channel copy exists before the DB row — if the insert failed,
+        # delete the copy or it stays orphaned in the storage channel forever.
+        if forwarded is not None:
+            try:
+                await delete_from_storage_channel(forwarded.id)
+            except Exception:
+                _log.warning("bot: orphaned storage msg %s (cleanup failed)", forwarded.id)
         await status_msg.edit(f"❌ Failed to process file: {str(e)}")
 
 
@@ -739,7 +765,7 @@ async def handle_callback(client, callback: CallbackQuery):
 
     elif data == "get_web_link":
         # Fallback for old messages - show link and also provide Mini App button
-        from pyrogram.errors import ButtonUrlInvalid
+        from pyrogram.errors import ButtonUrlInvalid, MessageNotModified
         async with async_session() as db:
             v_result = await db.execute(
                 select(User.auth_version).where(User.telegram_id == callback.from_user.id)
@@ -750,7 +776,7 @@ async def handle_callback(client, callback: CallbackQuery):
         text = (
             f"🌐 **Web Interface**\n\n"
             f"👉 {web_url}\n\n"
-            "__(Link expires in 15 minutes)__\n\n"
+            "__(Link valid for 7 days — use logout-all to revoke early)__\n\n"
             "💡 Tap the button below to open directly:"
         )
         try:
@@ -760,7 +786,7 @@ async def handle_callback(client, callback: CallbackQuery):
                     [await get_web_app_button(callback.from_user.id, "🚀 Open Mini App")]
                 ])
             )
-        except ButtonUrlInvalid:
+        except (ButtonUrlInvalid, MessageNotModified):
             await callback.message.reply(text)
         await callback.answer()
         
@@ -793,7 +819,7 @@ async def handle_callback(client, callback: CallbackQuery):
         
         text += "💡 Use /file <id> to manage a file"
         
-        from pyrogram.errors import ButtonUrlInvalid
+        from pyrogram.errors import ButtonUrlInvalid, MessageNotModified
         try:
             await callback.message.reply(
                 text,
@@ -802,7 +828,7 @@ async def handle_callback(client, callback: CallbackQuery):
                     [await get_web_app_button(callback.from_user.id, "🌐 Open Web")]
                 ])
             )
-        except ButtonUrlInvalid:
+        except (ButtonUrlInvalid, MessageNotModified):
             await callback.message.reply(text)
         await callback.answer()
         
@@ -819,7 +845,7 @@ async def handle_callback(client, callback: CallbackQuery):
             # Wait for user's reply (60 second timeout)
             reply = await client.wait_for_message(
                 chat_id=callback.message.chat.id,
-                filters=filters.text,
+                filters=filters.incoming & filters.text,  # bot's OWN replies must never resolve the flow
                 timeout=60
             )
             
@@ -827,7 +853,7 @@ async def handle_callback(client, callback: CallbackQuery):
                 await reply.reply("❌ Folder creation cancelled.")
                 return
             
-            folder_name = reply.text.strip() if reply.text else None
+            folder_name = (reply.text or "").strip()[:255]
             
             if not folder_name:
                 await reply.reply("❌ Invalid folder name.")
@@ -981,7 +1007,7 @@ async def handle_callback(client, callback: CallbackQuery):
 
         emoji = {"video": "🎬", "audio": "🎵", "document": "📄", "image": "🖼"}.get(file.file_type, "📎")
         text = (
-            f"{emoji} **{file.file_name}**\n\n"
+            f"{emoji} **{md_safe(file.file_name)}**\n\n"
             f"📦 Size: {format_size(file.file_size)}\n"
             f"🎭 Type: {file.file_type}\n"
         )
@@ -993,7 +1019,7 @@ async def handle_callback(client, callback: CallbackQuery):
             text += f"\n🔗 **Public Link:**\n`{settings.web_base_url}/api/stream/s/{file.public_hash}`\n"
             share_btn = InlineKeyboardButton("🔗 Unshare", callback_data=f"unsharefile:{file.id}")
 
-        from pyrogram.errors import ButtonUrlInvalid
+        from pyrogram.errors import ButtonUrlInvalid, MessageNotModified
         try:
             await callback.message.edit(
                 text,
@@ -1013,7 +1039,7 @@ async def handle_callback(client, callback: CallbackQuery):
                     [InlineKeyboardButton("🔙 Back", callback_data="back_folders")],
                 ])
             )
-        except ButtonUrlInvalid:
+        except (ButtonUrlInvalid, MessageNotModified):
             await callback.message.reply(text)
         await callback.answer()
 
@@ -1043,7 +1069,7 @@ async def handle_callback(client, callback: CallbackQuery):
         try:
             reply = await client.wait_for_message(
                 chat_id=callback.message.chat.id,
-                filters=filters.text,
+                filters=filters.incoming & filters.text,  # bot's OWN replies must never resolve the flow
                 timeout=60
             )
             
@@ -1066,7 +1092,7 @@ async def handle_callback(client, callback: CallbackQuery):
                 if file:
                     file.file_name = sanitize_filename(new_name)
                     await db.commit()
-                    await reply.reply(f"✅ File renamed to **{file.file_name}**")
+                    await reply.reply(f"✅ File renamed to **{md_safe(file.file_name)}**")
                 else:
                     await reply.reply("❌ File not found.")
                     
@@ -1133,7 +1159,7 @@ async def handle_callback(client, callback: CallbackQuery):
         except Exception:
             pass
         
-        await callback.message.edit(f"✅ File **{file_name}** deleted successfully!")
+        await callback.message.edit(f"✅ File **{md_safe(file_name)}** deleted successfully!")
         await callback.answer("File deleted", show_alert=True)
         
     elif data.startswith("renamefolder:"):
@@ -1153,7 +1179,7 @@ async def handle_callback(client, callback: CallbackQuery):
         
         await callback.message.reply(
             f"✏️ **Rename Folder**\n\n"
-            f"Current name: `{current_name}`\n\n"
+            f"Current name: `{md_safe(current_name)}`\n\n"
             "Send me the new name:\n"
             "__(or send /cancel to abort)__"
         )
@@ -1162,7 +1188,7 @@ async def handle_callback(client, callback: CallbackQuery):
         try:
             reply = await client.wait_for_message(
                 chat_id=callback.message.chat.id,
-                filters=filters.text,
+                filters=filters.incoming & filters.text,  # bot's OWN replies must never resolve the flow
                 timeout=60
             )
             
@@ -1375,7 +1401,7 @@ async def handle_callback(client, callback: CallbackQuery):
 
         text = (
             f"📂 **Move File**\n\n"
-            f"`{file_name}`\n\n"
+            f"`{md_safe(file_name)}`\n\n"
             "Select destination folder:"
         )
         buttons = []
@@ -1437,7 +1463,7 @@ async def handle_callback(client, callback: CallbackQuery):
 
         await callback.message.edit(
             f"✅ **File moved!**\n\n"
-            f"`{file_name}`\n"
+            f"`{md_safe(file_name)}`\n"
             f"→ {folder_label}"
         )
         await callback.answer("File moved successfully!", show_alert=True)
@@ -1455,7 +1481,7 @@ async def handle_callback(client, callback: CallbackQuery):
         try:
             reply = await client.wait_for_message(
                 chat_id=callback.message.chat.id,
-                filters=filters.text,
+                filters=filters.incoming & filters.text,  # bot's OWN replies must never resolve the flow
                 timeout=60
             )
 
@@ -1463,14 +1489,16 @@ async def handle_callback(client, callback: CallbackQuery):
                 await reply.reply("❌ Cancelled.")
                 return
 
-            folder_name = reply.text.strip() if reply.text else None
+            folder_name = (reply.text or "").strip()[:255]
             if not folder_name:
                 await reply.reply("❌ Invalid folder name.")
                 return
 
             async with async_session() as db:
+                # The flow initiator, not whoever's text resolved the listener
+                # (identical in private chats; matters for forwarded buttons).
                 user_result = await db.execute(
-                    select(User).where(User.telegram_id == reply.from_user.id)
+                    select(User).where(User.telegram_id == callback.from_user.id)
                 )
                 user = user_result.scalar_one_or_none()
                 if not user:
@@ -1777,7 +1805,7 @@ async def file_command(client, message: Message):
     emoji = {"video": "🎬", "audio": "🎵", "document": "📄", "image": "🖼"}.get(file.file_type, "📎")
     
     text = (
-        f"{emoji} **{file.file_name}**\n\n"
+        f"{emoji} **{md_safe(file.file_name)}**\n\n"
         f"📦 Size: {format_size(file.file_size)}\n"
         f"🎭 Type: {file.file_type}\n"
     )
@@ -1818,7 +1846,7 @@ async def deletefolder_command(client, message: Message):
         await message.reply("Usage: /deletefolder <folder_name>")
         return
     
-    folder_name = " ".join(message.command[1:])
+    folder_name = " ".join(message.command[1:]).strip()[:255]
     
     async with async_session() as db:
         # Get user

@@ -87,7 +87,7 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
   }, [query, searchMutation, addToast]);
 
   const handleSelect = useCallback(async (item: GrabSearchResult) => {
-    const itemId = `${item.msg_id}-${item.row}-${item.col}`;
+    const itemId = `${item.group_username || ''}-${item.msg_id}-${item.row}-${item.col}`;
     if (grabbingIds.has(itemId)) return;
     const last = lastSearchRef.current;
     if (!last) return;
@@ -165,7 +165,7 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
   };
 
   const isGrabbing = (item: GrabSearchResult) => {
-    return grabbingIds.has(`${item.msg_id}-${item.row}-${item.col}`);
+    return grabbingIds.has(`${item.group_username || ''}-${item.msg_id}-${item.row}-${item.col}`);
   };
 
   // Highlight the matched query inside result titles (projectduck-style smart search).
@@ -294,7 +294,7 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
             const grabbing = isGrabbing(item);
             return (
               <div
-                key={`${item.msg_id}-${item.row}-${item.col}`}
+                key={`${item.group_username || ''}-${item.msg_id}-${item.row}-${item.col}`}
                 className={`glass-card p-4 flex items-center gap-4 card-hover cursor-pointer group transition-opacity ${
                   grabbing ? 'opacity-60 pointer-events-none' : ''
                 }`}

@@ -543,6 +543,19 @@ async def _rewind_to_first(ivy: Client, msg) -> object | None:
     return msg
 
 
+# In-flight background rewinds by (chat_id, msg_id). grab_selected cancels
+# the matching rewind before walking the SAME message itself — otherwise the
+# bg "prev" clicks interleave with the grab's "next" clicks and the page walk
+# desyncs (wrong button on the positional path).
+_rewind_tasks: dict[tuple[int, int], asyncio.Task] = {}
+
+
+def _cancel_rewind_task(chat_id: int, msg_id: int) -> None:
+    t = _rewind_tasks.pop((chat_id, msg_id), None)
+    if t is not None and not t.done():
+        t.cancel()
+
+
 async def _rewind_to_first_bg(chat_id: int, msg_id: int) -> None:
     """Best-effort rewind of an inline menu back to page 1, off the search path.
 
@@ -817,8 +830,13 @@ async def _wait_for_file_auto_join(
     # Cap flood-wait sleeps: without a deadline one long FLOOD_WAIT pins an
     # _ivy_pool slot (and the HTTP request) for minutes.
     send_deadline = asyncio.get_event_loop().time() + 60
+    # Floor for ALL attempts: a file delivered just after attempt 1's window
+    # expired has id < attempt-2's /start but is still THIS grab's file.
+    first_sent_id = 0
     for attempt in range(max_attempts):
         sent = await _send_with_retry(ivy, chat_id, start_command, deadline=send_deadline)
+        if attempt == 0 and sent:
+            first_sent_id = sent.id
 
         file_msg = None
         pending_approval = False
@@ -827,12 +845,12 @@ async def _wait_for_file_auto_join(
         # are reused across grabs, so the previous grab's file still sits in
         # history; without this check a slow/silent bot delivers the WRONG
         # (previous) file, which then gets stored and streamed as this grab.
-        min_msg_id = sent.id if sent else 0
+        min_msg_id = first_sent_id or (sent.id if sent else 0)
         for _ in range(15):
             await asyncio.sleep(1)
             found_force_sub = False
             try:
-                async for msg in ivy.get_chat_history(chat_id, limit=5):
+                async for msg in ivy.get_chat_history(chat_id, limit=15):
                     if msg.media and msg.media in (
                         MessageMediaType.VIDEO, MessageMediaType.DOCUMENT,
                         MessageMediaType.AUDIO, MessageMediaType.PHOTO,
@@ -842,7 +860,10 @@ async def _wait_for_file_auto_join(
                             break
                         # Older media (or echoed forwards) — keep scanning for
                         # the join-prompt below, but never accept it as the file.
-                    if _is_join_required(msg):
+                    # Join prompts must ALSO be newer than our /start: a stale
+                    # prompt from a previous grab caused redundant joins and
+                    # spurious "admin approval" failures.
+                    if msg.id > min_msg_id and _is_join_required(msg):
                         # Auto-join every channel/group the bot wants, then send
                         # /start once more so the bot re-checks membership.
                         for ref in _join_targets_from_message(msg):
@@ -996,7 +1017,10 @@ async def search_results(
             # verifies page 1 itself and falls back to a fresh query if the
             # rewind has not finished in time.
             if page_msg is not None:
-                spawn_background(_rewind_to_first_bg(page_msg.chat.id, page_msg.id))
+                _cancel_rewind_task(page_msg.chat.id, page_msg.id)
+                t = spawn_background(_rewind_to_first_bg(page_msg.chat.id, page_msg.id))
+                _rewind_tasks[(page_msg.chat.id, page_msg.id)] = t
+                t.add_done_callback(lambda _, k=(page_msg.chat.id, page_msg.id): _rewind_tasks.pop(k, None))
 
         return {
             "results": options,
@@ -1082,14 +1106,13 @@ async def search_results_multi(
                 _put_group_in_cooldown(group, GROUP_COOLDOWN_NONE_TTL)
                 return None
             except asyncio.TimeoutError:
-                _log.warning("grabber: search in %s timed out after %ds — cooldown %ds",
-                             group, timeout, GROUP_COOLDOWN_TIMEOUT_TTL)
-                _mark_group_result(group, False)
-                _put_group_in_cooldown(group, GROUP_COOLDOWN_TIMEOUT_TTL)
+                # Strike/cooldown accounting happens ONCE, in the merge loop's
+                # res-is-None branch — marking here too double-counted every
+                # timeout (one timeout == suspect).
+                _log.warning("grabber: search in %s timed out after %ds", group, timeout)
                 return None
             except Exception as e:
                 _log.warning("grabber: search in %s raised: %s", group, e)
-                _mark_group_result(group, False)
                 return None
 
         return asyncio.create_task(_run())
@@ -1158,8 +1181,10 @@ async def search_results_multi(
             if rest:
                 await asyncio.gather(*rest, return_exceptions=True)
 
-        if not any_ok or not merged:
+        if not any_ok:
             return None
+        # any_ok with zero merged results = a legitimate no-hit query — a 200
+        # with empty results, NOT a 502 "rate-limited" error.
         return {
             "results": merged[:MAX_OPTIONS],
             "group_username": first_group,
@@ -1229,6 +1254,8 @@ async def grab_selected(
         # message back to page 1 if possible, then walk forward only as far as
         # that recorded depth instead of re-scanning every page — and never
         # re-query just because the background rewind was still in flight.
+        if result_msg is not None:
+            _cancel_rewind_task(result_msg.chat.id, result_msg.id)
         if result_msg is not None and _find_prev_button(result_msg) is not None:
             try:
                 rewound = await _rewind_to_first(ivy, result_msg)
@@ -1457,9 +1484,11 @@ async def grab_selected(
             return None
         file_msg = await _wait_for_file_auto_join(ivy, start_bot.id, f"/start {param}")
 
-        # Cleanup group messages
+        # Cleanup group messages — including the cached-menu path (sent is
+        # None there): every grab used to leave the bot's inline menu in the
+        # shared group (litter + ban risk).
         to_del_ids = [m.id for m in (sent, result_msg) if m]
-        if sent:
+        if to_del_ids:
             try:
                 await ivy.delete_messages(chat_id, to_del_ids)
             except Exception:
@@ -1503,7 +1532,37 @@ async def grab_selected(
             elif warning:
                 _log.warning("grabber: label/file soft mismatch for %r: %s", file_name, warning)
 
-        # 5. Forward to storage channel
+        # 5. Dedup: re-grabbing the same option must not create a second
+        # storage-channel copy + library row. The SOURCE message carries the
+        # same file_unique_id, so this runs BEFORE the forward.
+        _src_obj = file_msg.video or file_msg.document or file_msg.audio or file_msg.photo
+        if _src_obj is not None:
+            async with async_session() as db:
+                from sqlalchemy import select
+                u = (await db.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+                if u is not None:
+                    dup = (await db.execute(
+                        select(File).where(
+                            File.user_id == u.id,
+                            File.file_unique_id == _src_obj.file_unique_id,
+                        )
+                    )).scalar_one_or_none()
+                    if dup is not None:
+                        _log.info("grabber: %r already in library (file id %s) — reusing", file_name, dup.id)
+                        from .auth import create_download_token as _cdt
+                        _s = get_settings()
+                        _tok = _cdt(str(telegram_id), dup.id, version=u.auth_version)
+                        return {
+                            "name": dup.file_name,
+                            "size": dup.file_size,
+                            "stream_url": f"{_s.web_base_url.rstrip('/')}/api/stream/{dup.id}?token={_tok}",
+                            "id": dup.id,
+                            "file_id": dup.file_id,
+                            "file_unique_id": dup.file_unique_id,
+                            "warning": "",
+                        }
+
+        # 6. Forward to storage channel
         from .telegram import forward_to_storage_channel
         try:
             fwd = await forward_to_storage_channel(file_msg)
@@ -1523,7 +1582,8 @@ async def grab_selected(
         file_id = fwd_obj.file_id
         file_unique_id = fwd_obj.file_unique_id
 
-        # 6. Create DB record
+        # 6. Create DB record (or return the EXISTING one — re-grabbing the
+        # same option used to duplicate the storage-channel copy + library row)
         async with async_session() as db:
             from sqlalchemy import select
             result = await db.execute(select(User).where(User.telegram_id == telegram_id))

@@ -168,8 +168,8 @@ color = TVPrimary,
 items(state.results, key = { "${it.msgId}-${it.row}-${it.col}-${it.label}" }) { item ->
                             TvGrabCard(
                                 item = item,
-                                isGrabbing = state.grabbingIdx == item.row * 100 + item.col,
-                                onGrab = { viewModel.grabItem(item) },
+                                isGrabbing = state.grabbingIdx == item.row * 100 + item.col + (item.msgId % 1000) * 100000,
+                                onGrab = { if (state.grabbingIdx == -1) viewModel.grabItem(item) },
                             )
                         }
                     }

@@ -18,6 +18,11 @@ data class GrabSelectRequest(
     @SerializedName("chat_id") val chatId: Int? = null,
     @SerializedName("group_username") val groupUsername: String? = null,
     @SerializedName("bot_username") val botUsername: String? = null,
+    // REQUIRED by the backend: without a name the delivered file cannot be
+    // verified, and positional-only matching can grab the WRONG movie when
+    // the menu page/depth guess is off.
+    @SerializedName("file_name") val fileName: String,
+    @SerializedName("depth") val depth: Int? = null,
 )
 
 // ── Response Models ────────────────────────────────────────────────────
@@ -29,6 +34,11 @@ data class GrabSearchResult(
     @SerializedName("msg_id") val msgId: Int,
     @SerializedName("file_name") val fileName: String,
     @SerializedName("file_size") val fileSize: Long,
+    // Page depth + owning group — without these, a page-2 selection is
+    // matched positionally against page 1 and the wrong file is grabbed.
+    @SerializedName("depth") val depth: Int = 0,
+    @SerializedName("group_username") val groupUsername: String? = null,
+    @SerializedName("chat_id") val chatId: Long? = null,
 )
 
 data class GrabSearchResponse(

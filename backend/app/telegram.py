@@ -557,6 +557,13 @@ def invalidate_message_cache_batch(message_ids: list[int]):
 # ── convenience helpers (always use tg_client) ───────────────────────
 
 async def get_message_from_channel(message_id: int) -> Message:
+    # Proactively drop TTL-expired entries — without this up to 5000 stale
+    # Message objects (with parsed media/thumbs) were held until the size
+    # cap tripped.
+    try:
+        _prune_msg_cache()
+    except Exception:
+        pass
     now = time.monotonic()
     key = _msg_cache_key(message_id)
     if key in _msg_cache:

@@ -184,7 +184,7 @@ if (state.query.isNotEmpty()) {
 items(state.results, key = { "${it.msgId}-${it.row}-${it.col}-${it.label}" }) { item ->
                         GrabMovieCard(
                             item = item,
-                            isGrabbing = state.grabbingIdx == item.row * 100 + item.col,
+                            isGrabbing = state.grabbingIdx == item.row * 100 + item.col + (item.msgId % 1000) * 100000,
                             onGrab = { viewModel.grabItem(item) }
                         )
                     }

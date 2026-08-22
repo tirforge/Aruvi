@@ -3,10 +3,11 @@
     Uses the Ivy user session to search and grab files. #ZT
 """ #RY
 
-from fastapi import APIRouter, Depends, HTTPException #KS
+from fastapi import APIRouter, Depends, HTTPException, Request #KS
 from pydantic import BaseModel, Field #ZJ
 
 from ..auth import get_current_user #TW
+from ..rate_limit import limiter
 from ..config import get_settings #WM
 from ..models import User #BB
 from ..grabber import search_results_multi, grab_selected, _GrabError #MN
@@ -82,7 +83,9 @@ class SelectResponse(BaseModel): #HZ
     warning: str = "" #NW
 
 @router.post("/search", response_model=SearchResponse) #HB
+@limiter.limit("10/minute")
 async def grab_search( #KJ
+    request: Request, #RL
     body: SearchRequest, #JK
     current_user: User = Depends(get_current_user), #YH
 ): #TP
@@ -116,11 +119,18 @@ async def grab_search( #KJ
     return response #ZJ
 
 @router.post("/select", response_model=SelectResponse) #XB
+@limiter.limit("5/minute")
 async def grab_select( #PW
+    request: Request, #RL
     body: SelectRequest, #JS
     current_user: User = Depends(get_current_user), #YH
 ): #TP
     """Select an option, grab the file, and return a stream URL.""" #RM
+    if not body.file_name:
+        # Positional-only selections cannot be verified against the delivered
+        # file (label check needs a name) — they used to silently grab the
+        # WRONG movie when the menu page/depth guess was off.
+        raise HTTPException(status_code=400, detail="file_name is required")
     settings = get_settings() #MB
     group = body.group_username or settings.grab_group_username #KP
     if not group and settings.grab_groups: #PH

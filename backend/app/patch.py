@@ -204,6 +204,13 @@ async def resolve_listener(
         if getattr(update, "text", None) and update.text.startswith("/"):
             update.continue_propagation()
             return
+        # Defense in depth: the dispatcher delivers the bot's OWN outgoing
+        # messages too ("Processing file...", file lists, prompts). A pending
+        # rename/folder flow resolved by one of those silently renamed the
+        # file to the bot's reply text.
+        if getattr(update, "outgoing", False):
+            update.continue_propagation()
+            return
 
     if isinstance(update, types.CallbackQuery):
         if update.message:

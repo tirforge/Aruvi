@@ -97,9 +97,12 @@ fun search() {
 }
 
     fun grabItem(item: GrabSearchResult) {
-        val idx = item.row * 100 + item.col
+        // Never cancel-and-restart: cancelling the HTTP call does NOT stop the
+        // server-side grab (it keeps occupying an Ivy slot, forwards to the
+        // storage channel and inserts a DB row). Ignore taps while in flight.
+        if (grabJob?.isActive == true) return
+        val idx = item.row * 100 + item.col + (item.msgId % 1000) * 100000
         _state.value = _state.value.copy(grabbingIdx = idx, grabResult = null)
-        grabJob?.cancel()
         grabJob = viewModelScope.launch {
             try {
                 val resp = api.grabSelect(GrabSelectRequest(
@@ -107,6 +110,9 @@ fun search() {
                     row = item.row,
                     col = item.col,
                     msgId = item.msgId,
+                    fileName = item.fileName,
+                    depth = item.depth,
+                    groupUsername = item.groupUsername,
                 ))
                 if (resp.isSuccessful) {
                     val body = resp.body()
