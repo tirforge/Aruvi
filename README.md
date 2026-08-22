@@ -25,20 +25,6 @@ aruvi/
 - Native clients: Android app (phone + TV) and Windows/Linux desktop apps
 - Google Drive integration, thumbnails, continue-watching, folder management
 
-## Desktop & Mobile Apps
-
-Prebuilt clients are published on the [Releases](https://github.com/tirforge/Aruvi/releases) page:
-
-| Platform | File | Type |
-|----------|------|------|
-| Windows | `Aruvi.msi` | Installer |
-| Windows | `Aruvi-portable.exe` | Portable |
-| Debian/Ubuntu | `aruvi.deb` | Installer |
-| Any Linux | `aruvi.AppImage` | Portable |
-| Android phone / TV | `Aruvi-mobile.apk` / `Aruvi-tv.apk` | APK |
-
-Or connect with just a browser — the web player ships with the server.
-
 ## How It Works — You Bring Your Own Storage
 
 Aruvi ships **no content**. Each deployment is fully self-hosted against *your own*
