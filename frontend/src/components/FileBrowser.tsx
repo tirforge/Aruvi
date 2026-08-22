@@ -49,13 +49,15 @@ export default function FileBrowser() {
         setRenameFolder,
         clipboard,
         setClipboard,
-        selectionBox,
-        setSelectionBox,
         activeSection,
         addToast,
         setSelectedFiles,
         setVisibleFiles
     } = useAppStore();
+
+    // Rubber-band selection rectangle — deliberately LOCAL state: writing it
+    // to the global store on every mousemove re-rendered the whole app.
+    const [selectionBox, setSelectionBox] = useState<{ x1: number; y1: number; y2: number; x2: number; active: boolean } | null>(null);
 
     // Pagination state
     const [page, setPage] = useState(1);
@@ -245,6 +247,96 @@ export default function FileBrowser() {
 
 
     // Selection Box Logic
+    // Perf: card rects are measured ONCE per drag (re-measured only if the
+    // container scrolls mid-drag), pointer moves are coalesced to one update
+    // per animation frame, and the store is only written when the selected
+    // id set actually changes. Previously every mousemove did N
+    // getBoundingClientRect calls (forced layout) plus a global store write
+    // that re-rendered the entire tree.
+    const dragRectsRef = useRef<{
+        scrollX: number; scrollY: number;
+        entries: { id: number; kind: 'file' | 'folder'; left: number; top: number; right: number; bottom: number }[];
+    } | null>(null);
+    const rafRef = useRef<number | null>(null);
+    const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+    const lastSelectionSigRef = useRef<string>('');
+
+    const captureDragRects = () => {
+        const container = containerRef.current;
+        if (!container) return;
+        const cRect = container.getBoundingClientRect();
+        const sx = container.scrollLeft, sy = container.scrollTop;
+        const entries: { id: number; kind: 'file' | 'folder'; left: number; top: number; right: number; bottom: number }[] = [];
+        container.querySelectorAll<HTMLElement>('[data-file-id]').forEach((el) => {
+            const r = el.getBoundingClientRect();
+            entries.push({
+                id: Number(el.dataset.fileId), kind: 'file',
+                left: r.left - cRect.left + sx, top: r.top - cRect.top + sy,
+                right: r.right - cRect.left + sx, bottom: r.bottom - cRect.top + sy,
+            });
+        });
+        container.querySelectorAll<HTMLElement>('[data-folder-id]').forEach((el) => {
+            const r = el.getBoundingClientRect();
+            entries.push({
+                id: Number(el.dataset.folderId), kind: 'folder',
+                left: r.left - cRect.left + sx, top: r.top - cRect.top + sy,
+                right: r.right - cRect.left + sx, bottom: r.bottom - cRect.top + sy,
+            });
+        });
+        dragRectsRef.current = { scrollX: sx, scrollY: sy, entries };
+    };
+
+    const cancelDragFrame = () => {
+        if (rafRef.current != null) {
+            cancelAnimationFrame(rafRef.current);
+            rafRef.current = null;
+        }
+    };
+
+    const applyDragSelection = () => {
+        const container = containerRef.current;
+        const pointer = lastPointerRef.current;
+        if (!container || !pointer || !selectionStart.current) return;
+
+        // Rects went stale after a mid-drag scroll — re-measure once.
+        let cache = dragRectsRef.current;
+        if (!cache || cache.scrollX !== container.scrollLeft || cache.scrollY !== container.scrollTop) {
+            captureDragRects();
+            cache = dragRectsRef.current;
+        }
+        if (!cache) return;
+
+        setSelectionBox({
+            x1: selectionStart.current.x,
+            y1: selectionStart.current.y,
+            x2: pointer.x,
+            y2: pointer.y,
+            active: true
+        });
+
+        const left = Math.min(selectionStart.current.x, pointer.x);
+        const top = Math.min(selectionStart.current.y, pointer.y);
+        const right = Math.max(selectionStart.current.x, pointer.x);
+        const bottom = Math.max(selectionStart.current.y, pointer.y);
+
+        const fileIds: number[] = [];
+        const folderIds: number[] = [];
+        for (const e of cache.entries) {
+            if (e.left < right && e.right > left && e.top < bottom && e.bottom > top) {
+                (e.kind === 'file' ? fileIds : folderIds).push(e.id);
+            }
+        }
+
+        const sig = `${fileIds.slice().sort((a, b) => a - b).join(',')}|${folderIds.slice().sort((a, b) => a - b).join(',')}`;
+        if (sig === lastSelectionSigRef.current) return;
+        lastSelectionSigRef.current = sig;
+        if (fileIds.length > 0 || folderIds.length > 0) {
+            selectAll(fileIds, folderIds);
+        } else {
+            clearSelection();
+        }
+    };
+
     const handleMouseDown = (e: React.MouseEvent) => {
         if (e.button !== 0) return; // Only left click
         // Rubber-band selection is for the file grid. GrabSearch renders its own
@@ -263,6 +355,9 @@ export default function FileBrowser() {
             const startX = e.clientX - rect.left + containerRef.current!.scrollLeft;
             const startY = e.clientY - rect.top + containerRef.current!.scrollTop;
             selectionStart.current = { x: startX, y: startY };
+            lastPointerRef.current = { x: startX, y: startY };
+            lastSelectionSigRef.current = '';
+            captureDragRects();
             setSelectionBox({ x1: startX, y1: startY, x2: startX, y2: startY, active: true });
         }
         
@@ -275,60 +370,16 @@ export default function FileBrowser() {
         if (!isSelecting || !containerRef.current) return;
         
         const rect = containerRef.current.getBoundingClientRect();
-        const currentX = e.clientX - rect.left + containerRef.current.scrollLeft;
-        const currentY = e.clientY - rect.top + containerRef.current.scrollTop;
-
-        setSelectionBox({
-            x1: selectionStart.current.x,
-            y1: selectionStart.current.y,
-            x2: currentX,
-            y2: currentY,
-            active: true
-        });
-
-        // Calculate selection
-        const box = {
-            left: Math.min(selectionStart.current.x, currentX),
-            top: Math.min(selectionStart.current.y, currentY),
-            right: Math.max(selectionStart.current.x, currentX),
-            bottom: Math.max(selectionStart.current.y, currentY),
+        lastPointerRef.current = {
+            x: e.clientX - rect.left + containerRef.current.scrollLeft,
+            y: e.clientY - rect.top + containerRef.current.scrollTop
         };
-
-        const fileIdsToSelect: number[] = [];
-        const folderIdsToSelect: number[] = [];
-        
-        // Check files
-        const fileElements = containerRef.current.querySelectorAll('[data-file-id]');
-        fileElements.forEach((el) => {
-            const elRect = (el as HTMLElement).getBoundingClientRect();
-            const elLeft = elRect.left - rect.left + containerRef.current!.scrollLeft;
-            const elTop = elRect.top - rect.top + containerRef.current!.scrollTop;
-            const elRight = elLeft + elRect.width;
-            const elBottom = elTop + elRect.height;
-
-            if (elLeft < box.right && elRight > box.left && elTop < box.bottom && elBottom > box.top) {
-                fileIdsToSelect.push(Number((el as HTMLElement).dataset.fileId));
-            }
-        });
-
-        // Check folders
-        const folderElements = containerRef.current.querySelectorAll('[data-folder-id]');
-        folderElements.forEach((el) => {
-            const elRect = (el as HTMLElement).getBoundingClientRect();
-            const elLeft = elRect.left - rect.left + containerRef.current!.scrollLeft;
-            const elTop = elRect.top - rect.top + containerRef.current!.scrollTop;
-            const elRight = elLeft + elRect.width;
-            const elBottom = elTop + elRect.height;
-
-            if (elLeft < box.right && elRight > box.left && elTop < box.bottom && elBottom > box.top) {
-                folderIdsToSelect.push(Number((el as HTMLElement).dataset.folderId));
-            }
-        });
-
-        if (fileIdsToSelect.length > 0 || folderIdsToSelect.length > 0) {
-            selectAll(fileIdsToSelect, folderIdsToSelect);
-        } else {
-            clearSelection();
+        // Coalesce pointer moves to one update per frame.
+        if (rafRef.current == null) {
+            rafRef.current = requestAnimationFrame(() => {
+                rafRef.current = null;
+                applyDragSelection();
+            });
         }
     };
 
@@ -336,6 +387,9 @@ export default function FileBrowser() {
         if (isSelecting) {
             setIsSelecting(false);
             setSelectionBox(null);
+            cancelDragFrame();
+            dragRectsRef.current = null;
+            lastPointerRef.current = null;
         }
     };
 
@@ -359,13 +413,6 @@ export default function FileBrowser() {
             if (e.ctrlKey && e.shiftKey && (e.key === 'N' || e.key === 'n')) {
                 e.preventDefault();
                 setShowNewFolder(true);
-                return;
-            }
-
-            // F5 or Ctrl+R - Refresh
-            if (e.key === 'F5' || (e.ctrlKey && e.key === 'r')) {
-                e.preventDefault();
-                handleRefresh();
                 return;
             }
 

@@ -117,10 +117,11 @@ class LoginViewModel @Inject constructor(
             val url = _uiState.value.serverUrl
             if (url.isNotEmpty()) {
                 settingsRepository.setServerUrl(url)
-                val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-                intent?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-                Runtime.getRuntime().exit(0)
+                // DynamicBaseUrlInterceptor picks the new server up on the
+                // very next request — no process restart needed anymore (the
+                // old Runtime.exit(0) hack killed the app to rebuild Retrofit).
+                fetchBotInfo()
+                generateLoginCode()
             }
         }
     }
@@ -198,7 +199,9 @@ class LoginViewModel @Inject constructor(
         pollingJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isPolling = true)
 
-            repeat(150) {
+            // Each call long-polls ~8s server-side; 75 cycles comfortably
+            // outlives the 10-minute code expiry.
+            repeat(75) {
                 val result = authRepository.verifyLoginCode(code)
                 result.fold(
                     onSuccess = { _ ->
@@ -226,7 +229,7 @@ class LoginViewModel @Inject constructor(
 
                 )
 
-                delay(2000)
+                delay(500)
             }
 
             _uiState.value = _uiState.value.copy(
@@ -251,11 +254,15 @@ class LoginViewModel @Inject constructor(
         val writer = QRCodeWriter()
         val bitMatrix = writer.encode(content, BarcodeFormat.QR_CODE, size, size)
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.RGB_565)
-        for (x in 0 until size) {
-            for (y in 0 until size) {
-                bitmap.setPixel(x, y, if (bitMatrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+        // One bulk setPixels call instead of 360k setPixel round-trips
+        val pixels = IntArray(size * size)
+        var i = 0
+        for (y in 0 until size) {
+            for (x in 0 until size) {
+                pixels[i++] = if (bitMatrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE
             }
         }
+        bitmap.setPixels(pixels, 0, size, 0, 0, size, size)
         return bitmap
     }
 }

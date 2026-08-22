@@ -573,6 +573,9 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                         }
                     }
 
+                    // File existence checks + MediaStore queries are disk /
+                    // provider round-trips — keep them off the main thread.
+                    val localUri: Uri? = withContext(kotlinx.coroutines.Dispatchers.IO) {
                     val downloadsDir = if (Build.VERSION.SDK_INT < 29) {
                         Environment.getExternalStoragePublicDirectory(
                             Environment.DIRECTORY_DOWNLOADS
@@ -580,10 +583,10 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                     } else {
                         null
                     }
-                    var localUri: Uri? = null
+                    var foundUri: Uri? = null
                     val legacyFile = downloadsDir?.let { File(it, file.fileName) }
                     if (legacyFile != null && legacyFile.exists() && legacyFile.length() > 0) {
-                        localUri = Uri.fromFile(legacyFile)
+                        foundUri = Uri.fromFile(legacyFile)
                     } else if (Build.VERSION.SDK_INT >= 29) {
                         // Scoped storage: downloads are stored as MediaStore.Downloads rows,
                         // not raw files at the public Downloads path.
@@ -602,10 +605,12 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                                     cursor.getColumnIndexOrThrow(MediaStore.Downloads.IS_PENDING)
                                 ) == 1
                                 if (!isPending) {
-                                    localUri = Uri.withAppendedPath(MediaStore.Downloads.EXTERNAL_CONTENT_URI, id.toString())
+                                    foundUri = Uri.withAppendedPath(MediaStore.Downloads.EXTERNAL_CONTENT_URI, id.toString())
                                 }
                             }
                         }
+                    }
+                    foundUri
                     }
 
                     val useLocalFile = localUri != null

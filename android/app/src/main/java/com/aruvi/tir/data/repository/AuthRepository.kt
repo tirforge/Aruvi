@@ -158,7 +158,10 @@ class AuthRepository @Inject constructor(
      */
     suspend fun verifyLoginCode(code: String): Result<AuthResponse> {
         return try {
-            val response = api.verifyCode(VerifyCodeRequest(code))
+            // Long-poll 8s server-side: the 202 only comes back after the
+            // wait window, so the poll loop needs far fewer round-trips and
+            // login completes within ~300ms of the bot claim.
+            val response = api.verifyCode(VerifyCodeRequest(code, wait = 8))
             when (response.code()) {
                 200 -> {
                     val auth = response.body()

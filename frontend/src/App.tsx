@@ -122,12 +122,15 @@ function LoginPage() {
         requestNewCode();
     }, [requestNewCode]);
 
-    // Polling logic
-    // Polling logic
+    // Polling logic — each verify request long-polls server-side for ~8s and
+    // returns the instant the code is claimed, so this is a self-scheduling
+    // sequential loop (never two overlapping requests), not a fixed interval.
     useEffect(() => {
+        let cancelled = false;
         let timer: any;
         if (isPolling && code) {
-            timer = setInterval(() => {
+            const poll = () => {
+                if (cancelled) return;
                 if (expiresAt > 0 && Date.now() >= expiresAt) {
                     setCodeExpired(true);
                     setIsPolling(false);
@@ -135,22 +138,40 @@ function LoginPage() {
                 }
                 verifyCode(code, {
                     onSuccess: (data) => {
-                        // Ignore 202 "pending" responses — no access_token yet
-if (!('access_token' in data) || !data.access_token) return;
+                        if (cancelled) return;
+                        // 202 "pending" responses carry no access_token — go again
+                        if (!('access_token' in data) || !data.access_token) {
+                            timer = setTimeout(poll, 1000);
+                            return;
+                        }
                         localStorage.setItem('access_token', data.access_token);
                         localStorage.setItem('refresh_token', data.refresh_token);
                         clearStoredLoginCode();
                         setIsPolling(false);
                         window.location.href = '/home';
                     },
-                    onError: () => {
-                        // Silent failure for polling
+                    onError: (err: any) => {
+                        if (cancelled) return;
+                        // Terminal verdicts (410 gone / 404): retrying can
+                        // never succeed — stop polling and surface the reason
+                        // instead of spinning silently forever.
+                        const status = err?.response?.status;
+                        if (status === 410 || status === 404) {
+                            setError(err.response?.data?.detail || 'This code is no longer valid — generate a new one.');
+                            setIsPolling(false);
+                            clearStoredLoginCode();
+                            return;
+                        }
+                        // Transient (network, 5xx, 429) — back off and retry
+                        timer = setTimeout(poll, 2000);
                     }
                 });
-}, 2000);
+            };
+            poll();
         }
         return () => {
-            if (timer) clearInterval(timer);
+            cancelled = true;
+            if (timer) clearTimeout(timer);
         };
     }, [isPolling, code, expiresAt, verifyCode]);
 
@@ -377,7 +398,7 @@ function MovieHome() {
 }
 
 function App() {
-  const { previewFile } = useAppStore();
+  const previewFile = useAppStore((s) => s.previewFile);
   return (
     <>
       <GlobalContextMenu />

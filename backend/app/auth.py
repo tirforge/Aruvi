@@ -4,17 +4,26 @@ JWT authentication utilities.
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 import secrets
+import time
 
 from jose import jwt, JWTError
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from .config import get_settings
 from .database import get_db
 from .models import User
 from .schemas import TokenPayload
+
+
+def _utcnow():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+# telegram_id → monotonic time of last last_active DB write (throttle)
+_last_active_touch: dict[int, float] = {}
 
 settings = get_settings()
 security = HTTPBearer(auto_error=False)
@@ -180,5 +189,20 @@ async def get_current_user(
             detail="Session has been invalidated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
+    # Track activity for the admin "active today" stat. Throttled to one
+    # write per user per 5 minutes — a per-request write would hammer the
+    # users table on every stream chunk/authenticated call.
+    now = time.monotonic()
+    last = _last_active_touch.get(user.id, 0.0)
+    if now - last > 300:
+        _last_active_touch[user.id] = now
+        try:
+            await db.execute(
+                update(User).where(User.id == user.id).values(last_active=_utcnow())
+            )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+
     return user

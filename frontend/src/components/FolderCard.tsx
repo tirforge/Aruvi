@@ -1,7 +1,7 @@
 /**
  * FolderCard component - displays a folder in grid or list view with drag-drop support
  */
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { Folder as FolderIcon, MoreVertical, ChevronRight } from 'lucide-react';
 import { Folder } from '../lib/api';
 import { useAppStore } from '../lib/store';
@@ -15,9 +15,10 @@ interface FolderCardProps {
     onFileDrop: (fileId: number, folderId: number) => void;
 }
 
-export default function FolderCard({ folder, viewMode, selected, onSelect, onOpen, onFileDrop }: FolderCardProps) {
+function FolderCardImpl({ folder, viewMode, selected, onSelect, onOpen, onFileDrop }: FolderCardProps) {
     const [isDragOver, setIsDragOver] = useState(false);
-    const { activeContextMenu, setActiveContextMenu } = useAppStore();
+    const activeContextMenu = useAppStore((s) => s.activeContextMenu);
+    const setActiveContextMenu = useAppStore((s) => s.setActiveContextMenu);
 
     // Check if this folder's context menu is active
     const showMenu = activeContextMenu?.type === 'folder' && activeContextMenu?.item.id === folder.id;
@@ -211,3 +212,10 @@ export default function FolderCard({ folder, viewMode, selected, onSelect, onOpe
         </div>
     );
 }
+
+// Value-props comparison only (see FileCard): the callback props capture the
+// same stable store actions on every parent render.
+export default React.memo(
+    FolderCardImpl,
+    (prev, next) => prev.folder === next.folder && prev.viewMode === next.viewMode && prev.selected === next.selected
+);

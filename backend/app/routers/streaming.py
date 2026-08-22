@@ -133,15 +133,15 @@ async def streaming_debug(request: Request):
             })
 
         forward_info = []
-        for mid in list(_forward_streams.keys()):
-            info = _forward_streams.get(mid)
+        for key in list(_forward_streams.keys()):
+            info = _forward_streams.get(key)
             if not info:
                 continue
             futures = info.get("results", {})
             done = sum(1 for f in list(futures.values()) if f.done())
             total = info.get("total_chunks", 0)
             forward_info.append({
-                "message_id": mid,
+                "message_id": key[1],
                 "done_futures": done,
                 "total_futures": len(futures),
                 "total_chunks": total,

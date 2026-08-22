@@ -1,8 +1,9 @@
 /**
  * FileCard component - displays a single file in grid or list view
  */
+import React from 'react';
 import { Play, MoreVertical, Film, Music, FileText, Image } from 'lucide-react';
-import { TelegramFile, formatFileSize, formatDuration, useAccessToken } from '../lib/api';
+import { TelegramFile, formatFileSize, formatDuration } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import AuthImage from './AuthImage';
 
@@ -14,19 +15,17 @@ interface FileCardProps {
     onPlay: () => void;
 }
 
-export default function FileCard({
+function FileCardImpl({
     file,
     viewMode,
     selected,
     onSelect,
     onPlay
 }: FileCardProps) {
-    const { activeContextMenu, setActiveContextMenu } = useAppStore();
-
-    // Reactive token (not a one-shot read): the image srcs below embed it, and
-    // if it's rotated mid-session a stale capture would 401 forever. This hook
-    // re-renders the card on refresh so thumbnails reload with the fresh token.
-    const accessToken = useAccessToken();
+    // Narrow selectors: a whole-store subscription re-rendered EVERY card on
+    // any store change (selection box drag, toasts, selection changes).
+    const activeContextMenu = useAppStore((s) => s.activeContextMenu);
+    const setActiveContextMenu = useAppStore((s) => s.setActiveContextMenu);
 
     // Check if this file's context menu is active
     const showMenu = activeContextMenu?.type === 'file' && activeContextMenu?.item.id === file.id;
@@ -87,15 +86,15 @@ export default function FileCard({
                 data-file-id={file.id}
             >
                 <div className="w-12 h-12 rounded-lg bg-dark-800/80 flex items-center justify-center overflow-hidden shrink-0 border border-white/[0.05]">
-                    {file.file_type === 'image' ? (
-                        <img
-                            src={`${window.location.origin}${file.stream_url}${file.stream_url.includes('?') ? '&' : '?'}token=${accessToken}`}
+                    {file.file_type === 'image' || file.thumbnail_url ? (
+                        // AuthImage sends the token via the Authorization header
+                        // (no JWT in a URL that lands in server/proxy logs) and
+                        // loads lazily via IntersectionObserver.
+                        <AuthImage
+                            src={file.file_type === 'image' ? file.stream_url : file.thumbnail_url!}
                             alt={file.file_name}
                             className="w-full h-full object-cover"
-                            referrerPolicy="no-referrer"
                         />
-                    ) : file.thumbnail_url ? (
-                        <AuthImage src={file.thumbnail_url} alt={file.file_name} className="w-full h-full object-cover" />
                     ) : (
                         getIcon()
                     )}
@@ -166,17 +165,16 @@ export default function FileCard({
             data-file-id={file.id}
         >
             <div className={`aspect-video rounded-lg mb-3 overflow-hidden relative border ${selected ? 'border-primary-500/20' : 'border-white/[0.05]'} bg-dark-900/50`}>
-                {file.file_type === 'image' ? (
-                    <img
-                        src={`${window.location.origin}${file.stream_url}${file.stream_url.includes('?') ? '&' : '?'}token=${accessToken}`}
-                        alt={file.file_name}
-                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                        referrerPolicy="no-referrer"
-                    />
-                ) : file.thumbnail_url ? (
+                {file.file_type === 'image' || file.thumbnail_url ? (
                     <>
-                        <AuthImage src={file.thumbnail_url} alt={file.file_name} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                        <AuthImage
+                            src={file.file_type === 'image' ? file.stream_url : file.thumbnail_url!}
+                            alt={file.file_name}
+                            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        />
+                        {file.file_type !== 'image' && (
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                        )}
                     </>
                 ) : (
                     <div className="w-full h-full flex items-center justify-center">
@@ -251,3 +249,10 @@ export default function FileCard({
         </div>
     );
 }
+
+// Function props are re-created by the parent on every render; they only
+// capture the same stable store actions each time, so compare by value props.
+export default React.memo(
+    FileCardImpl,
+    (prev, next) => prev.file === next.file && prev.viewMode === next.viewMode && prev.selected === next.selected
+);

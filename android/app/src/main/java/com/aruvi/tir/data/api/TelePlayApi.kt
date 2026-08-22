@@ -181,6 +181,9 @@ interface TelePlayApi {
     @GET("tv/browse")
     suspend fun getTVBrowse(): Response<TVBrowseResponse>
 
+    @GET("tv/revision")
+    suspend fun getTVRevision(): Response<TVRevisionResponse>
+
     /**
      * Get continue watching list.
      */

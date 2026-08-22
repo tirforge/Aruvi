@@ -33,9 +33,12 @@
         android:name="android.hardware.type.television"
         android:required="false" />
 
+    <!-- allowBackup is disabled: auth tokens (JWT access+refresh) live in
+         DataStore and auto-backup would carry them into cloud transfers and
+         adb backups. A media client has nothing worth backing up. -->
     <application
         android:name=".TelePlayApp"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:requestLegacyExternalStorage="true"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"

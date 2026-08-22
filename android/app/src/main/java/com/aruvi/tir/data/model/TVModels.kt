@@ -23,3 +23,14 @@ data class SearchResponse(
     @SerializedName("results") val results: List<FileItem>,
     @SerializedName("total") val total: Int
 )
+
+/**
+ * Lightweight revision snapshot (/api/tv/revision): three max-timestamps the
+ * client compares to decide whether refetching the full browse payload is
+ * needed. NULL when a table is empty.
+ */
+data class TVRevisionResponse(
+    @SerializedName("files_created_at") val filesCreatedAt: String?,
+    @SerializedName("files_updated_at") val filesUpdatedAt: String?,
+    @SerializedName("folders_updated_at") val foldersUpdatedAt: String?
+)

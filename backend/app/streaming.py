@@ -202,7 +202,7 @@ class CacheManager:
 
 
 _cache_manager = CacheManager(per_video_max=STREAM_RAM_PER_VIDEO_MB * 1024 * 1024)  # RAM backward cache per video
-_forward_streams: dict[int, dict] = {}
+_forward_streams: dict[tuple[int, int], dict] = {}  # (chat_id, message_id) → live forward stream
 _cache_finished_at: dict[tuple[int, int], float] = {}  # (chat_id, msg_id) → monotonic when stream ended
 CACHE_TTL = 1800  # 30 min cache retention after stream ends
 
@@ -253,7 +253,9 @@ def _evict_idle_ram_caches():
             continue
         # The timestamp may be stale from a PRIOR stream of the same movie: if a
         # new stream is active right now (seek / resume), keep its hot cache.
-        if key[1] in _forward_streams:
+        # Composite key: the same message id in a different chat (diag route
+        # with ?chat=) must not keep/evict the wrong movie's cache.
+        if key in _forward_streams:
             continue
         _cache_finished_at.pop(key, None)
         freed = _cache_manager.remove(*key)
@@ -265,15 +267,15 @@ def get_forward_snapshot() -> list[dict]:
     # Prune stale entries (>8h since last update — a stream that ended without
     # its finally ever running, e.g. a hard server abort, would linger forever)
     now = time.monotonic()
-    for mid in list(_forward_streams.keys()):
-        if now - _forward_streams[mid].get("updated_at", 0) > 8 * 3600:
-            _forward_streams.pop(mid, None)
+    for key in list(_forward_streams.keys()):
+        if now - _forward_streams[key].get("updated_at", 0) > 8 * 3600:
+            _forward_streams.pop(key, None)
     result = []
-    for mid, info in list(_forward_streams.items()):
+    for key, info in list(_forward_streams.items()):
         futures = info.get("results", {})
         done = sum(1 for f in futures.values() if f.done())
         result.append({
-            "message_id": mid,
+            "message_id": key[1],
             "chat_id": info["chat_id"],
             "prebuffer_mb": done,
             "max_mb": info.get("total_chunks", 2000),
@@ -682,6 +684,13 @@ _stream_semaphore = asyncio.Semaphore(STREAM_MAX_CONCURRENT)
 class ClientPoolEmpty(Exception):
     """No connected client available in the pool."""
     pass
+
+
+class SourceMessageGone(Exception):
+    """Set on chunk futures when the source Telegram message is unretrievable.
+    Aborts the stream loudly instead of yielding empty chunks — the client
+    would otherwise receive a short body against the advertised length with
+    no error anywhere."""
 
 
 class ClientPool:
@@ -1122,7 +1131,7 @@ async def parallel_stream_generator(
     # monitor + restart-scheduler think no stream is active.
     _backpressure = CappedSemaphore(STREAM_INFLIGHT_MB)  # ~200 MB in-flight per stream
     _forward_stream = {"chat_id": chat_id, "results": results, "total_chunks": total_chunks, "updated_at": time.monotonic()}
-    _forward_streams[message_id] = _forward_stream
+    _forward_streams[(chat_id, message_id)] = _forward_stream
 
     async def _resolve_chunk_now(chunk_idx: int, data: bytes) -> bool:
         """Resolve a chunk future, acquiring a backpressure permit ONLY when we
@@ -1335,15 +1344,21 @@ async def parallel_stream_generator(
                         logger.error("Bot %d: failed to fetch message %d: %s", c_idx, message_id, e)
                         return
                 if not local_msg:
-                    logger.error("Bot %d: message %d not found, emitting empty chunks", c_idx, message_id)
+                    logger.error("Bot %d: message %d not found — failing chunks", c_idx, message_id)
                     while not task_queue.empty():
                         try:
                             batch_start, batch_end = task_queue.get_nowait()
                         except asyncio.QueueEmpty:
                             break
                         for chunk_offset in range(batch_start, batch_end + 1):
-                            if not results[chunk_offset].done():
-                                results[chunk_offset].set_result(b"")
+                            fut = results[chunk_offset]
+                            if not fut.done():
+                                fut.set_exception(
+                                    SourceMessageGone(f"message {message_id} not found in chat {chat_id}")
+                                )
+                                # Mark retrieved so an early client disconnect
+                                # (futures never awaited) doesn't warn at GC.
+                                fut.exception()
                         task_queue.task_done()
                     return
 
@@ -1626,8 +1641,9 @@ async def parallel_stream_generator(
             del results[chunk_idx]
             # Refresh forward stream timestamp every 100 chunks
             if offset % 100 == 0:
-                if message_id in _forward_streams:
-                    _forward_streams[message_id]["updated_at"] = time.monotonic()
+                fwd_key = (chat_id, message_id)
+                if fwd_key in _forward_streams:
+                    _forward_streams[fwd_key]["updated_at"] = time.monotonic()
     finally:
         # Diagnose WHY a stream ended short: log the pending exception type so a
         # mid-stream abort is never silent (normally an asyncio.TimeoutError from
@@ -1659,8 +1675,8 @@ async def parallel_stream_generator(
         except (asyncio.TimeoutError, asyncio.CancelledError):
             logger.warning("Worker drain timed out for msg %d (%d tasks)", message_id, len(worker_tasks))
         results.clear()
-        if _forward_streams.get(message_id) is _forward_stream:
-            _forward_streams.pop(message_id, None)
+        if _forward_streams.get((chat_id, message_id)) is _forward_stream:
+            _forward_streams.pop((chat_id, message_id), None)
             # Stream over — drop the prefetch size so the key can be re-seeded
             # by start_ahead_prefetch on the next stream. Prevents unbounded
             # growth of _prefetch_size across distinct movies streamed this boot.

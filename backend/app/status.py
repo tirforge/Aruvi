@@ -255,7 +255,7 @@ def maybe_oom_clear():
     now = time.monotonic()
     if cur is not None and mx is not None and cur > 0.65 * mx and now - _last_oom_clear > _OOM_CLEAR_COOLDOWN:
         _last_oom_clear = now
-        active = {(info["chat_id"], mid) for mid, info in list(_forward_streams.items())}
+        active = set(_forward_streams.keys())  # keys are (chat_id, message_id)
         freed = _cache_manager.clear_all(exclude_keys=active)
         kept = len(active)
         if freed > 0:
@@ -357,9 +357,13 @@ def clear_logs():
 
 
 async def get_status() -> dict:
-    cpu = get_cpu()
-    ram = get_ram()
-    net = get_net()
+    # /proc + cgroup reads (get_ram's RSS scan iterates every PID in the
+    # cgroup) — run them off the event loop so status polls never stall
+    # active streams when the 10s RSS cache expires.
+    def _sample():
+        return get_cpu(), get_ram(), get_net()
+
+    cpu, ram, net = await asyncio.to_thread(_sample)
     _history.append({"cpu": cpu, "ram": ram["percent"], "rx": net["rx_mbps"], "tx": net["tx_mbps"]})
     logs = _ring_handler.get_logs() if _ring_handler else []
     cache = _cache_manager.info

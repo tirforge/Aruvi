@@ -71,6 +71,13 @@ android {
             signingConfig = if (releaseKeyConfigured) {
                 signingConfigs.getByName("release")
             } else {
+                // Debug-signed APKs can't be updated over a release-signed
+                // install and are trivially re-signed by anyone — never ship
+                // one without noticing.
+                logger.warn(
+                    "WARNING: release build is signed with the DEBUG keystore " +
+                    "(no RELEASE_STORE_PASSWORD found). Do not distribute this APK."
+                )
                 signingConfigs.getByName("debug")
             }
         }

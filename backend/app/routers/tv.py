@@ -185,6 +185,8 @@ async def tv_search(
 @router.get("/folder/{folder_id}")
 async def tv_folder_detail(
     folder_id: int,
+    limit: int = Query(200, ge=1, le=1000, description="Max files to return"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -211,14 +213,24 @@ async def tv_folder_detail(
     )
     subfolders = subfolders_result.scalars().all()
     
-    # Get files in this folder
+    # Get files in this folder (paginated — a folder with tens of thousands
+    # of files must not load and serialize every row in one response)
     files_result = await db.execute(
         select(File)
         .where(File.user_id == current_user.id, File.folder_id == folder_id)
         .options(selectinload(File.watch_progress), defer(File.thumbnail_data))
         .order_by(File.file_name)
+        .offset(offset)
+        .limit(limit)
     )
     files = files_result.scalars().all()
+
+    total_result = await db.execute(
+        select(func.count())
+        .select_from(File)
+        .where(File.user_id == current_user.id, File.folder_id == folder_id)
+    )
+    total_files = total_result.scalar() or 0
     
     # Build parent path for breadcrumb navigation — single query
     parent_path = []
@@ -268,5 +280,8 @@ async def tv_folder_detail(
             for sf in subfolders
         ],
         "files": [add_urls_to_file(f) for f in files],
+        "total_files": total_files,
+        "limit": limit,
+        "offset": offset,
         "parent_path": parent_path
     }

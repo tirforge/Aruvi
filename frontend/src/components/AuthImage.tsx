@@ -17,6 +17,26 @@ export default function AuthImage({ src, alt, className }: AuthImageProps) {
     const [blobUrl, setBlobUrl] = useState<string | null>(null);
     const [error, setError] = useState(false);
     const blobUrlRef = useRef<string | null>(null);
+    const imgRef = useRef<HTMLDivElement>(null);
+    // Lazy: only fetch (an authorized request + blob) once the card scrolls
+    // near the viewport. Infinite scroll mounts every card immediately —
+    // without this, a 500-file library fires 500 thumbnail fetches at once.
+    const [visible, setVisible] = useState(false);
+    useEffect(() => {
+        const el = imgRef.current;
+        if (!el || visible) return;
+        const io = new IntersectionObserver(
+            (entries) => {
+                if (entries.some((e) => e.isIntersecting)) {
+                    setVisible(true);
+                    io.disconnect();
+                }
+            },
+            { rootMargin: '200px' }
+        );
+        io.observe(el);
+        return () => io.disconnect();
+    }, [visible]);
 
     // Reactive token: when it's rotated mid-session (401 refresh, another tab),
     // this changes and re-runs the fetch below with the fresh token — a plain
@@ -31,8 +51,7 @@ export default function AuthImage({ src, alt, className }: AuthImageProps) {
         setError(false);
 
         const token = accessToken;
-        if (!token || !src) {
-            setError(true);
+        if (!token || !src || !visible) {
             return;
         }
 
@@ -83,9 +102,11 @@ export default function AuthImage({ src, alt, className }: AuthImageProps) {
                 blobUrlRef.current = null;
             }
         };
-    }, [src, accessToken]);
+    }, [src, accessToken, visible]);
 
-    if (error || !blobUrl) return null;
+    if (error) return null;
+
+    if (!blobUrl) return <div ref={imgRef} className={className} aria-hidden="true" />;
 
     return <img src={blobUrl} alt={alt} className={className} />;
 }

@@ -25,14 +25,19 @@ from app.telegram import _prune_msg_cache
 
 async def _periodic_housekeeping():
     """Every 60s: release free memory, evict stale stream caches, prune msg cache."""
-    while True:
-        await asyncio.sleep(60)
+    def _gc_and_trim():
         gc.collect()
         _libc.malloc_trim(0)
+
+    while True:
+        await asyncio.sleep(60)
+        # gc.collect over a large heap stalls the loop for tens of ms — run it
+        # off the event loop so active streams never blip.
+        await asyncio.to_thread(_gc_and_trim)
         try:
             now = time.monotonic()
             # Active streams — never evict
-            active = {(info["chat_id"], mid) for mid, info in list(_forward_streams.items())}
+            active = set(_forward_streams.keys())  # keys are (chat_id, message_id)
             # Recently finished streams — keep for CACHE_TTL (10min) for resume after network drop
             for key, finished_at in list(_cache_finished_at.items()):
                 if now - finished_at < CACHE_TTL:
