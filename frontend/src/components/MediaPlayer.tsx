@@ -16,8 +16,8 @@ let moviLoadPromise: Promise<boolean> | null = null;
 
 // Warm the engine in the background once the page has painted, so the first
 // movie the user opens mounts movi-player immediately instead of flashing the
-// app's loading spinner for the ~1s it takes to fetch the 11MB module from the
-// CDN. No-op after the first load (customElements.get guard + moviLoadPromise).
+// app's loading spinner while the 11MB module downloads. No-op after the
+// first load (customElements.get guard + moviLoadPromise).
 if (typeof window !== 'undefined') {
     const warm = () => loadMoviPlayer();
     const scheduleWarm = () => {
@@ -306,8 +306,14 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         prevTokenRef.current = reactiveToken;
         const wasPlaying = !el.paused;
         const prevTime = el.currentTime || 0;
+        // Build the URL from the CURRENT token — authorizedStreamUrl is
+        // deliberately frozen at mount (stable src); re-sourcing with it
+        // would replay the stale token the rotation just invalidated.
+        const base = getAbsoluteUrl(file.stream_url || '');
+        const sep = base.includes('?') ? '&' : '?';
+        const freshUrl = `${base}${sep}token=${reactiveToken}`;
         el.source({
-            video: { src: authorizedStreamUrl, type: 'video/mp4' },
+            video: { src: freshUrl, type: 'video/mp4' },
         });
         const restore = () => {
             try {

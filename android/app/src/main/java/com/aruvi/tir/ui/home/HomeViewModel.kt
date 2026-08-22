@@ -168,13 +168,17 @@ class HomeViewModel @Inject constructor(
      */
     private suspend fun checkForUpdates() {
         val revision = filesRepository.getTVRevision().getOrNull()
+        var pendingFingerprint: String? = null
         if (revision != null) {
             val fingerprint = "${revision.filesCreatedAt}|${revision.filesUpdatedAt}|${revision.foldersUpdatedAt}"
             if (fingerprint == lastRevision) return
-            lastRevision = fingerprint
+            // Committed only AFTER a successful browse below — if this fetch
+            // fails, the next poll must still see the change and retry.
+            pendingFingerprint = fingerprint
         }
         filesRepository.getTVBrowse().fold(
             onSuccess = { browse ->
+                pendingFingerprint?.let { lastRevision = it }
                 if (browse != lastBrowse) {
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,

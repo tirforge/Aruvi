@@ -85,10 +85,6 @@ interface AppState {
     toasts: Array<{ id: string; message: string; type: 'success' | 'error' | 'info' }>;
     addToast: (message: string, type?: 'success' | 'error' | 'info') => void;
     removeToast: (id: string) => void;
-
-    // Drag Selection Box
-    selectionBox: { x1: number; y1: number; x2: number; y2: number; active: boolean } | null;
-    setSelectionBox: (box: { x1: number; y1: number; x2: number; y2: number; active: boolean } | null) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -217,6 +213,4 @@ export const useAppStore = create<AppState>((set) => ({
     })),
 
     // Drag Selection Box
-    selectionBox: null,
-    setSelectionBox: (box) => set({ selectionBox: box }),
 }));
