@@ -3,6 +3,7 @@ package com.aruvi.tir.di
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.aruvi.tir.data.api.AuthInterceptor
+import com.aruvi.tir.data.api.DynamicBaseUrlInterceptor
 import com.aruvi.tir.data.api.TelePlayApi
 import com.aruvi.tir.data.repository.AuthRepository
 import com.aruvi.tir.data.repository.FilesRepository
@@ -33,7 +34,8 @@ object NetworkModule {
     @Singleton
     fun provideFileDownloader(
         @dagger.hilt.android.qualifiers.ApplicationContext context: android.content.Context,
-        authInterceptor: AuthInterceptor
+        authInterceptor: AuthInterceptor,
+        dynamicBaseUrlInterceptor: DynamicBaseUrlInterceptor
     ): FileDownloader {
         // Create a dedicated OkHttpClient for downloads:
         // - NO body logging (Level.BODY buffers entire response into memory, killing large downloads)
@@ -41,8 +43,10 @@ object NetworkModule {
         // - Auth interceptor for automatic token handling
         val downloadLogging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.HEADERS
+            redactHeader("Authorization")
         }
         val downloadClient = OkHttpClient.Builder()
+            .addInterceptor(dynamicBaseUrlInterceptor)
             .addInterceptor(authInterceptor)
             .addInterceptor(downloadLogging)
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -69,7 +73,10 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(authInterceptor: AuthInterceptor): OkHttpClient {
+    fun provideOkHttpClient(
+        authInterceptor: AuthInterceptor,
+        dynamicBaseUrlInterceptor: DynamicBaseUrlInterceptor
+    ): OkHttpClient {
         val loggingInterceptor = HttpLoggingInterceptor().apply {
             // BODY logging writes every JWT, login code and response body to
             // logcat — release builds must stay silent.
@@ -82,6 +89,9 @@ object NetworkModule {
         }
 
         return OkHttpClient.Builder()
+            // URL rewrite must run before auth so the token attaches to the
+            // request that actually goes to the CURRENT server.
+            .addInterceptor(dynamicBaseUrlInterceptor)
             .addInterceptor(authInterceptor)
             .addInterceptor(loggingInterceptor)
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -97,14 +107,15 @@ object NetworkModule {
         gson: Gson,
         settingsRepository: SettingsRepository
     ): Retrofit {
-        val defaultUrl = BuildConfig.DEFAULT_SERVER_URL.ifBlank { "http://localhost:7680" }
+        // One startup read to seed the in-memory cache the interceptor uses;
+        // the base URL below is only a valid-URL placeholder — every request
+        // is rewritten to the CURRENT saved server by DynamicBaseUrlInterceptor,
+        // so changing servers applies without an app restart.
         val serverUrl = try {
-            settingsRepository.normalizeServerUrl(runBlocking { settingsRepository.getServerUrl() })
+            runBlocking { settingsRepository.getServerUrl() }
         } catch (e: Exception) {
-            defaultUrl
+            BuildConfig.DEFAULT_SERVER_URL.ifBlank { "http://localhost:7680" }
         }
-        // Retrofit requires a valid http(s) base URL; anything else must never
-        // reach startup (would crash the app beyond launch).
         val baseUrl = if (serverUrl.startsWith("http://") || serverUrl.startsWith("https://")) {
             if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/"
         } else {

@@ -5,7 +5,13 @@ import { TelegramFile, formatDuration, useUpdateProgress, useFile, getFileDownlo
 import { useAppStore } from '../lib/store';
 import AuthImage from './AuthImage';
 
-const MOVI_PLAYER_URL = 'https://cdn.jsdelivr.net/npm/movi-player@0.3.5/dist/element.js';
+// Vendored copy of movi-player@0.3.5 dist/element.js (upstream:
+// https://cdn.jsdelivr.net/npm/movi-player@0.3.5/dist/element.js — keep both
+// in sync when upgrading). Self-hosted: loading the playback engine from a
+// third-party CDN leaked every visitor's IP to jsdelivr, broke playback
+// whenever the CDN was blocked/down, and allowed a silent supply-chain swap
+// of the code (no SRI possible for this module format).
+const MOVI_PLAYER_URL = '/vendor/movi-player-0.3.5-element.js';
 let moviLoadPromise: Promise<boolean> | null = null;
 
 // Warm the engine in the background once the page has painted, so the first
@@ -14,10 +20,21 @@ let moviLoadPromise: Promise<boolean> | null = null;
 // CDN. No-op after the first load (customElements.get guard + moviLoadPromise).
 if (typeof window !== 'undefined') {
     const warm = () => loadMoviPlayer();
+    const scheduleWarm = () => {
+        // 'idle' keeps the 11MB engine fetch out of the startup critical
+        // path; the timeout guarantees it still warms when the browser never
+        // reports idle (busy TVs, background tabs).
+        const w = window as typeof window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number };
+        if (w.requestIdleCallback) {
+            w.requestIdleCallback(warm, { timeout: 3000 });
+        } else {
+            setTimeout(warm, 1500);
+        }
+    };
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
-        setTimeout(warm, 500);
+        setTimeout(scheduleWarm, 500);
     } else {
-        window.addEventListener('load', () => setTimeout(warm, 500));
+        window.addEventListener('load', () => setTimeout(scheduleWarm, 500));
     }
 }
 

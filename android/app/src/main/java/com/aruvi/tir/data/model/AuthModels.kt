@@ -14,9 +14,12 @@ data class LoginCodeResponse(
     @SerializedName("bot_name") val botName: String? = null
 )
 
-// Verify login code
+// Verify login code. wait>0 asks the server to long-poll (hold the request
+// until the code is claimed or wait seconds elapse) so login completes
+// ~300ms after the user taps Start in the bot.
 data class VerifyCodeRequest(
-    @SerializedName("code") val code: String
+    @SerializedName("code") val code: String,
+    @SerializedName("wait") val wait: Int = 0
 )
 
 // Auth response with tokens

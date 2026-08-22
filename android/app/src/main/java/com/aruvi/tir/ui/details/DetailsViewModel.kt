@@ -117,18 +117,23 @@ class DetailsViewModel @Inject constructor(
 
     /**
      * Check if the file already exists in local Downloads folder.
+     * Disk access — dispatched to IO (caller runs on Main).
      */
     private fun checkLocalFile(fileName: String) {
-        val downloadsDir = Environment.getExternalStoragePublicDirectory(
-            Environment.DIRECTORY_DOWNLOADS
-        )
-        val localFile = File(downloadsDir, fileName)
-        if (localFile.exists() && localFile.length() > 0) {
-            _uiState.value = _uiState.value.copy(
-                isFileLocal = true,
-                localFilePath = localFile.absolutePath,
-                downloadStatus = DownloadManager.STATUS_SUCCESSFUL
-            )
+        viewModelScope.launch {
+            val localFile = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DOWNLOADS
+                )
+                File(downloadsDir, fileName).takeIf { it.exists() && it.length() > 0 }
+            }
+            if (localFile != null) {
+                _uiState.value = _uiState.value.copy(
+                    isFileLocal = true,
+                    localFilePath = localFile.absolutePath,
+                    downloadStatus = DownloadManager.STATUS_SUCCESSFUL
+                )
+            }
         }
     }
 
@@ -172,10 +177,12 @@ class DetailsViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                val deleted = if (path.startsWith("content://")) {
-                    context.contentResolver.delete(Uri.parse(path), null, null) > 0
-                } else {
-                    file.exists() && file.delete()
+                val deleted = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    if (path.startsWith("content://")) {
+                        context.contentResolver.delete(Uri.parse(path), null, null) > 0
+                    } else {
+                        file.exists() && file.delete()
+                    }
                 }
                 if (deleted) {
                     _uiState.value = _uiState.value.copy(

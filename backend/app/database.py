@@ -186,11 +186,20 @@ async def init_db():
 
     # Data migration: reclassify files whose stored file_type doesn't match
     # their mime/extension (e.g. .mkv delivered as a Telegram document was
-    # stored as "document"). Runs on every startup; only writes changed rows.
+    # stored as "document"). ONE-TIME, guarded by an app_meta flag: the scan
+    # reads every file row and issues one UPDATE per changed row inside a
+    # single transaction — too slow to repeat on every boot of a large
+    # library. Files inserted after this fixup are classified at insert time.
     from sqlalchemy import text
     from .media_types import classify_file_type
     async with engine.begin() as conn:
+        done = (await conn.execute(
+            text("SELECT value FROM app_meta WHERE key = 'file_type_reclassified'")
+        )).scalar()
+        if done:
+            return
         rows = (await conn.execute(text("SELECT id, file_name, mime_type, file_type FROM files"))).all()
+        changed = 0
         for fid, fname, mime, ftype in rows:
             effective = classify_file_type(fname, mime)
             if effective != ftype:
@@ -198,4 +207,10 @@ async def init_db():
                     text("UPDATE files SET file_type = :t WHERE id = :id"),
                     {"t": effective, "id": fid},
                 )
+                changed += 1
                 logger.info("Reclassified file %s: %s -> %s", fid, ftype, effective)
+        await conn.execute(
+            text("INSERT INTO app_meta (key, value) VALUES ('file_type_reclassified', '1')")
+        )
+        if changed:
+            logger.info("Reclassification complete: %d file(s) fixed (will not run again)", changed)

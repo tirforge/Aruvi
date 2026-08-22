@@ -84,8 +84,10 @@ class FileDownloader(
      */
     fun enqueue(fileId: Int, fileName: String, url: String, mimeType: String? = null): Long {
         val id = nextId.getAndIncrement()
-        val localPath = createDestination(fileName, mimeType)
 
+        // Register the task immediately so the UI sees it; the MediaStore
+        // insert (a provider round-trip) happens off the caller thread —
+        // enqueue() is invoked from Main via ViewModelScope.launch.
         val task = DownloadTask(
             id = id,
             fileId = fileId,
@@ -93,13 +95,17 @@ class FileDownloader(
             url = url,
             mimeType = mimeType,
             status = DownloadStatus.PENDING,
-            localPath = localPath
+            localPath = null
         )
-
         updateTask(task)
-        // Start foreground service to keep downloads alive in background
-        try { DownloadService.start(context) } catch (_: Exception) {}
-        startDownload(task)
+
+        scope.launch(Dispatchers.IO) {
+            val ready = task.copy(localPath = createDestination(fileName, mimeType))
+            updateTask(ready)
+            // Start foreground service to keep downloads alive in background
+            try { DownloadService.start(context) } catch (_: Exception) {}
+            startDownload(ready)
+        }
 
         return id
     }
@@ -186,19 +192,22 @@ class FileDownloader(
         val task = _tasks.value[id] ?: return
         if (task.status != DownloadStatus.PAUSED && task.status != DownloadStatus.FAILED) return
 
-        // Check how many bytes are already on disk
-        val existing = existingBytes(task)
+        // existingBytes() stats the partial file (disk / content provider) —
+        // keep that off the main thread.
+        scope.launch(Dispatchers.IO) {
+            val existing = existingBytes(task)
 
-        val updatedTask = task.copy(
-            status = DownloadStatus.PENDING,
-            downloadedBytes = existing,
-            error = null
-        )
-        updateTask(updatedTask)
-        startDownload(updatedTask)
+            val updatedTask = task.copy(
+                status = DownloadStatus.PENDING,
+                downloadedBytes = existing,
+                error = null
+            )
+            updateTask(updatedTask)
+            startDownload(updatedTask)
 
-        // Start foreground service to keep downloads alive in background
-        try { DownloadService.start(context) } catch (_: Exception) {}
+            // Start foreground service to keep downloads alive in background
+            try { DownloadService.start(context) } catch (_: Exception) {}
+        }
     }
 
     /**
@@ -211,13 +220,14 @@ class FileDownloader(
         lastTimeMap.remove(id)
 
         val task = _tasks.value[id]
-        if (task != null && task.status != DownloadStatus.COMPLETED) {
-            deleteDestination(task)
-        }
-
         val currentTasks = _tasks.value.toMutableMap()
         currentTasks.remove(id)
         _tasks.value = currentTasks
+
+        // Delete the (possibly partial) file off the main thread
+        if (task != null && task.status != DownloadStatus.COMPLETED) {
+            scope.launch(Dispatchers.IO) { deleteDestination(task) }
+        }
     }
 
     /**
@@ -225,10 +235,10 @@ class FileDownloader(
      */
     fun deleteFile(id: Long) {
         val task = _tasks.value[id] ?: return
-        deleteDestination(task)
         val currentTasks = _tasks.value.toMutableMap()
         currentTasks.remove(id)
         _tasks.value = currentTasks
+        scope.launch(Dispatchers.IO) { deleteDestination(task) }
     }
 
     /**

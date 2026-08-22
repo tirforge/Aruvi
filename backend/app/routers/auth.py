@@ -1,6 +1,7 @@
 """
 Authentication API endpoints.
 """
+import asyncio
 import logging
 import time
 from hashlib import sha256
@@ -226,6 +227,15 @@ async def generate_login_code(
     )
 
 
+def _pending_response():
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED,
+        content={"detail": "Code not yet verified", "status": "pending"},
+        headers={"Retry-After": "3"},
+    )
+
+
 @router.post("/verify-code", response_model=AuthResponse)
 @limiter.limit("80/minute")  # Allow TV polling while limiting brute force attempts
 async def verify_login_code(
@@ -236,7 +246,35 @@ async def verify_login_code(
     """
     Check if the login code has been claimed by a user via Telegram bot.
     If claimed, returns access tokens and user info.
+
+    Long-poll: with ``wait`` > 0 the request is HELD open (up to wait
+    seconds), re-checking every 300ms, and returns the instant the code is
+    claimed — the client learns about the login within ~300ms of the user
+    tapping Start in the bot, instead of within its next poll tick (up to
+    2s+ on TV clients). Long-polling also cuts request volume ~5x vs
+    2s-interval polling.
     """
+    deadline = time.monotonic() + min(max(code_request.wait or 0, 0), 10)
+    while True:
+        result = await _verify_login_code_once(request, code_request, db)
+        if result is not None:
+            return result
+        if time.monotonic() >= deadline:
+            return _pending_response()
+        # Release the pooled connection while sleeping — a held-open
+        # transaction per waiting TV would starve the pool (size 5).
+        await db.rollback()
+        await asyncio.sleep(0.3)
+
+
+async def _verify_login_code_once(
+    request: Request,
+    code_request: VerifyCodeRequest,
+    db: AsyncSession,
+):
+    """One check of a login code. Returns an AuthResponse on success, a
+    pending JSONResponse when the wait expired (long-poll loop's deadline),
+    or None when the code is still unclaimed and should be re-checked."""
     # Find code (case-insensitive)
     result = await db.execute(
         select(LoginCode).where(LoginCode.code == code_request.code.upper())
@@ -244,33 +282,20 @@ async def verify_login_code(
     login_code = result.scalar_one_or_none()
     
     if not login_code:
-        # Don't distinguish between invalid and unclaimed — always return 202
-        from fastapi.responses import JSONResponse
-        return JSONResponse(
-            status_code=status.HTTP_202_ACCEPTED,
-            content={"detail": "Code not yet verified", "status": "pending"},
-            headers={"Retry-After": "3"},
-        )
-        
+        # Unknown code: keep polling (codes are minted asynchronously and the
+        # client may poll before generation commits) — the outer loop's
+        # deadline turns this into the terminal 202.
+        return None
+
     if login_code.expires_at < datetime.now(timezone.utc).replace(tzinfo=None):
         await db.delete(login_code)
         await db.commit()
         # Same response as unclaimed — don't reveal code existed
-        from fastapi.responses import JSONResponse
-        return JSONResponse(
-            status_code=status.HTTP_202_ACCEPTED,
-            content={"detail": "Code not yet verified", "status": "pending"},
-            headers={"Retry-After": "3"},
-        )
-    
+        return _pending_response()
+
     # Check if user has claimed it (telegram_id is set)
     if not login_code.telegram_id:
-        from fastapi.responses import JSONResponse
-        return JSONResponse(
-            status_code=status.HTTP_202_ACCEPTED,
-            content={"detail": "Code not yet verified", "status": "pending"},
-            headers={"Retry-After": "3"},
-        )
+        return None
 
     # Atomically consume the code so two concurrent pollers can't both mint
     # tokens (the SELECT above is shared by every poller of the same code).
@@ -281,12 +306,9 @@ async def verify_login_code(
         )
     )
     if claim.rowcount != 1:
-        from fastapi.responses import JSONResponse
-        return JSONResponse(
-            status_code=status.HTTP_202_ACCEPTED,
-            content={"detail": "Code not yet verified", "status": "pending"},
-            headers={"Retry-After": "3"},
-        )
+        # Another poller of the same code consumed it between our SELECT and
+        # DELETE — treat as still-pending for the loop.
+        return None
     await db.commit()
 
     # Get user

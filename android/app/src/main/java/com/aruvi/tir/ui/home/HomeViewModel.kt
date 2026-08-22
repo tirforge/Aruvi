@@ -47,6 +47,7 @@ class HomeViewModel @Inject constructor(
 
     private var autoRefreshJob: Job? = null
     private var lastBrowse: TVBrowseResponse? = null
+    private var lastRevision: String? = null
 
     init {
         loadHomeData()
@@ -155,13 +156,23 @@ class HomeViewModel @Inject constructor(
 
     /**
      * Poll the backend and refresh the home data if it changed.
+     *
+     * Polls the lightweight /api/tv/revision endpoint (three timestamps) and
+     * only refetches the full browse payload when the revision actually
+     * changed — a 10s full-payload poll cost battery/bandwidth on TVs for
+     * nothing in the common no-change case. If the revision endpoint is
+     * unavailable (older server), falls back to the old full-payload poll.
      * Background polls silently recover the UI from error/empty states: a
      * successful poll clears the error and shows the latest content without
      * touching the loading indicator mid-flight.
-     * TODO: later swap to polling the backend /api/tv/revision endpoint and
-     * only fetch the full browse payload when the revision changes.
      */
     private suspend fun checkForUpdates() {
+        val revision = filesRepository.getTVRevision().getOrNull()
+        if (revision != null) {
+            val fingerprint = "${revision.filesCreatedAt}|${revision.filesUpdatedAt}|${revision.foldersUpdatedAt}"
+            if (fingerprint == lastRevision) return
+            lastRevision = fingerprint
+        }
         filesRepository.getTVBrowse().fold(
             onSuccess = { browse ->
                 if (browse != lastBrowse) {

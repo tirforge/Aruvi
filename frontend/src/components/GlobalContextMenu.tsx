@@ -4,7 +4,19 @@ import { TelegramFile, Folder, api, useFolders, getFileDownloadToken, useAccessT
 import { Play, Download, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, ExternalLink } from 'lucide-react';
 
 export default function GlobalContextMenu() {
-    const { activeContextMenu, setActiveContextMenu, setPreviewFile, setMoveItems, setDeleteConfirm, setRenameFile, setRenameFolder, selectedFileIds, selectedFolderIds, selectedFiles, currentFolderId } = useAppStore();
+    // Narrow selectors: this component mounts permanently at the app root —
+    // a whole-store subscription re-rendered it on every drag/toast/selection.
+    const activeContextMenu = useAppStore((s) => s.activeContextMenu);
+    const setActiveContextMenu = useAppStore((s) => s.setActiveContextMenu);
+    const setPreviewFile = useAppStore((s) => s.setPreviewFile);
+    const setMoveItems = useAppStore((s) => s.setMoveItems);
+    const setDeleteConfirm = useAppStore((s) => s.setDeleteConfirm);
+    const setRenameFile = useAppStore((s) => s.setRenameFile);
+    const setRenameFolder = useAppStore((s) => s.setRenameFolder);
+    const selectedFileIds = useAppStore((s) => s.selectedFileIds);
+    const selectedFolderIds = useAppStore((s) => s.selectedFolderIds);
+    const selectedFiles = useAppStore((s) => s.selectedFiles);
+    const currentFolderId = useAppStore((s) => s.currentFolderId);
     // Reactive: the token may be written after this menu mounts (e.g. the
     // /auth callback logs in without a page reload), so `hasToken` must re-
     // evaluate instead of being captured once at mount — otherwise the folder
@@ -176,25 +188,39 @@ export default function GlobalContextMenu() {
                                             Play
                                         </button>
                                         <button className="context-menu-item w-full text-left" onClick={() => {
-                                            const token = localStorage.getItem('access_token');
-                                            const baseUrl = `${window.location.protocol}//${window.location.host}`;
-                                            const url = f.public_stream_url
-                                                ? `${baseUrl}${f.public_stream_url}`
-                                                : `${baseUrl}${f.stream_url}?token=${token}`;
-                                            window.open(`vlc://${url}`, '_blank');
                                             handleAction(() => {});
+                                            // Short-lived file-bound token: the URL is handed to an
+                                            // external app — never embed the account-wide JWT.
+                                            (async () => {
+                                                try {
+                                                    const baseUrl = `${window.location.protocol}//${window.location.host}`;
+                                                    const url = f.public_stream_url
+                                                        ? `${baseUrl}${f.public_stream_url}`
+                                                        : `${baseUrl}${f.stream_url}?token=${await getFileDownloadToken(f.id)}`;
+                                                    window.open(`vlc://${url}`, '_blank');
+                                                } catch (err) {
+                                                    console.error('Failed to mint stream token:', err);
+                                                }
+                                            })();
                                         }}>
                                             <ExternalLink className="w-4 h-4" />
                                             Play in VLC
                                         </button>
                                         <button className="context-menu-item w-full text-left" onClick={() => {
-                                            const token = localStorage.getItem('access_token');
-                                            const baseUrl = `${window.location.protocol}//${window.location.host}`;
-                                            const url = f.public_stream_url
-                                                ? `${baseUrl}${f.public_stream_url}`
-                                                : `${baseUrl}${f.stream_url}?token=${token}`;
-                                            navigator.clipboard.writeText(url);
                                             handleAction(() => {});
+                                            // Clipboard URLs end up in logs/chat history — mint a
+                                            // short-lived file-bound token, not the account JWT.
+                                            (async () => {
+                                                try {
+                                                    const baseUrl = `${window.location.protocol}//${window.location.host}`;
+                                                    const url = f.public_stream_url
+                                                        ? `${baseUrl}${f.public_stream_url}`
+                                                        : `${baseUrl}${f.stream_url}?token=${await getFileDownloadToken(f.id)}`;
+                                                    await navigator.clipboard.writeText(url);
+                                                } catch (err) {
+                                                    console.error('Failed to mint stream token:', err);
+                                                }
+                                            })();
                                         }}>
                                             <Link className="w-4 h-4" />
                                             Copy Stream URL

@@ -184,6 +184,11 @@ class LoginCodeResponse(BaseModel):
 
 class VerifyCodeRequest(BaseModel):
     code: str = Field(min_length=6, max_length=6, pattern=r"^[A-Za-z0-9]{6}$")
+    # Optional long-poll: seconds the server may HOLD the request while the
+    # code is still unclaimed (0 = classic immediate response, the default
+    # old clients get). Login then completes within ~300ms of the user
+    # tapping Start in Telegram instead of within one client poll interval.
+    wait: int = Field(default=0, ge=0, le=10)
 
 
 class AuthResponse(Token):

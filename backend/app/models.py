@@ -155,3 +155,12 @@ class RefreshSession(Base):
     last_used_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     user: Mapped["User"] = relationship(back_populates="refresh_sessions")
+
+
+class AppMeta(Base):
+    """Internal one-time bookkeeping flags (e.g. data-migration markers), so
+    expensive startup migrations don't re-scan the whole DB on every boot."""
+    __tablename__ = "app_meta"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(String(255), nullable=False)

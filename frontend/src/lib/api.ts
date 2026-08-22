@@ -313,7 +313,10 @@ return data;
 export const useVerifyLoginCode = () => {
 return useMutation({
 mutationFn: async (code: string) => {
-const { data } = await api.post<CodeVerificationResponse>('/auth/verify-code', { code });
+// Long-poll: the server holds the request up to 8s and returns the
+// instant the code is claimed in Telegram — login completes ~300ms
+// after tapping Start in the bot instead of within a 2s poll tick.
+const { data } = await api.post<CodeVerificationResponse>('/auth/verify-code', { code, wait: 8 });
 return data;
 },
 });

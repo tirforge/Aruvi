@@ -181,6 +181,26 @@ class FilesRepository @Inject constructor(
     }
 
     /**
+     * Lightweight revision snapshot — poll this instead of the full browse
+     * payload; refetch browse only when it changes.
+     */
+    suspend fun getTVRevision(): Result<TVRevisionResponse> {
+        return try {
+            val response = api.getTVRevision()
+            if (response.isSuccessful) {
+                val body = response.body()
+                if (body != null) Result.success(body) else Result.failure(Exception("Empty response from server"))
+            } else {
+                Result.failure(Exception("Failed to load revision"))
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Get continue watching list.
      */
     suspend fun getContinueWatching(): Result<List<FileItem>> {

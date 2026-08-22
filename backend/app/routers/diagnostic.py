@@ -83,7 +83,7 @@ async def diag_clear_cache(request: Request):
     and freed automatically by the OS under memory pressure."""
     _check_auth(request)
     from ..status import _forward_streams
-    active = {(info["chat_id"], mid) for mid, info in list(_forward_streams.items())}
+    active = set(_forward_streams.keys())  # keys are (chat_id, message_id)
     freed = _cache_manager.clear_all(exclude_keys=active)
     import gc
     freed_gc = gc.collect(2)
@@ -167,6 +167,14 @@ async def _diag_media_response(request: Request, msg: int, chat: int | None, hea
     }
     if has_range:
         headers["Content-Range"] = f"bytes {from_bytes}-{until_bytes}/{file_size}"
+
+    # RFC 9110: 206 responses MUST carry Content-Length of the range slice;
+    # without it some clients mis-size the transfer.
+    headers["Content-Length"] = str(until_bytes - from_bytes + 1)
+
+    if head:
+        # Header-only probe: never start a live streaming body for HEAD.
+        return Response(status_code=206 if has_range else 200, headers=headers)
 
     return StreamingResponse(
         _stream(),

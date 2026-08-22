@@ -52,6 +52,18 @@ async def admin_list_users(
         .correlate(User)
         .scalar_subquery()
     )
+    file_count_subq = (
+        select(func.count(File.id))
+        .where(File.user_id == User.id)
+        .correlate(User)
+        .scalar_subquery()
+    )
+    folder_count_subq = (
+        select(func.count(Folder.id))
+        .where(Folder.user_id == User.id)
+        .correlate(User)
+        .scalar_subquery()
+    )
     result = await db.execute(
         select(
             User.id,
@@ -62,13 +74,13 @@ async def admin_list_users(
             User.is_admin,
             User.created_at,
             User.last_active,
-            func.coalesce(func.count(func.distinct(File.id)), 0).label("file_count"),
-            func.coalesce(func.count(func.distinct(Folder.id)), 0).label("folder_count"),
+            file_count_subq.label("file_count"),
+            folder_count_subq.label("folder_count"),
             storage_subq.label("storage_bytes"),
         )
-        .outerjoin(File, File.user_id == User.id)
-        .outerjoin(Folder, Folder.user_id == User.id)
-        .group_by(User.id)
+        # No outerjoins: joining files×folders materializes |files|×|folders|
+        # intermediate rows per user before the aggregation; correlated scalar
+        # subqueries use the existing indexes instead.
         .order_by(User.last_active.desc())
     )
     rows = result.all()
