@@ -280,21 +280,24 @@ async def _warmup_messages():
 
         async def _warm_one(client):
             count = 0
-            for mid in mids:
-                try:
-                    msg = await client.get_messages(channel_id, mid)
-                    if msg:
-                        # Only cache keys the reader can actually hit —
-                        # get_message_from_channel reads tg_client's pool_index
-                        # only, so per-helper keys would be dead weight.
-                        if getattr(client, "pool_index", 0) == getattr(tg_client, "pool_index", 0):
-                            key = (getattr(client, "pool_index", 0), msg.id)
-                            if key not in _msg_cache:
-                                _msg_cache[key] = (time.monotonic(), msg)
-                                count += 1
-                                _msg_cache_evict()
-                except Exception:
-                    pass
+            try:
+                # One batched RPC instead of 20 sequential get_messages calls —
+                # Pyrogram accepts an id list and returns them in order
+                # (non-existent ids come back as empty Message objects).
+                msgs = await client.get_messages(channel_id, mids)
+            except Exception:
+                return count
+            for msg in msgs or []:
+                # Only cache keys the reader can actually hit —
+                # get_message_from_channel reads tg_client's pool_index
+                # only, so per-helper keys would be dead weight.
+                if msg and not getattr(msg, "empty", False):
+                    if getattr(client, "pool_index", 0) == getattr(tg_client, "pool_index", 0):
+                        key = (getattr(client, "pool_index", 0), msg.id)
+                        if key not in _msg_cache:
+                            _msg_cache[key] = (time.monotonic(), msg)
+                            count += 1
+                            _msg_cache_evict()
             return count
 
         results = await asyncio.gather(*[_warm_one(c) for c in connected])

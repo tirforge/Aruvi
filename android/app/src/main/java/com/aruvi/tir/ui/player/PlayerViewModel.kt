@@ -174,6 +174,11 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
     private var lastSeekTime: Long = 0L
 
     private var castPlayer: CastPlayer? = null
+    // The ExoPlayer is a @Singleton that outlives this ViewModel — the listener
+    // must be removable or each playback session leaks one listener (and the
+    // ViewModel it captures) into the shared player forever.
+    private var exoPlayerListener: Player.Listener? = null
+    private var castExecutor: java.util.concurrent.ExecutorService? = null
 
     private val castPlayerListener = object : Player.Listener {
         override fun onDeviceInfoChanged(deviceInfo: DeviceInfo) {
@@ -204,6 +209,7 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
     @OptIn(UnstableApi::class)
     private fun initCastPlayer() {
         val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+        castExecutor = executor
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
             try {
                 // Defensive initialization of CastContext to avoid DeadObjectException on Main thread
@@ -249,7 +255,7 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
 
     @OptIn(UnstableApi::class)
     private fun setupPlayerListener() {
-        exoPlayer.addListener(object : Player.Listener {
+        val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 when (state) {
                     Player.STATE_BUFFERING -> {
@@ -303,7 +309,9 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                     error = parsedError
                 )
             }
-        })
+        }
+        exoPlayerListener = listener
+        exoPlayer.addListener(listener)
     }
 
     @OptIn(UnstableApi::class)
@@ -1027,6 +1035,14 @@ while (isActive) {
 
     override fun onCleared() {
         super.onCleared()
+        exoPlayerListener?.let {
+            try { exoPlayer.removeListener(it) } catch (_: Throwable) {}
+        }
+        exoPlayerListener = null
+        castExecutor?.let {
+            try { it.shutdown() } catch (_: Throwable) {}
+        }
+        castExecutor = null
         castPlayer?.let {
             try { it.removeListener(castPlayerListener) } catch (_: Throwable) {}
             try { it.release() } catch (_: Throwable) {}

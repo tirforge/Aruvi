@@ -194,9 +194,10 @@ def build_service(token_dict: dict):
     return build("drive", "v3", credentials=_refresh_creds(token_dict))
 
 
-async def ensure_aruvi_folder(service) -> str:
+def ensure_aruvi_folder(service) -> str:
     """Return the ID of the 'Aruvi' folder in the user's Drive.
-    Creates it if it doesn't exist.  Handles TOCTOU race on create."""
+    Creates it if it doesn't exist.  Handles TOCTOU race on create.
+    Fully synchronous (httplib2) — call via asyncio.to_thread from async code."""
     q = (
         "name='Aruvi'"
         " and mimeType='application/vnd.google-apps.folder'"

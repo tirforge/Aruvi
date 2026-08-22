@@ -1622,8 +1622,14 @@ async def handle_callback(client, callback: CallbackQuery):
                         pass
                     return
 
-                service = gdrive_mod.build_service(token_dict)
-                folder_id = await gdrive_mod.ensure_aruvi_folder(service)
+                # build_service refreshes OAuth tokens and ensure_aruvi_folder
+                # issues Drive list/create calls — both synchronous httplib2
+                # round-trips that would freeze the event loop (and every
+                # active stream) for the duration.
+                def _connect_drive():
+                    service = gdrive_mod.build_service(token_dict)
+                    return service, gdrive_mod.ensure_aruvi_folder(service)
+                service, folder_id = await asyncio.to_thread(_connect_drive)
 
                 try:
                     await callback.message.edit(
@@ -1722,7 +1728,10 @@ async def handle_callback(client, callback: CallbackQuery):
                 except Exception:
                     pass
 
-        asyncio.create_task(_do_gdrive_upload())
+        # Multi-minute upload task — must be referenced or GC can kill it
+        # mid-upload (asyncio only keeps weak refs to tasks).
+        from .utils import spawn_background
+        spawn_background(_do_gdrive_upload())
 
     elif data == "canceldel":
         await callback.message.edit("❌ Deletion cancelled.")

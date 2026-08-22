@@ -42,7 +42,7 @@
 
 ## Live Preview
 
-Web app: **https://movie.aaruvi.space**
+Web app: **http://localhost:7680** (your own deployment)
 
 ---
 

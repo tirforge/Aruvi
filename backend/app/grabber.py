@@ -14,6 +14,7 @@ from pyrogram import Client
 from .database import async_session
 from .models import User, File
 from .config import get_settings
+from .utils import spawn_background
 from .media_types import classify_file_type
 
 _log = logging.getLogger(__name__)
@@ -987,7 +988,7 @@ async def search_results(
             # verifies page 1 itself and falls back to a fresh query if the
             # rewind has not finished in time.
             if page_msg is not None:
-                asyncio.create_task(_rewind_to_first_bg(page_msg.chat.id, page_msg.id))
+                spawn_background(_rewind_to_first_bg(page_msg.chat.id, page_msg.id))
 
         return {
             "results": options,

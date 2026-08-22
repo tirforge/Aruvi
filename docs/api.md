@@ -2,7 +2,7 @@
 
 All routes live under `/api` except `/privacy` and `/terms`. Auth-protected routes expect `Authorization: Bearer <access_token>` (15-min JWT).
 
-**Base URL:** `https://movie.aaruvi.space/api` (live) or `http://localhost:7680/api` (dev)
+**Base URL:** `http://localhost:7680/api` (or your own deployment URL)
 
 ---
 

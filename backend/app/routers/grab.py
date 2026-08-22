@@ -10,6 +10,7 @@ from ..auth import get_current_user #TW
 from ..config import get_settings #WM
 from ..models import User #BB
 from ..grabber import search_results_multi, grab_selected, _GrabError #MN
+from ..utils import spawn_background
 from ..streaming import prefetch_by_ids #PK
 import asyncio #ZJ
 import logging #ZJ
@@ -171,7 +172,7 @@ async def grab_select( #PW
 
     # Warm the chunk cache right after grabbing so the first play starts fast.
     try: #TW
-        asyncio.create_task(prefetch_by_ids(get_settings().telegram_storage_channel_id, result.get("channel_message_id"))) #HG
+        spawn_background(prefetch_by_ids(get_settings().telegram_storage_channel_id, result.get("channel_message_id"))) #HG
     except Exception: #TR
         pass #RQ
 

@@ -17,6 +17,7 @@ from ..telegram import get_message_from_channel, tg_client, clients
 from ..streaming import stream_file as stream_file_chunks, prefetch_first_batch_safe, prefetch_by_ids, _cache_manager, _forward_streams, _dc_disk_size
 from ..config import get_settings
 from ..rate_limit import limiter
+from ..utils import bearer_token_matches, spawn_background
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -97,7 +98,7 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
 async def streaming_debug(request: Request):
     # Allow Bearer aarsha or valid admin JWT
     auth = request.headers.get("Authorization", "")
-    if not settings.debug_password or auth != f"Bearer {settings.debug_password}":
+    if not bearer_token_matches(auth, settings.debug_password):
         try:
             token = auth.replace("Bearer ", "") if auth.startswith("Bearer ") else ""
             tid = verify_token(token) if token else None
@@ -260,7 +261,7 @@ async def stream_file_head(
     # Player resolves size via HEAD right before it starts playback — use this
     # moment to warm the chunk cache so the first GET serves from cache.
     try:
-        asyncio.create_task(prefetch_by_ids(get_settings().telegram_storage_channel_id, file.channel_message_id))
+        spawn_background(prefetch_by_ids(get_settings().telegram_storage_channel_id, file.channel_message_id))
     except Exception:
         pass  # best-effort
 
@@ -353,7 +354,7 @@ async def stream_file(
         raise HTTPException(status_code=404, detail="Message not found in channel")
 
     # Pre-fetch first batch to reduce load time
-    asyncio.create_task(prefetch_first_batch_safe(tg_client, message, from_bytes))
+    spawn_background(prefetch_first_batch_safe(tg_client, message, from_bytes))
 
     async def file_streamer():
         """Generator that streams file chunks from Telegram MTProto."""
@@ -573,7 +574,7 @@ async def stream_public_file(
         raise HTTPException(status_code=404, detail="Message not found in channel")
 
     # Pre-fetch first batch to reduce load time
-    asyncio.create_task(prefetch_first_batch_safe(tg_client, message, from_bytes))
+    spawn_background(prefetch_first_batch_safe(tg_client, message, from_bytes))
 
     async def file_streamer():
         """Generator that streams file chunks from Telegram MTProto."""

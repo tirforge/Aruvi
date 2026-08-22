@@ -5,6 +5,9 @@
 *.session-journal
 backend/session/
 backend/data/
+# docker-compose bind-mounts Telegram sessions + cache DBs here
+/data/
+/session/
 swagger_ui/
 *.db
 

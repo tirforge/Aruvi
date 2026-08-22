@@ -459,23 +459,25 @@ queryClient.invalidateQueries({ queryKey: ['folderTree'] });
 });
 };
 
-export const useRecentFiles = (limit = 20) => {
+export const useRecentFiles = (limit = 20, enabled = true) => {
 return useQuery<FileListResponse>({
 queryKey: ['files', 'recent', limit],
 queryFn: async () => {
 const { data } = await api.get<FileListResponse>('/files/recent', { params: { limit } });
 return data;
 },
+enabled,
 });
 };
 
-export const useContinueWatching = (limit = 20) => {
+export const useContinueWatching = (limit = 20, enabled = true) => {
 return useQuery<FileListResponse>({
 queryKey: ['files', 'continue-watching', limit],
 queryFn: async () => {
 const { data } = await api.get<FileListResponse>('/files/continue-watching', { params: { limit } });
 return data;
 },
+enabled,
 });
 };
 

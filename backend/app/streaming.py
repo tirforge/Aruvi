@@ -1229,17 +1229,25 @@ async def parallel_stream_generator(
         t0 = time.perf_counter()
         last_progress = t0
         current = batch_start
-        async with _media_session_scope(cl, msg):
-            # Acquire the transmission slot with a short, separate timeout so
-            # queueing behind a busy bot never eats the fetch budget.
-            try:
-                await asyncio.wait_for(sem.acquire(), timeout=STREAM_SEM_WAIT_TIMEOUT_S)
-            except asyncio.TimeoutError:
-                logger.warning("Batch %d-%d waited %.0fs for bot %d — skipping",
-                    batch_start, batch_end, STREAM_SEM_WAIT_TIMEOUT_S,
-                    getattr(cl, 'pool_index', '?'))
-                return False
-            try:
+        # Order matters: DC-cooldown wait (unbounded-ish) → transmission slot
+        # (bounded 10s) → global session lock. Waiting on the semaphore while
+        # inside _media_session_scope held the process-wide lock for up to
+        # STREAM_SEM_WAIT_TIMEOUT_S, stalling every OTHER bot's cold-session
+        # establishment behind an unrelated, saturated bot.
+        dc_id = _msg_dc_id(msg)
+        if dc_id is not None and cl.media_sessions.get(dc_id) is None:
+            await _wait_dc_cooldown(dc_id)
+        # Acquire the transmission slot with a short, separate timeout so
+        # queueing behind a busy bot never eats the fetch budget.
+        try:
+            await asyncio.wait_for(sem.acquire(), timeout=STREAM_SEM_WAIT_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            logger.warning("Batch %d-%d waited %.0fs for bot %d — skipping",
+                batch_start, batch_end, STREAM_SEM_WAIT_TIMEOUT_S,
+                getattr(cl, 'pool_index', '?'))
+            return False
+        try:
+            async with _media_session_scope(cl, msg):
                 # The wall-clock budget covers the fetch only — a batch whose
                 # media session is stuck (Telegram auth throttling under
                 # concurrent cold starts) would otherwise retry upload.GetFile
@@ -1259,13 +1267,13 @@ async def parallel_stream_generator(
                         await _resolve_chunk_now(current, data)
                         current += 1
                         last_progress = time.perf_counter()
-            except asyncio.TimeoutError:
-                logger.warning("Batch %d-%d timed out after %.0fs (bot %d, got %d/%d)",
-                    batch_start, batch_end, timeout, getattr(cl, 'pool_index', '?'), current - batch_start,
-                    batch_end - batch_start + 1)
-                return False
-            finally:
-                sem.release()
+        except asyncio.TimeoutError:
+            logger.warning("Batch %d-%d timed out after %.0fs (bot %d, got %d/%d)",
+                batch_start, batch_end, timeout, getattr(cl, 'pool_index', '?'), current - batch_start,
+                batch_end - batch_start + 1)
+            return False
+        finally:
+            sem.release()
         elapsed = time.perf_counter() - t0
         if elapsed > 2.5:
             logger.warning("Slow batch %d-%d: %.1fs (bot %d)", batch_start, batch_end, elapsed, getattr(cl, 'pool_index', '?'))
@@ -1276,12 +1284,17 @@ async def parallel_stream_generator(
         if timeout is None:
             timeout = STREAM_CHUNK_TIMEOUT_S
         t0 = time.perf_counter()
-        async with _media_session_scope(cl, msg):
-            try:
-                await asyncio.wait_for(sem.acquire(), timeout=STREAM_SEM_WAIT_TIMEOUT_S)
-            except asyncio.TimeoutError:
-                return None
-            try:
+        # Same ordering as _fetch_batch: cooldown → transmission slot → session
+        # lock, so a busy bot's semaphore never stalls the global lock.
+        dc_id = _msg_dc_id(msg)
+        if dc_id is not None and cl.media_sessions.get(dc_id) is None:
+            await _wait_dc_cooldown(dc_id)
+        try:
+            await asyncio.wait_for(sem.acquire(), timeout=STREAM_SEM_WAIT_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            return None
+        try:
+            async with _media_session_scope(cl, msg):
                 # Wall-clock cap covers the wait for the first part too, so a stuck
                 # media session (auth throttling) can't hold this chunk forever.
                 async with asyncio.timeout(timeout):
@@ -1292,15 +1305,15 @@ async def parallel_stream_generator(
                 video_cache.put(chunk_offset, data)
                 _schedule_disk_write(chat_id, message_id, chunk_offset, data)
                 return data
-            except asyncio.TimeoutError:
-                logger.warning("Chunk %d timed out after %.0fs", chunk_offset, timeout)
-                return None
-            except (FileReferenceInvalid, FileReferenceExpired, AuthKeyUnregistered, AuthBytesInvalid):
-                raise
-            except Exception:
-                return None
-            finally:
-                sem.release()
+        except asyncio.TimeoutError:
+            logger.warning("Chunk %d timed out after %.0fs", chunk_offset, timeout)
+            return None
+        except (FileReferenceInvalid, FileReferenceExpired, AuthKeyUnregistered, AuthBytesInvalid):
+            raise
+        except Exception:
+            return None
+        finally:
+            sem.release()
 
     async def worker(worker_id: int):
         pool = get_client_pool()
