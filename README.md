@@ -5,18 +5,14 @@
 [![Stars](https://img.shields.io/github/stars/tirforge/Aruvi?style=social)](https://github.com/tirforge/Aruvi/stargazers)
 ![Platforms](https://img.shields.io/badge/platform-Web%20%7C%20Android%20%7C%20TV%20%7C%20Win%20%7C%20Linux-blue)
 
-Self-hosted media platform that streams your Telegram files (movies, series, audio) to the
-browser, Android phone, and Android TV — powered by multi-bot parallel streaming with a
-two-tier (RAM + disk) cache.
-
-## Live Preview
-
-**https://movie.aaruvi.space** — try the web player (demo instance).
+Self-hosted media platform that streams your own files from a private Telegram channel
+to the browser, Android phone, Android TV, and desktop — powered by multi-bot parallel
+streaming with a two-tier (RAM + disk) cache.
 
 ```
 aruvi/
 ├── backend/      # FastAPI backend (streaming engine, Telegram bot, API, subtitles)
-├── frontend/     # React SPA (web player + file manager + grabs)
+├── frontend/     # React SPA (web player + file manager + import)
 ├── android/      # Native Android / Android-TV app (Kotlin + Jetpack Compose)
 └── docs/         # Architecture, streaming, auth, data model, deployment guides
 ```
@@ -26,7 +22,7 @@ aruvi/
 - Stream large media directly from your private Telegram channel to any device
 - Multi-bot parallel chunk fetching with a **RAM hot cache + disk cache** (survives restarts)
 - Internet subtitle search + download (OpenSubtitles.com + keyless providers)
-- Telegram-bot driven grab/movie search
+- Import files into your storage channel from Telegram sources you configure
 - Web player and native Android app (phone + TV flavors)
 - Google Drive integration, thumbnails, continue-watching, folder management
 
@@ -36,11 +32,10 @@ Aruvi ships **no content**. Each deployment is fully self-hosted against *your o
 private Telegram channel:
 
 1. **Create your storage** — make a private Telegram channel, set its ID in `.env`
-2. **Grab** — use the web UI's Grab tab to search Telegram sources *you configure*.
-   The engine fans out across your bot fleet in parallel, paginates results,
-   auto-handles join walls and rate limits, and caches responses for instant re-search
-3. **Select** — picking a result makes your bot copy that file into *your* channel
-4. **Stream anywhere** — web player, Android phone/tablet, Android TV, or the
+2. **Import** — use the web UI's import tab (Grabs) to fetch files from Telegram
+   sources *you configure*. The engine fans out across your bot fleet in parallel,
+   paginates results, auto-handles join walls and rate limits, and caches responses
+3. **Stream anywhere** — web player, Android phone/tablet, Android TV, or the
    Windows/Linux desktop apps
 
 Your server never talks to anyone else's instance — files live only in channels
