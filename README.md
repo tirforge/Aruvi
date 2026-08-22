@@ -12,7 +12,7 @@ streaming with a two-tier (RAM + disk) cache.
 ```
 aruvi/
 ├── backend/      # FastAPI backend (streaming engine, Telegram bot, API, subtitles)
-├── frontend/     # React SPA (web player + file manager + import)
+├── frontend/     # React SPA (web player + file manager)
 ├── android/      # Native Android / Android-TV app (Kotlin + Jetpack Compose)
 └── docs/         # Architecture, streaming, auth, data model, deployment guides
 ```
@@ -22,7 +22,6 @@ aruvi/
 - Stream large media directly from your private Telegram channel to any device
 - Multi-bot parallel chunk fetching with a **RAM hot cache + disk cache** (survives restarts)
 - Internet subtitle search + download (OpenSubtitles.com + keyless providers)
-- Import files into your storage channel from Telegram sources you configure
 - Native clients: Android app (phone + TV) and Windows/Linux desktop apps
 - Google Drive integration, thumbnails, continue-watching, folder management
 
@@ -46,9 +45,7 @@ Aruvi ships **no content**. Each deployment is fully self-hosted against *your o
 private Telegram channel:
 
 1. **Create your storage** — make a private Telegram channel, set its ID in `.env`
-2. **Import** — use the web UI's import tab (Grabs) to fetch files from Telegram
-   sources *you configure*. The engine fans out across your bot fleet in parallel,
-   paginates results, auto-handles join walls and rate limits, and caches responses
+2. **Add your files** — upload directly in Telegram or via the bot
 3. **Stream anywhere** — web player, Android phone/tablet, Android TV, or the
    Windows/Linux desktop apps
 
