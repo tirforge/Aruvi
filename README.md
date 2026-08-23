@@ -66,12 +66,14 @@ docker compose up -d --build
 cd backend
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-cp ../.env.example ../.env    # fill in your Telegram credentials
+cp ../.env.example .env        # .env lives in backend/ for manual; repo root for Docker (both work via load_dotenv)
+# fill in: TELEGRAM_API_ID/HASH, TELEGRAM_BOT_TOKEN, TELEGRAM_STORAGE_CHANNEL_ID, AUTH_USERS
+mkdir -p data session           # persisted: data/teleplay.db + data/.jwt_secret + session/*.session
 python run.py
 ```
 Web UI served from `backend/app/static` (prebuilt SPA bundle included).
 
-> Windows / no `uvloop`: use `python run_nouvloop.py` instead. Requires Python **3.11+**.
+> Windows / no `uvloop`: use `python run_nouvloop.py` instead (hardcodes `7680`). Requires Python **3.11+**.
 
 ### 2. Environment
 
@@ -177,9 +179,11 @@ See [docs/architecture.md](docs/architecture.md) for the full simple explanation
 | `TELEGRAM_API_HASH` | — | Telegram app API hash |
 | `TELEGRAM_BOT_TOKEN` | — | Main bot token from BotFather |
 | `TELEGRAM_HELPER_BOT_TOKENS` | *empty* | 10 helper bots for parallel fetching |
-| `TELEGRAM_STORAGE_CHANNEL_ID` | — | Channel where media is stored |
-| `DATABASE_URL` | SQLite | PostgreSQL supported |
-| `JWT_SECRET` | auto-generated | Set for sessions to survive restarts |
+| `TELEGRAM_STORAGE_CHANNEL_ID` | — | Channel where media is stored (requires bot as admin, `-100...` via `@userinfobot`) |
+| `AUTH_USERS` | — | Comma-separated Telegram user IDs allowed to log in (via `@userinfobot`; checked in `bot.py`) |
+| `ADMIN_IDS` | — | Telegram IDs with `/api/admin/*` access |
+| `DATABASE_URL` | SQLite (`./data/teleplay.db`) | PostgreSQL supported (`postgresql+asyncpg://...`) — WAL+NORMAL, needs `data/` writable |
+| `JWT_SECRET` | auto-generated → `data/.jwt_secret` (`0600`) | Set explicitly for multi-replica; else auto-generated once and persisted so restarts don't log everyone out |
 | `SERVER_PORT` | `7680` | HTTP port (Docker; manual without `.env` defaults 24696) |
 | `WEB_BASE_URL` | `http://localhost:7680` | Public base URL |
 | `STREAM_RAM_PER_VIDEO_MB` | `300` | RAM hot cache per video |

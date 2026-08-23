@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   backend:
     build:
@@ -10,10 +8,10 @@ services:
     env_file:
       - .env
     environment:
-      SERVER_PORT: "7680"
-      WEB_BASE_URL: "http://localhost:7680"
+      SERVER_PORT: "${SERVER_PORT:-7680}"
+      WEB_BASE_URL: "${WEB_BASE_URL:-http://localhost:7680}"
     ports:
-      - "7680:7680"
+      - "${SERVER_PORT:-7680}:${SERVER_PORT:-7680}"
     volumes:
-      - ./data:/app/data
-      - ./session:/app/session
+      - ./data:/app/data       # persists data/teleplay.db + data/.jwt_secret + data/vcache
+      - ./session:/app/session # persists Telegram .session files (gitignored)

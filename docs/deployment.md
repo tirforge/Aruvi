@@ -11,34 +11,41 @@
 
 ## Directory Layout
 
+**For self-hosters (Docker or manual):**
+
 ```
-/home/container/grabber-deploy/
+Aruvi/
+├── .env                  # repo root .env for Docker (env_file:.env)
+├── data/                 # → /app/data in container: teleplay.db + .jwt_secret + vcache
+├── session/              # → /app/session: Telegram .session files (gitignored, bind-mounted)
 ├── backend/
-│   ├── app/              # FastAPI code (synced from GitHub)
-│   ├── run.py            # Starts the server
-│   ├── .env              # ALL SECRETS HERE
-│   ├── grabber.log       # stdout/stderr
-│   ├── session/          # Telegram session files (gitignored)
-│   └── venv/             # Python packages
-├── frontend/             # React source (build ignored at runtime)
-└── AGENTS.md             # This file
+│   ├── app/              # FastAPI code
+│   ├── run.py            # `python run.py` (or `run_nouvloop.py` on Windows)
+│   ├── .env              # alternative for manual: backend/.env
+│   └── requirements.txt
+├── frontend/             # React source → builds to backend/app/static
+└── docker-compose.yml
 ```
+
+**Live deploy (internal):** `/home/container/grabber-deploy/backend/` + `/home/container/grabber.log` — see runbook below.
 
 ---
 
 ## Required `.env` Variables
 
 ```bash
-# Telegram (REQUIRED - get from @BotFather)
+# Telegram (REQUIRED - get from @BotFather + my.telegram.org)
 TELEGRAM_API_ID=...
 TELEGRAM_API_HASH=...
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_STORAGE_CHANNEL_ID=-100xxxxxxxxxx  # see "Add your storage channel" below
-TELEGRAM_HELPER_BOT_TOKENS=token1,token2,...  # 10 helpers
+TELEGRAM_HELPER_BOT_TOKENS=token1,token2,...  # 10 helpers (11 bots total)
 
-# Auth
-JWT_SECRET=...                      # 32+ random chars
-DEBUG_PASSWORD=...                  # for /diag/* endpoints
+# Auth (REQUIRED - get via @userinfobot, comma-separated)
+AUTH_USERS=123456789,987654321
+ADMIN_IDS=123456789
+JWT_SECRET=...                      # `openssl rand -hex 32` (else auto to data/.jwt_secret, 0600, persists via ./data mount)
+DEBUG_PASSWORD=...                  # for /api/diag/* endpoints
 
 # Database (Supabase)
 DATABASE_URL=postgresql+asyncpg://...
@@ -101,11 +108,12 @@ tail -20 /home/container/grabber.log
 
 ```bash
 # Basic: is the API up?
-curl -sf http://localhost:7680/ | grep -q "Aruvi" && echo OK
+curl -sf http://localhost:7680/health && echo OK
+# (Docker: docker inspect --format='{{.State.Health.Status}}' aruvi-backend)
 
 # Streaming: does range request work? (needs DEBUG_PASSWORD)
 curl -sf -H "Authorization: Bearer $DEBUG_PASSWORD" \
-  "http://localhost:7680/diag/stream?msg=197&chat=-1003950847652" \
+  "http://localhost:7680/api/diag/stream?msg=197&chat=-1003950847652" \
   -H "Range: bytes=0-1023" -w "\n%{http_code}\n"
 # Expect: HTTP 206 + 1024 bytes
 ```
@@ -115,17 +123,17 @@ curl -sf -H "Authorization: Bearer $DEBUG_PASSWORD" \
 ## Log Analysis (Common Queries)
 
 ```bash
-# Stream health
-grep -E "Batch.*timed out|Batch.*OK|Worker.*failed" /home/container/grabber.log
+# Stream health (Docker: docker logs aruvi-backend | grep ...)
+grep -E "Batch.*timed out|Batch.*OK|Worker.*failed" grabber.log
 
 # Auth issues
-grep -E "Refresh token|Invalid.*token|auth_version" /home/container/grabber.log
+grep -E "Refresh token|Invalid.*token|auth_version" grabber.log
 
 # Cache stats
-grep "Housekeeping" /home/container/grabber.log
+grep "Housekeeping" grabber.log
 
 # Telegram issues
-grep -E "Client.*start|FLOOD_WAIT|AuthKey|FILE_REFERENCE" /home/container/grabber.log
+grep -E "Client.*start|FLOOD_WAIT|AuthKey|FILE_REFERENCE" grabber.log
 ```
 
 ---
@@ -134,10 +142,10 @@ grep -E "Client.*start|FLOOD_WAIT|AuthKey|FILE_REFERENCE" /home/container/grabbe
 
 | Task | Command |
 |------|---------|
-| Clear disk cache | `rm -rf /home/container/vcache/*` |
-| Reset Telegram sessions | `rm -rf /home/container/grabber-deploy/backend/session/*.session` then restart |
-| View active streams | `curl -H "Authorization: Bearer $DEBUG_PASSWORD" http://localhost:7680/diag/active` |
-| Rotate DEBUG_PASSWORD | Edit `.env`, restart service |
+| Clear disk cache | `rm -rf ./data/vcache/*` (Docker: `docker exec aruvi-backend rm -rf /app/data/vcache/*`) |
+| Reset Telegram sessions | `rm -rf ./session/*.session` then `docker compose restart` |
+| View active streams | `curl -H "Authorization: Bearer $DEBUG_PASSWORD" http://localhost:7680/api/diag/active` |
+| Rotate DEBUG_PASSWORD | Edit `.env`, `docker compose restart` |
 
 ---
 
@@ -145,11 +153,11 @@ grep -E "Client.*start|FLOOD_WAIT|AuthKey|FILE_REFERENCE" /home/container/grabbe
 
 | Variable | Default | What It Does |
 |----------|---------|--------------|
-| `TELEGRAM_CLIENT_CONCURRENCY` | 5 | Per-bot download semaphore |
+| `TELEGRAM_CLIENT_CONCURRENCY` | 8 | Per-bot download semaphore |
 | `STREAM_MAX_CONCURRENT` | 4 | Worker semaphore per stream |
 | `STREAM_BATCH_SIZE` | 10 | Chunks per Telegram batch fetch |
 | `STREAM_PREFETCH_AHEAD_MB` | 192 | How far ahead to prefetch |
-| `STREAM_PREFETCH_CONCURRENCY` | 1 | Bots used for prefetch |
+| `STREAM_PREFETCH_CONCURRENCY` | 3 | Bots used for prefetch |
 | `STREAM_INFLIGHT_MB` | 200 | Unbacklogged data cap per stream |
 | `STREAM_RAM_PER_VIDEO_MB` | 300 | RAM hot cache per video |
 | `DISK_CACHE_TTL` | 1800 | Seconds a cache dir lives after last use |
