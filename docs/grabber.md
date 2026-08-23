@@ -34,17 +34,17 @@ In `.env` (see `.env.example:78`):
 GRAB_GROUP_USERNAME=my_movie_group
 
 # Multiple groups (preferred) — comma-separated, no @, no t.me/
-GRAB_GROUP_USERNAMES=movie_group1,movie_group2,CinemaGalaxy_Group
+GRAB_GROUP_USERNAMES=my_movie_group_1,my_movie_group_2
 
 # Bots that post in those groups (positional — one per group, empty = auto-detect)
-GRAB_BOT_USERNAMES=FileBot,Toby2Robot,
+GRAB_BOT_USERNAMES=example_bot_1,example_bot_2,
 
 # user sessions for parallel fetching (one per group recommended)
 GRAB_SESSION_STRINGS=1_sender_session_string,2_sender_session_string
 ```
 
 **Rules:**
-- Usernames only — e.g. `Film_Factorys_Group` not `https://t.me/Film_Factorys_Group` and not `@Film_Factorys_Group`.
+- Usernames only — e.g. `my_movie_group_1` not `https://t.me/my_movie_group_1` and not `@my_movie_group_1`.
 - Groups must be **public** or your user sessions must already be **members** (join manually with those accounts first).
 - Order matters: `GRAB_BOT_USERNAMES` maps positionally to `GRAB_GROUP_USERNAMES`. Leave blank entry with comma to auto-detect: `bot1,,bot3`.
 
@@ -106,15 +106,15 @@ If you see an error, check that `API_ID` is numbers without quotes and `API_HASH
 
 **Step 4 — Join the source groups with that phone account**
 
-Open Telegram **logged in as the same phone number** → search the group username (e.g. `CinemaGalaxy_Group`) → tap **Join**. Open the group and confirm you can see files. If the group is private/invite-only, you must join via invite link first — the grabber cannot join it for you.
+Open Telegram **logged in as the same phone number** → search the group username (e.g. `my_group_2`) → tap **Join**. Open the group and confirm you can see files. If the group is private/invite-only, you must join via invite link first — the grabber cannot join it for you.
 
 **Step 5 — Paste into `.env`**
 
 On your server, open `.env`:
 
 ```bash
-GRAB_GROUP_USERNAMES=Film_Factorys_Group,CinemaGalaxy_Group
-GRAB_BOT_USERNAMES=Toby2Robot,          # leave blank with comma to auto-detect
+GRAB_GROUP_USERNAMES=my_movie_group_1,my_movie_group_2
+GRAB_BOT_USERNAMES=example_bot_2,          # leave blank with comma to auto-detect
 GRAB_SESSION_STRINGS=PASTE_FIRST_STRING_HERE,PASTE_SECOND_STRING_HERE
 ```
 
