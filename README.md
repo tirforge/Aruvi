@@ -77,6 +77,20 @@ Web UI served from `backend/app/static` (prebuilt SPA bundle included).
 
 Copy `.env.example` → `.env` and fill in. Every cache/prefetch/concurrency knob is tunable — defaults match the live instance.
 
+#### Add your storage channel (required for local hosting)
+
+This is the Telegram channel where **your own files** live. Aruvi only streams what you put there.
+
+1. In Telegram, create a **new channel** (private recommended, e.g. `My Aruvi Storage`).
+2. Add your bot (`@YourBot` from BotFather) as **admin** — give it `Post messages` permission.
+3. Send any message to the channel, then forward it to [`@userinfobot`](https://t.me/userinfobot) — it replies with `ID: -100...`. Use that full `-100...` value.
+   - Alt: forward to `@JsonDumpBot` or call `https://api.telegram.org/bot<token>/getUpdates` and read `chat.id`.
+4. In `.env` set `TELEGRAM_STORAGE_CHANNEL_ID=-100...` (the `-100` prefix is required).
+5. Restart the server (`python run.py` or `docker compose restart`).
+6. Upload a test file to the channel — it should appear under `Home → Your Files` within seconds. If not, check logs for `Channel access OK` (`grabber.log` or `docker logs`).
+
+Tip: for multiple libraries or the movie-grabber, set `GRAB_GROUP_USERNAMES` / `GRAB_BOT_USERNAMES` as shown in `.env.example:50-52`.
+
 ### 3. Frontend (rebuild SPA)
 
 ```bash

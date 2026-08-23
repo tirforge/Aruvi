@@ -33,7 +33,7 @@
 TELEGRAM_API_ID=...
 TELEGRAM_API_HASH=...
 TELEGRAM_BOT_TOKEN=...
-TELEGRAM_STORAGE_CHANNEL_ID=-100xxxxxxxxxx
+TELEGRAM_STORAGE_CHANNEL_ID=-100xxxxxxxxxx  # see "Add your storage channel" below
 TELEGRAM_HELPER_BOT_TOKENS=token1,token2,...  # 10 helpers
 
 # Auth
@@ -47,10 +47,23 @@ DATABASE_URL=postgresql+asyncpg://...
 GDRIVE_CLIENT_ID=...
 GDRIVE_CLIENT_SECRET=...
 OPENSUBTITLES_API_KEY=...
-GRAB_GROUP_USERNAME=...
+GRAB_GROUP_USERNAME=...             # single source group for grabber (legacy)
+GRAB_GROUP_USERNAMES=group1,group2  # comma-separated source groups (preferred)
 GRAB_BOT_USERNAME=...
-GRAB_BOT_USERNAMES=...
+GRAB_BOT_USERNAMES=bot1,bot2
 ```
+
+### Add your storage channel (local self-host)
+
+This channel is **your library** — Aruvi only streams files you put there.
+
+1. Telegram → **New Channel** (private, e.g. `My Aruvi Storage`).
+2. **Add bot as admin**: open channel → `Manage channel → Administrators → Add admin` → select `@YourBot` → enable `Post messages`.
+3. **Get the channel ID**: send any message to the channel, forward it to [`@userinfobot`](https://t.me/userinfobot) — it replies `ID: -100...`. Copy the full `-100...` number.
+   - Alt: `https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getUpdates` → find `chat.id`.
+4. **Set in `.env`**: `TELEGRAM_STORAGE_CHANNEL_ID=-100...` (keep the `-100` prefix).
+5. **Restart**: `python run.py` or `docker compose restart`; watch logs for `Client 0 (@YourBot): channel access OK`.
+6. **Verify**: upload a test file to the channel → appears in `Home → Your Files` in seconds. If not, check `grabber.log` for `FLOOD_WAIT` or `channel access` errors.
 
 ---
 
