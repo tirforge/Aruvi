@@ -89,7 +89,7 @@ This is the Telegram channel where **your own files** live. Aruvi only streams w
 5. Restart the server (`python run.py` or `docker compose restart`).
 6. Upload a test file to the channel — it should appear under `Home → Your Files` within seconds. If not, check logs for `Channel access OK` (`grabber.log` or `docker logs`).
 
-Tip: for the movie-grabber, set `GRAB_GROUP_USERNAMES` — e.g. `GRAB_GROUP_USERNAMES=Film_Factorys_Group,CinemaGalaxy_Group` (usernames only, no `t.me/` or `@`). Full guide: [docs/grabber.md](docs/grabber.md).
+Tip: for the movie-grabber, set `GRAB_GROUP_USERNAMES=Film_Factorys_Group,CinemaGalaxy_Group` (usernames only, no `t.me/`/`@`) — **requires a Telegram mobile account** (phone number → Ivy `GRAB_SESSION_STRINGS`, must join the groups). Full guide: [docs/grabber.md](docs/grabber.md).
 
 ### 3. Frontend (rebuild SPA)
 
