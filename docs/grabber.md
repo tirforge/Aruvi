@@ -50,32 +50,79 @@ GRAB_SESSION_STRINGS=1_sender_session_string,2_sender_session_string
 
 Get the username: open the group in Telegram → `Group Info` → the `@username` or `t.me/<username>` link → use `<username>`.
 
-### 2.1 Generate Ivy session strings (Telegram mobile account)
+### 2.1 Generate Ivy session strings — step-by-step for beginners
 
-Each Ivy session is a Telethon **StringSession** tied to one phone number.
+Think of a session string as a **password that lets the server log in as your phone** without asking for OTP every time. You create it once, paste it in `.env`, and never share it.
 
-1. **Get API credentials**: go to https://my.telegram.org → `API development tools` → create an app → note `API_ID` and `API_HASH`. One app can be reused for all sessions.
-2. **Generate the string** (run locally once per phone number):
+> **You need:** a phone number with Telegram installed, a computer with Python 3.11+, 10 minutes.
 
-   ```bash
-   pip install telethon
-   python3 -c "
-   from telethon.sync import TelegramClient
-   from telethon.sessions import StringSession
-   client = TelegramClient(StringSession(), API_ID, API_HASH)
-   client.start(phone='+91XXXXXXXXXX')  # enter code from Telegram
-   print(client.session.save())
-   "
-   ```
+**Step 1 — Get Telegram API credentials (one-time, free)**
 
-   It prints a long string starting with `1...` or `BQIk...` — that is your `GRAB_SESSION_STRINGS` entry. Keep it secret — it is a full login.
+1. Open https://my.telegram.org and log in with your phone number (you will get a code in Telegram).
+2. Click **API development tools**.
+3. Fill the form: `App title` = `Aruvi`, `Short name` = `aruvi`, `Platform` = `Other` → click **Create application**.
+4. You will see `App api_id` (e.g. `1234567`) and `App api_hash` (e.g. `abc123...`). Copy both — one app can be reused for all your session strings.
 
-   Alternative: use the helper script if present: `python backend/scripts/gen_session.py --phone +91...`
+**Step 2 — Install Telethon**
 
-3. **Join the groups** with that phone account: open Telegram (mobile/desktop) logged in as that number → search `group_username` → `Join`. Confirm you can see files there.
-4. **Paste into `.env`**: `GRAB_SESSION_STRINGS=<string1>,<string2>` — one string per group is ideal; strings are comma-separated with no spaces. They are read in `backend/app/config.py:173` and pooled in `backend/app/grabber.py:96` (`_IvyPool`).
+On your computer (not on the server):
 
-Never commit session strings — `.env` is gitignored (`**/.env`). If a string leaks, revoke it via Telegram `Settings → Devices → Terminate` and regenerate.
+```bash
+pip install telethon
+```
+
+**Step 3 — Generate the session string**
+
+Create a file `gen_session.py` anywhere (e.g. on your Desktop) and paste this:
+
+```python
+from telethon.sync import TelegramClient
+from telethon.sessions import StringSession
+
+API_ID = 1234567              # ← put your api_id here (numbers only, no quotes)
+API_HASH = "abc123..."        # ← put your api_hash here (keep the quotes)
+
+client = TelegramClient(StringSession(), API_ID, API_HASH)
+client.start()                # it will ask for phone, then code, then 2FA password if you have one
+print("\nYOUR SESSION STRING (copy the whole line):")
+print(client.session.save())
+```
+
+Run it:
+
+```bash
+python3 gen_session.py
+```
+
+What happens:
+- It asks `Please enter your phone:` → type `+919876543210` (with country code).
+- Telegram sends a **login code** to your Telegram app → type it in the terminal.
+- If you have 2FA password, it asks for it → type it.
+- It prints a **very long string** starting with `1...` or `BQIk...` — that is your session string. It is a full login — **never share it or push it to GitHub**.
+
+Do this **once per phone number**. One number can handle 2–3 groups; for many groups use multiple numbers (one string per group is ideal).
+
+If you see an error, check that `API_ID` is numbers without quotes and `API_HASH` has quotes.
+
+**Step 4 — Join the source groups with that phone account**
+
+Open Telegram **logged in as the same phone number** → search the group username (e.g. `CinemaGalaxy_Group`) → tap **Join**. Open the group and confirm you can see files. If the group is private/invite-only, you must join via invite link first — the grabber cannot join it for you.
+
+**Step 5 — Paste into `.env`**
+
+On your server, open `.env`:
+
+```bash
+GRAB_GROUP_USERNAMES=Film_Factorys_Group,CinemaGalaxy_Group
+GRAB_BOT_USERNAMES=Toby2Robot,          # leave blank with comma to auto-detect
+GRAB_SESSION_STRINGS=PASTE_FIRST_STRING_HERE,PASTE_SECOND_STRING_HERE
+```
+
+Rules:
+- `GRAB_SESSION_STRINGS` entries are **comma-separated, no spaces**.
+- Order: first string corresponds to first group, etc. They are pooled in `backend/app/grabber.py:96` (`_IvyPool`) and read via `backend/app/config.py:173`.
+
+**Security:** `.env` is gitignored (`**/.env` in `.gitignore:3`) — it will never be pushed. If a string leaks, go to Telegram `Settings → Devices → Terminate` that session and regenerate.
 
 ---
 
