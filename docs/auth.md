@@ -6,8 +6,8 @@
 ┌─────────────────────┬────────────┬─────────────────────────────────┐
 │ Token               │ Lifetime   │ Purpose                         │
 ├─────────────────────┼────────────┼─────────────────────────────────┤
-│ Access Token (JWT)  │ 15 min     │ Every API call                  │
-│ Refresh Token       │ 60 min     │ Get new access tokens           │
+│ Access Token (JWT)  │ 7 days     │ Every API call                  │
+│ Refresh Token       │ 28 days    │ Get new access tokens           │
 │ Download Token      │ 30 days    │ Streaming URLs (?token=...)     │
 └─────────────────────┴────────────┴─────────────────────────────────┘
 ```
