@@ -162,6 +162,7 @@ See [docs/architecture.md](docs/architecture.md) for the full simple explanation
 | Auth & tokens | [docs/auth.md](docs/auth.md) |
 | Database schema | [docs/data-model.md](docs/data-model.md) |
 | Grabber (add groups) | [docs/grabber.md](docs/grabber.md) |
+| Self-Hosting (Docker) | [Self-Host Guide](https://aaruvi.space/selfhost.html) / [docs/deployment.md](docs/deployment.md) |
 | Testing | [docs/testing.md](docs/testing.md) |
 | Deploy & runbook | [docs/deployment.md](docs/deployment.md) |
 | Agent cheat sheet | [AGENTS.md](AGENTS.md) |
@@ -179,11 +180,11 @@ See [docs/architecture.md](docs/architecture.md) for the full simple explanation
 | `TELEGRAM_STORAGE_CHANNEL_ID` | — | Channel where media is stored |
 | `DATABASE_URL` | SQLite | PostgreSQL supported |
 | `JWT_SECRET` | auto-generated | Set for sessions to survive restarts |
-| `SERVER_PORT` | `7680` | HTTP port |
+| `SERVER_PORT` | `7680` | HTTP port (Docker; manual without `.env` defaults 24696) |
 | `WEB_BASE_URL` | `http://localhost:7680` | Public base URL |
-| `STREAM_RAM_PER_VIDEO_MB` | `200` | RAM hot cache per video |
+| `STREAM_RAM_PER_VIDEO_MB` | `300` | RAM hot cache per video |
 | `STREAM_INFLIGHT_MB` | `200` | Backpressure cap per stream |
-| `STREAM_PREFETCH_AHEAD_MB` | `128` | Prefetch ahead of playhead |
+| `STREAM_PREFETCH_AHEAD_MB` | `192` | Prefetch ahead of playhead |
 | `DISK_CACHE_DIR` | `./data/vcache` | Disk cache location |
 | `DISK_CACHE_TTL` | `1800` | Disk expiry (s) after last activity |
 | `OPENSUBTITLES_API_KEY` | *empty* | Enables OpenSubtitles.com |
