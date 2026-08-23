@@ -1,5 +1,5 @@
 """
-Aruvi Setup Helper — get channel/group IDs + Ivy session strings via GitHub Codespaces or locally.
+Aruvi Setup Helper — get channel/group IDs + user session strings via GitHub Codespaces or locally.
 
 Run:  python scripts/setup_helper.py
 Needs: pip install telethon
@@ -18,7 +18,7 @@ def prompt_api():
     return int(api_id), api_hash
 
 def gen_session(api_id, api_hash):
-    print("\nStep 2 — Generate Ivy session string")
+    print("\nStep 2 — Generate user session string")
     print("You will be asked for phone (+91...), login code, and 2FA password if set.")
     client = TelegramClient(StringSession(), api_id, api_hash)
     client.start()
@@ -58,7 +58,7 @@ def list_ids(client):
 
 def main():
     print("=== Aruvi Setup Helper ===")
-    print("This helps you get: 1) Ivy session strings (needs phone) 2) Channel/Group IDs")
+    print("This helps you get: 1) user session strings (needs phone) 2) Channel/Group IDs")
     print("It runs via GitHub Codespaces or locally — no data leaves your machine.")
     api_id, api_hash = prompt_api()
     print("\nWhat to do?")

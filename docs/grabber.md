@@ -7,7 +7,7 @@ The grabber indexes movies from **Telegram groups you follow** so users can sear
 ## 1. What it does
 
 - You configure 1+ source group usernames (e.g. movie request groups).
-- Aruvi joins them with dedicated Ivy sessions and listens for new files.
+- Aruvi joins them with dedicated user sessions and listens for new files.
 - Users search via the app (`Movies → Search`) — results come from those groups.
 
 ## 1.1 Requirements — Telegram mobile account (mandatory)
@@ -15,7 +15,7 @@ The grabber indexes movies from **Telegram groups you follow** so users can sear
 The grabber **cannot work with bot tokens alone**. It needs a **real Telegram mobile account** (phone number + API ID/HASH) because:
 
 - Bots can only see messages that mention them; they miss most group files.
-- User accounts (Ivy sessions via Telethon MTProto) see the full group history like a normal Telegram app.
+- User accounts (user sessions via Telethon MTProto) see the full group history like a normal Telegram app.
 - Each `GRAB_GROUP_*` you configure is joined **as that user account**, not as the bot.
 
 What you need:
@@ -39,18 +39,18 @@ GRAB_GROUP_USERNAMES=movie_group1,movie_group2,CinemaGalaxy_Group
 # Bots that post in those groups (positional — one per group, empty = auto-detect)
 GRAB_BOT_USERNAMES=FileBot,Toby2Robot,
 
-# Ivy sessions for parallel fetching (one per group recommended)
+# user sessions for parallel fetching (one per group recommended)
 GRAB_SESSION_STRINGS=1_sender_session_string,2_sender_session_string
 ```
 
 **Rules:**
 - Usernames only — e.g. `Film_Factorys_Group` not `https://t.me/Film_Factorys_Group` and not `@Film_Factorys_Group`.
-- Groups must be **public** or your Ivy sessions must already be **members** (join manually with those accounts first).
+- Groups must be **public** or your user sessions must already be **members** (join manually with those accounts first).
 - Order matters: `GRAB_BOT_USERNAMES` maps positionally to `GRAB_GROUP_USERNAMES`. Leave blank entry with comma to auto-detect: `bot1,,bot3`.
 
 Get the username: open the group in Telegram → `Group Info` → the `@username` or `t.me/<username>` link → use `<username>`.
 
-### 2.1 Generate Ivy session strings — step-by-step for beginners
+### 2.1 Generate user session strings — step-by-step for beginners
 
 Think of a session string as a **password that lets the server log in as your phone** without asking for OTP every time. You create it once, paste it in `.env`, and never share it.
 
@@ -164,7 +164,7 @@ In the app: `Movies → Search "test"` — results should appear within seconds.
 
 | Symptom | Fix |
 |---------|-----|
-| `not a member` / `CHANNEL_PRIVATE` | Ivy session account must join the group first (open Telegram with that account → Join). |
+| `not a member` / `CHANNEL_PRIVATE` | user session account must join the group first (open Telegram with that account → Join). |
 | No results | Verify group username spelling (case-sensitive), restart, check `grab_groups` in logs. |
 | `FLOOD_WAIT` | Too many concurrent grabs — reduce groups or wait; sessions are rate-limited per DC. |
 | Bot mismatch | Ensure `GRAB_BOT_USERNAMES` count matches `GRAB_GROUP_USERNAMES` (use `,,` for auto). |

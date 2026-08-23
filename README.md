@@ -106,7 +106,7 @@ This is the Telegram channel where **your own files** live. Aruvi only streams w
 5. Restart the server (`python run.py` or `docker compose restart`).
 6. Upload a test file to the channel — it should appear under `Home → Your Files` within seconds. If not, check logs for `Channel access OK` (`grabber.log` or `docker logs`).
 
-Tip: for the movie-grabber, set `GRAB_GROUP_USERNAMES=Film_Factorys_Group,CinemaGalaxy_Group` (usernames only, no `t.me/`/`@`) — **requires a Telegram mobile account** (phone number → Ivy `GRAB_SESSION_STRINGS`, must join the groups). Full guide: [docs/grabber.md](docs/grabber.md).
+Tip: for the movie-grabber, set `GRAB_GROUP_USERNAMES=Film_Factorys_Group,CinemaGalaxy_Group` (usernames only, no `t.me/`/`@`) — **requires a Telegram mobile account** (phone number → user `GRAB_SESSION_STRINGS`, must join the groups). Full guide: [docs/grabber.md](docs/grabber.md).
 
 ### 3. Frontend (rebuild SPA)
 
@@ -189,7 +189,7 @@ See [docs/architecture.md](docs/architecture.md) for the full simple explanation
 | `DEBUG_PASSWORD` | *empty* | For `/diag/*` endpoints |
 | `GRAB_GROUP_USERNAMES` | *empty* | Comma-separated source group usernames (see [docs/grabber.md](docs/grabber.md)) |
 | `GRAB_BOT_USERNAMES` | *empty* | Bots per group, positional (empty = auto-detect) |
-| `GRAB_SESSION_STRINGS` | *empty* | Ivy sessions for parallel grabber fetching |
+| `GRAB_SESSION_STRINGS` | *empty* | user sessions for parallel grabber fetching |
 
 Full list in `.env.example`.
 
