@@ -180,3 +180,16 @@ In the app: `Movies → Search "test"` — results should appear within seconds.
 - `docs/deployment.md:46` — env block summary (links here)
 
 To add a new group later: append its username to `GRAB_GROUP_USERNAMES` (and matching bot entry), restart.
+
+## 6. Keep messages (avoid admin suspicion)
+
+By default the grabber deletes its search messages after collecting replies — this keeps groups clean but shows `This message was deleted` in Telegram, which can look suspicious to admins.
+
+To **keep messages visible** (so admins see normal queries, not deletions):
+
+```bash
+# in .env
+GRAB_KEEP_MESSAGES=1
+```
+
+Then `docker compose restart` or `python run.py` restart. Messages will stay in the groups (each search stays as a normal message). **Trade-off:** groups will get spammed with search queries — use only if admin suspicion is a bigger concern than spam.
