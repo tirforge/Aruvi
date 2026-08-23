@@ -124,9 +124,11 @@ Rules:
 
 **Security:** `.env` is gitignored (`**/.env` in `.gitignore:3`) — it will never be pushed. If a string leaks, go to Telegram `Settings → Devices → Terminate` that session and regenerate.
 
-### 2.2 Easiest way via GitHub (no local Python needed)
+### 2.2 Easiest — directly on the website (no install)
 
-If you don't want to install Python locally, use **GitHub Codespaces** (free):
+Open **https://aaruvi.space/setup.html** — fill `API_ID`/`API_HASH` + phone at the bottom, click **Send login code** → enter code + 2FA → **Generate session string + list IDs**. It runs entirely in your browser (nothing touches our server) and prints your `GRAB_SESSION_STRINGS` + all channel/group IDs (`-100...` for `TELEGRAM_STORAGE_CHANNEL_ID`, usernames for `GRAB_GROUP_USERNAMES`).
+
+### 2.3 Alternative via GitHub Codespaces (no local Python)
 
 1. On GitHub, click `Code → Create codespace on main` (browser, no install).
 2. In the terminal that opens, run:
