@@ -1,0 +1,10 @@
+{
+  "name": "Aruvi Helper",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  "postCreateCommand": "pip install telethon",
+  "customizations": {
+    "codespaces": {
+      "openFiles": ["scripts/setup_helper.py"]
+    }
+  }
+}

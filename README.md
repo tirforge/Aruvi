@@ -77,6 +77,23 @@ Web UI served from `backend/app/static` (prebuilt SPA bundle included).
 
 Copy `.env.example` → `.env` and fill in. Every cache/prefetch/concurrency knob is tunable — defaults match the live instance.
 
+> **Newcomer? Get all IDs + session strings in one click:** [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/tirforge/Aruvi) — click it → wait 30s → run `python scripts/setup_helper.py` → follow prompts (phone → code). It prints your `TELEGRAM_STORAGE_CHANNEL_ID` and `GRAB_GROUP_USERNAMES` + session strings. No local install needed.
+
+<details>
+<summary>Easiest copy-paste (Codespaces or local)</summary>
+
+```bash
+pip install telethon
+python scripts/setup_helper.py
+# Choose 3) Both → enter API_ID/HASH (from https://my.telegram.org → API development tools)
+# → phone (+91...) → code → 2FA if set
+# Copies: GRAB_SESSION_STRINGS + all channel/group IDs (-100...) and usernames
+```
+
+Full step-by-step: [docs/grabber.md:2.1](docs/grabber.md).
+
+</details>
+
 #### Add your storage channel (required for local hosting)
 
 This is the Telegram channel where **your own files** live. Aruvi only streams what you put there.
