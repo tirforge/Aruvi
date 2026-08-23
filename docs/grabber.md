@@ -124,6 +124,24 @@ Rules:
 
 **Security:** `.env` is gitignored (`**/.env` in `.gitignore:3`) — it will never be pushed. If a string leaks, go to Telegram `Settings → Devices → Terminate` that session and regenerate.
 
+### 2.2 Easiest way via GitHub (no local Python needed)
+
+If you don't want to install Python locally, use **GitHub Codespaces** (free):
+
+1. On GitHub, click `Code → Create codespace on main` (browser, no install).
+2. In the terminal that opens, run:
+
+   ```bash
+   pip install telethon
+   python scripts/setup_helper.py
+   ```
+
+   Choose `3) Both` — it will ask for `API_ID`/`API_HASH` → phone → code → 2FA, then **prints your session string and lists all your channels/groups with their `-100...` IDs and usernames**.
+
+3. Copy the IDs into `.env` locally (`TELEGRAM_STORAGE_CHANNEL_ID` and `GRAB_GROUP_USERNAMES`), and close the codespace.
+
+The script is `scripts/setup_helper.py:1` — it runs entirely in your codespace, nothing is stored.
+
 ---
 
 ## 3. Restart & verify
