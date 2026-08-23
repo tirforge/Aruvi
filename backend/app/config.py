@@ -171,6 +171,7 @@ class Settings(BaseSettings):
     # When multiple are configured, N grab operations run concurrently.
     # Falls back to GRAB_SESSION_STRING, then TELEGRAM_BOT_SESSION_STRINGS.
     grab_session_strings_str: str = Field("", alias="GRAB_SESSION_STRINGS")
+    grab_keep_messages: bool = Field(False, alias="GRAB_KEEP_MESSAGES")  # if true, don't delete search/bot messages (avoids "deleted message" suspicion)
 
     @property
     def grab_session_strings(self) -> list[str]:

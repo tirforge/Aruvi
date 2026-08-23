@@ -945,11 +945,12 @@ async def search_results(
         if bot_user is None and result_msgs:
             bot_user = result_msgs[0].from_user
 
-        # Cleanup search message
-        try:
-            await ivy.delete_messages(chat_id, sent.id)
-        except Exception:
-            pass
+        # Cleanup search message (skip if GRAB_KEEP_MESSAGES=1 to avoid 'deleted message' suspicion)
+        if not get_settings().grab_keep_messages:
+            try:
+                await ivy.delete_messages(chat_id, sent.id)
+            except Exception:
+                pass
 
         if not result_msgs:
             return None
@@ -1284,7 +1285,8 @@ async def grab_selected(
 
             if not result_msg:
                 try:
-                    await ivy.delete_messages(chat_id, sent.id)
+                    if not get_settings().grab_keep_messages:
+                        await ivy.delete_messages(chat_id, sent.id)
                 except Exception:
                     pass
                 return None
@@ -1334,7 +1336,8 @@ async def grab_selected(
             _log.warning("grabber: button not found on reused msg %s, re-querying", msg_id)
             if result_msg is not None:
                 try:
-                    await ivy.delete_messages(chat_id, result_msg.id)
+                    if not get_settings().grab_keep_messages:
+                        await ivy.delete_messages(chat_id, result_msg.id)
                 except Exception:
                     pass
             result_msg = None
@@ -1352,7 +1355,8 @@ async def grab_selected(
             result_msg = result_msgs[0] if result_msgs else None
             if not result_msg:
                 try:
-                    await ivy.delete_messages(chat_id, sent.id)
+                    if not get_settings().grab_keep_messages:
+                        await ivy.delete_messages(chat_id, sent.id)
                 except Exception:
                     pass
                 return None
@@ -1363,7 +1367,8 @@ async def grab_selected(
                        row, col, f" ({target_file_name!r})" if target_file_name else "")
             to_del_ids = [m.id for m in (sent, result_msg) if m]
             try:
-                await ivy.delete_messages(chat_id, to_del_ids)
+                if not get_settings().grab_keep_messages:
+                    await ivy.delete_messages(chat_id, to_del_ids)
             except Exception:
                 pass
             return None
@@ -1400,7 +1405,8 @@ async def grab_selected(
             _log.warning("grabber: click failed")
             to_del_ids = [m.id for m in (sent, result_msg) if m]
             try:
-                await ivy.delete_messages(chat_id, to_del_ids)
+                if not get_settings().grab_keep_messages:
+                    await ivy.delete_messages(chat_id, to_del_ids)
             except Exception:
                 pass
             return None
@@ -1459,7 +1465,8 @@ async def grab_selected(
             _log.error("grabber: could not extract deep-link param after click")
             to_del_ids = [m.id for m in (sent, result_msg) if m]
             try:
-                await ivy.delete_messages(chat_id, to_del_ids)
+                if not get_settings().grab_keep_messages:
+                    await ivy.delete_messages(chat_id, to_del_ids)
             except Exception:
                 pass
             return None
@@ -1478,7 +1485,8 @@ async def grab_selected(
             _log.error("grabber: could not determine bot user for /start")
             to_del_ids = [m.id for m in (sent, result_msg) if m]
             try:
-                await ivy.delete_messages(chat_id, to_del_ids)
+                if not get_settings().grab_keep_messages:
+                    await ivy.delete_messages(chat_id, to_del_ids)
             except Exception:
                 pass
             return None
@@ -1490,7 +1498,8 @@ async def grab_selected(
         to_del_ids = [m.id for m in (sent, result_msg) if m]
         if to_del_ids:
             try:
-                await ivy.delete_messages(chat_id, to_del_ids)
+                if not get_settings().grab_keep_messages:
+                    await ivy.delete_messages(chat_id, to_del_ids)
             except Exception:
                 pass
 
@@ -1525,7 +1534,8 @@ async def grab_selected(
                 _log.warning("grabber: label/file mismatch for %r: %s", file_name, warning)
                 to_del_ids = [m.id for m in (sent, result_msg) if m]
                 try:
-                    await ivy.delete_messages(chat_id, to_del_ids)
+                    if not get_settings().grab_keep_messages:
+                        await ivy.delete_messages(chat_id, to_del_ids)
                 except Exception:
                     pass
                 raise _GrabError(warning)
