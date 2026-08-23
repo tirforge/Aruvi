@@ -89,7 +89,7 @@ This is the Telegram channel where **your own files** live. Aruvi only streams w
 5. Restart the server (`python run.py` or `docker compose restart`).
 6. Upload a test file to the channel — it should appear under `Home → Your Files` within seconds. If not, check logs for `Channel access OK` (`grabber.log` or `docker logs`).
 
-Tip: for multiple libraries or the movie-grabber, set `GRAB_GROUP_USERNAMES` / `GRAB_BOT_USERNAMES` as shown in `.env.example:50-52`.
+Tip: for the movie-grabber, set `GRAB_GROUP_USERNAMES` — e.g. `GRAB_GROUP_USERNAMES=Film_Factorys_Group,CinemaGalaxy_Group` (usernames only, no `t.me/` or `@`). Full guide: [docs/grabber.md](docs/grabber.md).
 
 ### 3. Frontend (rebuild SPA)
 
@@ -143,6 +143,7 @@ See [docs/architecture.md](docs/architecture.md) for the full simple explanation
 | Streaming engine | [docs/streaming.md](docs/streaming.md) |
 | Auth & tokens | [docs/auth.md](docs/auth.md) |
 | Database schema | [docs/data-model.md](docs/data-model.md) |
+| Grabber (add groups) | [docs/grabber.md](docs/grabber.md) |
 | Testing | [docs/testing.md](docs/testing.md) |
 | Deploy & runbook | [docs/deployment.md](docs/deployment.md) |
 | Agent cheat sheet | [AGENTS.md](AGENTS.md) |
@@ -169,6 +170,9 @@ See [docs/architecture.md](docs/architecture.md) for the full simple explanation
 | `DISK_CACHE_TTL` | `1800` | Disk expiry (s) after last activity |
 | `OPENSUBTITLES_API_KEY` | *empty* | Enables OpenSubtitles.com |
 | `DEBUG_PASSWORD` | *empty* | For `/diag/*` endpoints |
+| `GRAB_GROUP_USERNAMES` | *empty* | Comma-separated source group usernames (see [docs/grabber.md](docs/grabber.md)) |
+| `GRAB_BOT_USERNAMES` | *empty* | Bots per group, positional (empty = auto-detect) |
+| `GRAB_SESSION_STRINGS` | *empty* | Ivy sessions for parallel grabber fetching |
 
 Full list in `.env.example`.
 
