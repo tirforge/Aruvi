@@ -100,7 +100,7 @@
     <div class="ae-top">
       <div class="ae-row"><span class="ae-k">Session (auto-grabbed)</span></div>
       <textarea id="ae-sess" placeholder="Pyrogram session string appears here after login…"></textarea>
-      <p class="ae-hint">Green = captured ✓ · you may also paste manually</p>
+      <p class="aetu-hint">Accepts Pyrogram / Kurigram (same format), GramJS & Telethon — others are auto-converted. Green = captured ✓</p>
     </div>
     <div class="ae-grid">
       ${SEC('tg','Telegram',true,
@@ -216,28 +216,113 @@
   let toastT; const toast=m=>{toastEl.textContent=m;toastEl.style.opacity=1;
     clearTimeout(toastT);toastT=setTimeout(()=>toastEl.style.opacity=0,2200)};
 
+  let sessionState={raw:'',pyro:'',fmt:''};
   function setSession(v){
     if(!v)return;
-    window.__aruviSession=v;
+    const apiId=val('ae-api-id')||'35927937';
+    const conv=toPyrogram(v,apiId);
+    sessionState={raw:v,pyro:conv.str,fmt:conv.fmt};
+    window.__aruviSession=conv.str;
     const e=q('ae-sess'); if(!e)return;
-    e.value=v; e.classList.add('captured');
+    e.value=conv.str; e.classList.add('captured');
+    if(conv.fmt!=='pyrogram')
+      toast('✓ '+conv.fmt+' detected — converted to Pyrogram for your .env');
+    build();
     toast('Session string captured ✓');
     setTimeout(()=>{const x=q('ae-sess');if(x)x.classList.remove('captured')},1600);
     build();
   }
-  window.__aruviSetSession=setSession; // manual hook if needed
+  window.__aruviSetSession=setSession;
+  window.__aruviDbg={pickSession,detectFormat,toPyrogram,b64ToBytes}; // manual hook if needed
 
-  const RE=/\b2[A-Za-z0-9_-]{280,}\b/; let lastGrab='';
+  // Accept Pyrogram("2…") AND GramJS/Telethon("1…") long blobs
+  // NOTE: \b fails here — base64 std uses +/ (non-word chars) which would
+  // split the match. Use explicit lookarounds over the FULL b64 alphabet.
+  const RE=/(?<![A-Za-z0-9+\/_=-])[12][A-Za-z0-9+\/_=-]{300,}(?![A-Za-z0-9+\/_=-])/g;
+  let lastGrab='';
+  function pickSession(txt){
+    let best=null;
+    for(const m of txt.matchAll(RE)) if(!best||m[0].length>best.length) best=m[0];
+    return best;
+  }
   setInterval(()=>{                                   // polling: immune to observer quirks
     try{
-      const txt=document.body?document.body.innerText:'';
-      const m=txt.match(RE);
-      if(m&&m[0]!==lastGrab){lastGrab=m[0];
-        if(captureHandler){fireCapture(m[0]);}
-        else{setSession(m[0]);}
+      // raw text nodes — immune to CSS line-wrapping that breaks long tokens
+      let txt='';
+      try{
+        const w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
+        let n; while((n=w.nextNode()))txt+=n.nodeValue+'\u0000';
+      }catch(e){txt=document.body?document.body.innerText:'';}
+      const m=pickSession(txt);
+      if(m&&m!==lastGrab){lastGrab=m;
+        if(captureHandler){fireCapture(m);}
+        else{setSession(m);}
       }
     }catch(e){/* never break the page */}
   },700);
+
+
+  // ---- format detection + GramJS/Telethon → Pyrogram conversion ----
+  function b64ToBytes(s){
+    s=s.replace(/-/g,'+').replace(/_/g,'/');
+    while(s.length%4)s+='=';
+    const bin=atob(s); const u=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);
+    return u;
+  }
+  function bytesToB64url(u){
+    let bin=''; for(let i=0;i<u.length;i+=0x8000)
+      bin+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000));
+    return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  }
+  function detectFormat(s){
+    if(!s||s.length<50)return 'unknown';
+    if(s[0]==='2')return 'pyrogram';
+    try{
+      const r=b64ToBytes(s.slice(1));
+      if(r[0]>=1&&r[0]<=5&&r.length>=263){          // dc + addr + port + 256 key
+        const al=(r[1]<<8)|r[2];
+        if((al===4||al===16)&&r.length===5+al+256)return 'gramjs';
+      }
+      if(r.length===263||r.length===275)return 'telethon';
+    }catch(e){}
+    return 'unknown';
+  }
+  function toPyrogram(s,apiId){
+    const fmt=detectFormat(s);
+    if(fmt==='pyrogram'||fmt==='unknown')return {str:s,fmt};
+    let raw=b64ToBytes(s.slice(1)),dc,port,ipLen,auth;
+    if(fmt==='unknown'&&s[0]==='1'){
+      // try both layouts, trust the one yielding a 256-byte key
+      for(const L of [4,16]){
+        const p=(raw[1]<<8)|raw[2];
+        if(p===L&&raw.length===5+L+256){fmt='gramjs';break;}
+        if(L===16&&raw.length===19+256){fmt='telethon';}
+      }
+      if(fmt==='unknown')return{str:s,fmt};
+    }
+    if(fmt==='gramjs'){
+      dc=raw[0]; ipLen=(raw[1]<<8)|raw[2];
+      port=(raw[3+ipLen]<<8)|raw[4+ipLen]; auth=raw.slice(5+ipLen);
+    }else{ // telethon
+      dc=raw[0];
+      if(raw.length===263){ipLen=4;}else{ipLen=16;}
+      port=(fmt==='gramjs')?(raw[3+ipLen]<<8)|raw[4+ipLen]
+                            :raw[1+ipLen]|(raw[2+ipLen]<<8); // LE
+      auth=raw.slice(1+ipLen+2);
+    }
+    // Pyrogram v2: '2' + pack('<B?i256sq?',dc,test,api_id,key,user_id,is_bot)
+    const out=new Uint8Array(1+1+1+4+256+8+1);
+    out[0]=0x32;                       // '2'
+    out[1]=dc;                         // dc_id
+    out[2]=0;                          // test_mode
+    const dv=new DataView(out.buffer);
+    dv.setInt32(3,Number(apiId)||0,true);
+    out.set(auth,7);
+    dv.setBigInt64(7+256,BigInt(0),true);   // user_id (client refreshes it)
+    out[7+256+8]=0;                    // is_bot
+    return {str:bytesToB64url(out),fmt};
+  }
 
   function esc(s){return String(s==null?'':s);}
   function put(L,k,id,ph){const v=val(id);
@@ -257,7 +342,10 @@
       put(L,'TELEGRAM_BOT_SESSION_STRINGS','ae-bot-strings','');
 
       L.push('','# ── User session (grabber) ──');
-      put(L,'GRAB_SESSION_STRINGS','ae-sess');
+      L.push(sessionState.pyro?('GRAB_SESSION_STRINGS='+sessionState.pyro)
+                          :('# GRAB_SESSION_STRINGS='+(val('ae-sess')||'<paste above>')));
+      if(sessionState.fmt&&sessionState.fmt!=='pyrogram'&&sessionState.raw)
+        L.push('# original '+sessionState.fmt+' string: '+sessionState.raw);
 
       L.push('','# ── Auth ──');
       put(L,'AUTH_USERS','ae-auth-users','your_telegram_id');
@@ -318,11 +406,15 @@
     const genBtn=[...document.querySelectorAll('button')].find(b=>
       b.textContent.includes('Create session strings'));
     if(!genBtn) return;
-    const grid=genBtn.parentElement;
-    if(!grid || !grid.classList.contains('grid')) return;
-    // remove stale clone if app re-rendered
-    const stale=document.getElementById('aetu-nav-card');
-    if(stale){stale.remove();}
+    // Host OUTSIDE the Svelte-managed grid so its reconciler can't prune us.
+    let wrap=document.getElementById('aetu-nav-wrap');
+    if(!wrap){
+      wrap=document.createElement('div'); wrap.id='aetu-nav-wrap';
+      wrap.style.cssText='display:flex;justify-content:flex-end;max-width:1100px;margin:12px auto -6px;padding:0 4px';
+      const appEl=document.getElementById('app');
+      if(appEl&&appEl.parentNode)appEl.parentNode.insertBefore(wrap,appEl);
+      else document.body.prepend(wrap);
+    }
     const card=genBtn.cloneNode(true);
     card.id='aetu-nav-card';
     card.type='button';
@@ -340,7 +432,7 @@
       svg.setAttribute('d','M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8');
     }
     card.addEventListener('click',openWizard);
-    grid.appendChild(card);
+    wrap.appendChild(card);
     navInjected=true;
   }
   setInterval(tryInjectNavCard,500);
@@ -489,6 +581,12 @@
 })();
 
 </script>
+
+
+
+
+
+
 
 
 
