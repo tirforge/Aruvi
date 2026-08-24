@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<title>Aruvi Setup Helper</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',system-ui,sans-serif;background:#0a0a0f;color:#E6E8EB;line-height:1.6}
+.wrap{max-width:720px;margin:0 auto;padding:32px 20px}
+h1{font-size:1.6rem;font-weight:800;margin-bottom:8px;background:linear-gradient(135deg,#6366f1,#a855f7,#ec4899);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.sub{color:#9CA3AF;font-size:.88rem;margin-bottom:28px}
+.card{background:#12121a;border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:24px;margin-bottom:20px}
+.card h2{font-size:.95rem;font-weight:700;margin-bottom:14px;color:#E6E8EB}
+label{display:block;font-size:.78rem;font-weight:600;color:#9CA3AF;margin:14px 0 6px}
+input,textarea{width:100%;background:#0a0a0f;border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:10px 12px;color:#E6E8EB;font-size:.85rem;outline:none;font-family:'Inter',monospace}
+input:focus{border-color:#6366f1}
+.hint{font-size:.72rem;color:#6B7280;margin-top:4px}
+.btn{width:100%;padding:12px;border:none;border-radius:8px;background:linear-gradient(135deg,#6366f1,#a855f7);color:#fff;font-size:.9rem;font-weight:600;cursor:pointer;margin-top:16px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.status{margin-top:12px;font-size:.82rem;min-height:1.2em}
+.row{display:flex;gap:10px}.row>*{flex:1}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Aruvi Setup Helper</h1>
+  <p class="sub">Generates your <b>Pyrogram session string</b> server-side — nothing runs in your browser.</p>
+
+  <div class="card">
+    <h2>1 · Credentials</h2>
+    <label>Setup key (SETUP_PASSWORD or DEBUG_PASSWORD)</label>
+    <input id="setup_key" type="password" placeholder="required">
+    <div class="row">
+      <div><label>API_ID</label><input id="api_id" placeholder="123456"></div>
+      <div><label>API_HASH</label><input id="api_hash" placeholder="0ab1cd…"></div>
+    </div>
+    <label>Phone number</label>
+    <input id="phone" placeholder="+15551234567">
+    <button class="btn" id="btnSend">Send login code →</button>
+    <div class="status" id="sendStatus"></div>
+  </div>
+
+  <div class="card hidden" id="step2Card">
+    <h2>2 · Sign in</h2>
+    <label>Login code Telegram sent you</label>
+    <input id="code" placeholder="12345">
+    <label class="hidden" id="pwdLabel">2FA password</label>
+    <input id="pwd" type="password" class="hidden" placeholder="cloud password">
+    <button class="btn" id="btnGen">Generate session string</button>
+    <div class="status" id="genStatus"></div>
+  </div>
+
+  <div class="card hidden" id="step3Card">
+    <h2>3 · Your session string</h2>
+    <textarea id="sessOut" rows="4" readonly></textarea>
+    <p class="hint">Paste into .env as TELEGRAM_SESSION (or your configured session var), then restart the backend.</p>
+    <button class="btn" id="btnCopy">Copy to clipboard</button>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+// One-shot link token arrives in the URL fragment (#k=...) — fragments are
+// never sent to servers or logs. If present, it IS the setup key.
+const LINK_KEY=new URLSearchParams(location.hash.slice(1)).get('k')||'';
+if(LINK_KEY){
+  const row=document.querySelector('#setup_key')?.closest('label');
+  if(row) row.style.display='none';
+}
+const getKey=()=>LINK_KEY||$('setup_key').value.trim();
+const setStatus=(el,msg,ok)=>{el.textContent=msg;el.style.color=ok?'#34d399':'#f87171'};
+let token=null;
+
+$('btnSend').onclick=async()=>{
+  const key=$('setup_key').value.trim(),api_id=$('api_id').value.trim(),
+        api_hash=$('api_hash').value.trim(),phone=$('phone').value.trim();
+  if(!key||!api_id||!api_hash||!phone)return setStatus($('sendStatus'),'Fill every field first.',false);
+  $('btnSend').disabled=true;setStatus($('sendStatus'),'Sending code via server…',true);
+  try{
+    const r=await fetch('/api/setup/send-code',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({setup_key:getKey(),api_id:Number(api_id),api_hash,phone})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||('HTTP '+r.status));
+    token=d.token;
+    setStatus($('sendStatus'),'Code sent — check Telegram.',true);
+    $('step2Card').classList.remove('hidden');
+  }catch(e){setStatus($('sendStatus'),'Error: '+e.message,false)}
+  $('btnSend').disabled=false;
+};
+
+$('btnGen').onclick=async()=>{
+  if(!token)return setStatus($('genStatus'),'Send the code first.',false);
+  const key=$('setup_key').value.trim(),code=$('code').value.trim(),pwd=$('pwd').value.trim();
+  if(!code)return setStatus($('genStatus'),'Enter the login code.',false);
+  $('btnGen').disabled=true;setStatus($('genStatus'),'Signing in…',true);
+  try{
+    let r=await fetch('/api/setup/sign-in',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({setup_key:getKey(),token,code,password:pwd||null})});
+    let d=await r.json().catch(()=>({}));
+    if(r.status===401&&d.detail==='need_password'){
+      $('pwdLabel').classList.remove('hidden');$('pwd').classList.remove('hidden');
+      throw new Error('2FA enabled — enter your cloud password above and retry.');
+    }
+    if(!r.ok)throw new Error(d.detail||('HTTP '+r.status));
+    $('sessOut').value=d.session_string;
+    setStatus($('genStatus'),'Done ✓',true);
+    $('step3Card').classList.remove('hidden');
+  }catch(e){setStatus($('genStatus'),'Error: '+e.message,false)}
+  $('btnGen').disabled=false;
+};
+
+$('btnCopy').onclick=()=>{navigator.clipboard.writeText($('sessOut').value);
+  $('btnCopy').textContent='Copied ✓';setTimeout(()=>$('btnCopy').textContent='Copy to clipboard',1500)};
+</script>
+</body>
+</html>
