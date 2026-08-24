@@ -58,7 +58,7 @@
     font-size:.78rem;font-family:${MONO};outline:none;resize:vertical}
   #ae-sess.captured{color:${OK}}
   .ae-hint{font-size:.68rem;color:${S4};margin:6px 0 0}
-  .ae-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+  .ae-grid{display:flex;flex-direction:column;gap:14px;max-width:760px;margin:0 auto;width:100%}
   details.ae-box{background:${SL};border:1px solid ${S7};border-radius:.6rem;overflow:hidden}
   details.ae-box[open]{border-color:${P6}}
   details.ae-box summary{list-style:none;cursor:pointer;padding:.8rem 1rem;display:flex;align-items:center;gap:10px;
@@ -151,6 +151,10 @@
         CK('ae-grab','Enable grabber (auto-adds storage channel)')+
         R('GRAB_GROUP_USERNAMES','ae-groups','my_movies,my_series')+
         R('GRAB_BOT_USERNAMES','ae-gbots','','text','AutoFilterBot')+
+        `<p class="ae-hint">The bot that replies with the file inside each group — listed in the
+          same order as the groups; leave one slot empty to auto-detect it.
+          <b>AutoFilterBot</b> is just the most common public movie-filter bot;
+          replace it if your groups use another one.</p>`+
         CK('ae-keep','Keep search messages'))}
       ${SEC('gdrive','Google Drive',false,
         R('GDRIVE_CLIENT_ID','ae-gcid','','password')+
@@ -164,6 +168,13 @@
   </div>`;
 
   const style=document.createElement('style'); style.textContent=CSS;
+  const banner=document.createElement('div');
+  banner.style.cssText='max-width:760px;margin:18px auto -6px;padding:10px 16px;border:1px solid '+S7+
+    ';border-radius:.6rem;background:'+S9+';color:#c7cbd3;font-size:.8rem;font-family:var(--font-sans);text-align:center';
+  banner.innerHTML='<b style="color:#E2E8F0">⚡ .env Builder</b> is at the <b>bottom of this page</b> — generate your session above, then scroll down ↓';
+  const appElB=document.getElementById('app');
+  if(appElB&&appElB.parentNode)appElB.parentNode.insertBefore(banner,appElB);
+  else document.body.prepend(banner);
   const mountAt=document.getElementById('app');
   const styleElOk=document.head.appendChild(style);
   if(mountAt&&mountAt.parentNode){mountAt.parentNode.insertBefore(host,mountAt.nextSibling);}
@@ -294,5 +305,6 @@
 })();
 
 </script>
+
 </body>
 </html>
