@@ -801,8 +801,10 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                     .setUri(url)
                     .setMediaId(currentFileId.toString())
                     .setMediaMetadata(mediaMetadata)
-                    .setContentType("video/mp4")
-                    .setStreamType(MediaItem.StreamType.BUFFERED)
+                    // media3 1.2.1 MediaItem.Builder has no setContentType/
+                    // setStreamType; setMimeType is the supported equivalent
+                    // and BUFFERED is already the Cast default stream type.
+                    .setMimeType("video/mp4")
                     .build()
                 exoPlayer.pause()
                 // MediaItem.Builder has no setStartPositionMs in media3 1.2.1
