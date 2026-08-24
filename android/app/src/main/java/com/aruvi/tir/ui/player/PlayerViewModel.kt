@@ -841,12 +841,31 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                     .build()
                 // media3 1.2.1 MediaItem.Builder has no setContentType/
                 // setStreamType; setMimeType is the supported equivalent and
-                // BUFFERED is already the Cast default stream type. Use the
-                // file's real MIME so audio files aren't mislabelled video —
-                // the Default Receiver picks its renderer from this hint.
-                val mimeType = file?.mimeType
-                    ?.takeIf { it.startsWith("video/") || it.startsWith("audio/") }
-                    ?: "video/mp4"
+                // BUFFERED is already the Cast default stream type. The MIME
+                // hint selects the receiver's DEMUXER, so it must match the
+                // real container: an MKV served with a video/mp4 hint fails to
+                // load even when its codecs are supported. Prefer the backend
+                // MIME, fall back to the filename extension (most libraries
+                // here are .mkv), and only then assume MP4.
+                val extMime = mapOf(
+                    "mkv" to "video/x-matroska",
+                    "webm" to "video/webm",
+                    "mp4" to "video/mp4",
+                    "m4v" to "video/mp4",
+                    "mov" to "video/mp4",
+                    "ts" to "video/mp2t",
+                    "mp3" to "audio/mpeg",
+                    "m4a" to "audio/mp4",
+                    "flac" to "audio/flac",
+                    "ogg" to "audio/ogg",
+                    "opus" to "audio/ogg",
+                    "wav" to "audio/wav"
+                )[file?.fileName?.substringAfterLast('.', "")?.lowercase() ?: ""]
+                val mimeType = sequenceOf(
+                    file?.mimeType?.takeIf { it.startsWith("video/") || it.startsWith("audio/") },
+                    extMime,
+                    "video/mp4"
+                ).firstOrNull { !it.isNullOrBlank() }!!
                 val mediaItem = MediaItem.Builder()
                     .setUri(url)
                     .setMediaId(currentFileId.toString())
