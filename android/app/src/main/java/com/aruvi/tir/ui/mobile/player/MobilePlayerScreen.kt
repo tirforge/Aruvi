@@ -8,8 +8,9 @@ import android.media.AudioManager
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import androidx.core.content.ContextCompat
 import androidx.mediarouter.app.MediaRouteButton
-import androidx.media3.cast.MediaRouteButtonFactory
+import com.google.android.gms.cast.framework.CastButtonFactory
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
@@ -508,10 +509,16 @@ fun MobilePlayerControls(
                                 btn.layoutParams = ViewGroup.LayoutParams(buttonSizePx, buttonSizePx)
                                 // REQUIRED for discovery: wires the button's MediaRouteSelector to
                                 // the Cast framework. Without this the button has no selector and
-                                // finds nothing — this is what YouTube/Google Home do. Returns a
-                                // ListenableFuture; safe to ignore. CastContext is initialized
-                                // eagerly in TelePlayApp.onCreate(), so this won't throw.
-                                MediaRouteButtonFactory.setUpMediaRouteButton(themedCtx, btn)
+                                // finds nothing — this is exactly what YouTube/Google Home do.
+                                // CastContext is initialized eagerly in TelePlayApp.onCreate(), so
+                                // this resolves successfully. The 3-arg overload (Context, Executor,
+                                // MediaRouteButton) is the only one in play-services-cast-framework
+                                // 21.5.0; we run the async result on the main executor.
+                                CastButtonFactory.setUpMediaRouteButton(
+                                    themedCtx,
+                                    ContextCompat.getMainExecutor(themedCtx),
+                                    btn
+                                )
                                 btn
                                 } catch (e: Throwable) {
                                     // Never let a cast-button failure crash the player; show an empty view.
