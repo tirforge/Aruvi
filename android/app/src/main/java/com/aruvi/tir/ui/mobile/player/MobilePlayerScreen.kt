@@ -9,6 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import androidx.mediarouter.app.MediaRouteButton
+import androidx.media3.cast.MediaRouteButtonFactory
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
@@ -505,6 +506,12 @@ fun MobilePlayerControls(
                                     )
                                 val btn = MediaRouteButton(themedCtx)
                                 btn.layoutParams = ViewGroup.LayoutParams(buttonSizePx, buttonSizePx)
+                                // REQUIRED for discovery: wires the button's MediaRouteSelector to
+                                // the Cast framework. Without this the button has no selector and
+                                // finds nothing — this is what YouTube/Google Home do. Returns a
+                                // ListenableFuture; safe to ignore. CastContext is initialized
+                                // eagerly in TelePlayApp.onCreate(), so this won't throw.
+                                MediaRouteButtonFactory.setUpMediaRouteButton(themedCtx, btn)
                                 btn
                                 } catch (e: Throwable) {
                                     // Never let a cast-button failure crash the player; show an empty view.
