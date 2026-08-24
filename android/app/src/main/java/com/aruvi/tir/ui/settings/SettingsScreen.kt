@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import com.aruvi.tir.ui.components.TVButton
@@ -54,7 +55,7 @@ fun SettingsScreen(
 
             // Settings sections
             Column(
-                modifier = Modifier 
+                modifier = Modifier
                     .fillMaxWidth(0.6f)
                     .align(Alignment.CenterHorizontally),
                 verticalArrangement = Arrangement.spacedBy(24.dp)
@@ -297,12 +298,12 @@ private fun LogoutConfirmDialog(
         },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text("Logout", color = TVError)
+                Text(stringResource(com.aruvi.tir.R.string.logout), color = TVError)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(com.aruvi.tir.R.string.cancel))
             }
         },
         containerColor = TVSurface

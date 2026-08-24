@@ -25,4 +25,12 @@
 
     <!-- Deprecated name for compatibility with existing code if any -->
     <style name="Theme.TelegramTV" parent="Theme.Aruvi.TV" />
+
+    <!-- Cast MediaRouteButton brand tint.
+         MediaRouterThemeHelper requires an opaque colorPrimary; we supply the
+         Aruvi brand color so the cast icon matches the app instead of default blue. -->
+    <style name="Theme.Aruvi.CastButton" parent="Theme.AppCompat.NoActionBar">
+        <item name="colorPrimary">@color/aruvi_primary</item>
+        <item name="colorPrimaryDark">@color/aruvi_primary_dark</item>
+    </style>
 </resources>

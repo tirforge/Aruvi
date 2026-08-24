@@ -11,6 +11,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import com.aruvi.tir.data.model.FileItem
 import com.aruvi.tir.data.model.Folder
 import com.aruvi.tir.data.model.FolderWithChildren
@@ -35,54 +36,54 @@ fun FileOptionsButton(
         }
         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
             DropdownMenuItem(
-                text = { Text("Open in External Player") }, 
+                text = { Text(stringResource(com.aruvi.tir.R.string.open_external_player)) },
                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, null) },
                 onClick = { onExternalPlayer(); showMenu = false }
             )
             onGoToFolder?.let {
                 DropdownMenuItem(
-                    text = { Text("Go to Folder Location") }, 
+                    text = { Text(stringResource(com.aruvi.tir.R.string.go_to_folder)) },
                     leadingIcon = { Icon(Icons.Default.FolderOpen, null) },
                     onClick = { it(); showMenu = false }
                 )
             }
             HorizontalDivider()
             DropdownMenuItem(
-                text = { Text("Rename") }, 
+                text = { Text(stringResource(com.aruvi.tir.R.string.rename)) },
                 leadingIcon = { Icon(Icons.Default.Edit, null) },
                 onClick = { onRename(); showMenu = false }
             )
             DropdownMenuItem(
-                text = { Text("Move") }, 
+                text = { Text(stringResource(com.aruvi.tir.R.string.move)) },
                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.DriveFileMove, null) },
                 onClick = { onMove(); showMenu = false }
             )
             DropdownMenuItem(
-                text = { Text("Download") }, 
+                text = { Text("Download") },
                 leadingIcon = { Icon(Icons.Default.Download, null) },
                 onClick = { onDownload(); showMenu = false }
             )
             HorizontalDivider()
             DropdownMenuItem(
-                text = { Text(if (file.publicHash != null) "Copy Public Link" else "Generate Public Link") }, 
+                text = { Text(if (file.publicHash != null) "Copy Public Link" else "Generate Public Link") },
                 leadingIcon = { Icon(Icons.Default.Share, null) },
                 onClick = { onCopyPublic(); showMenu = false }
             )
             if (file.publicHash != null) {
                 DropdownMenuItem(
-                    text = { Text("Revoke Public Link") }, 
+                    text = { Text("Revoke Public Link") },
                     leadingIcon = { Icon(Icons.Default.LinkOff, null) },
                     onClick = { onRevokePublic(); showMenu = false }
                 )
             }
             DropdownMenuItem(
-                text = { Text("Copy Download Link") }, 
+                text = { Text("Copy Download Link") },
                 leadingIcon = { Icon(Icons.Default.ContentCopy, null) },
                 onClick = { onCopyDownload(); showMenu = false }
             )
             HorizontalDivider()
             DropdownMenuItem(
-                text = { Text("Delete", color = MaterialTheme.colorScheme.error) }, 
+                text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
                 leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
                 onClick = { onDelete(); showMenu = false }
             )

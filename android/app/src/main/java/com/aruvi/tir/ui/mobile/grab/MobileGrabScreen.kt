@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aruvi.tir.data.model.GrabSearchResult
 import com.aruvi.tir.ui.theme.*
@@ -84,7 +85,7 @@ viewModel: GrabViewModel = hiltViewModel(),
                     TextField(
                         value = state.query,
                         onValueChange = { viewModel.onQueryChange(it) },
-                        placeholder = { Text("Search movies...", color = MobileTextSecondary) },
+                        placeholder = { Text(stringResource(com.aruvi.tir.R.string.search_movies_hint), color = MobileTextSecondary) },
                         colors = TextFieldDefaults.colors(
                             focusedContainerColor = Color.Transparent,
                             unfocusedContainerColor = Color.Transparent,
@@ -116,7 +117,7 @@ if (state.query.isNotEmpty()) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(color = MobilePrimary)
                         Spacer(Modifier.height(16.dp))
-                        Text("Searching...", color = MobileTextSecondary)
+                        Text(stringResource(com.aruvi.tir.R.string.searching), color = MobileTextSecondary)
                     }
                 }
             }
@@ -140,7 +141,7 @@ if (state.query.isNotEmpty()) {
                         )
                         Spacer(Modifier.height(16.dp))
                         TextButton(onClick = { viewModel.clearError() }) {
-                            Text("Dismiss", color = MobilePrimary)
+                            Text(stringResource(com.aruvi.tir.R.string.dismiss), color = MobilePrimary)
                         }
                     }
                 }
@@ -157,10 +158,10 @@ if (state.query.isNotEmpty()) {
                             Icon(Icons.Default.Movie, null, Modifier.size(36.dp), tint = MobilePrimary.copy(alpha = 0.5f))
                         }
                         Spacer(Modifier.height(16.dp))
-                        Text("No movies found", color = MobileTextPrimary, fontWeight = FontWeight.Medium)
+                        Text(stringResource(com.aruvi.tir.R.string.no_movies_found), color = MobileTextPrimary, fontWeight = FontWeight.Medium)
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "Try a different search term",
+                            stringResource(com.aruvi.tir.R.string.try_different_search),
                             color = MobileTextSecondary,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -202,10 +203,10 @@ items(state.results, key = { "${it.msgId}-${it.row}-${it.col}-${it.label}" }) { 
                             Icon(Icons.Default.Movie, null, Modifier.size(36.dp), tint = MobilePrimary.copy(alpha = 0.5f))
                         }
                         Spacer(Modifier.height(16.dp))
-                        Text("Search Telegram groups", color = MobileTextPrimary, fontWeight = FontWeight.Medium)
+                        Text(stringResource(com.aruvi.tir.R.string.search_telegram_groups), color = MobileTextPrimary, fontWeight = FontWeight.Medium)
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "for movies to watch",
+                            stringResource(com.aruvi.tir.R.string.for_movies_to_watch),
                             color = MobileTextSecondary,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -233,7 +234,7 @@ items(state.results, key = { "${it.msgId}-${it.row}-${it.col}-${it.label}" }) { 
                 }
             },
             title = {
-                Text("Ready to Watch!", fontWeight = FontWeight.SemiBold)
+                Text(stringResource(com.aruvi.tir.R.string.ready_to_watch), fontWeight = FontWeight.SemiBold)
             },
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -307,7 +308,7 @@ shape = RoundedCornerShape(8.dp)
 ) {
 Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp))
 Spacer(Modifier.width(8.dp))
-Text("VLC")
+Text(stringResource(com.aruvi.tir.R.string.vlc))
 }
                         FilledTonalButton(
                             onClick = {
@@ -319,7 +320,7 @@ Text("VLC")
                         ) {
                             Icon(Icons.Default.Download, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("Download")
+                            Text(stringResource(com.aruvi.tir.R.string.download_action))
                         }
                     }
                     Spacer(Modifier.height(8.dp))
@@ -334,14 +335,14 @@ Text("VLC")
                     ) {
                         Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Watch Now")
+                        Text(stringResource(com.aruvi.tir.R.string.watch_now))
                     }
 }
             },
             confirmButton = {},
 dismissButton = {
 TextButton(onClick = { viewModel.clearGrabResult() }) {
-Text("Back", color = MobileTextSecondary)
+Text(stringResource(com.aruvi.tir.R.string.back), color = MobileTextSecondary)
 }
 },
         )

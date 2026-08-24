@@ -80,7 +80,7 @@ fun MobilePlayerScreen(
         gestureMessage = text
         gestureIcon = icon
         gestureJob?.cancel()
-        gestureJob = scope.launch { 
+        gestureJob = scope.launch {
             delay(1500)
             gestureMessage = null
             gestureIcon = null
@@ -101,7 +101,7 @@ fun MobilePlayerScreen(
     DisposableEffect(Unit) {
         val originalOrientation = activity?.requestedOrientation
         val window = activity?.window
-        
+
         if (activity != null && window != null) {
             WindowCompat.setDecorFitsSystemWindows(window, false)
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -120,7 +120,7 @@ fun MobilePlayerScreen(
         if (startPosition > 0) {
              viewModel.setResumePosition(startPosition)
         }
-        
+
         onDispose {
             activity?.requestedOrientation = originalOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             if (window != null) {
@@ -219,7 +219,7 @@ fun MobilePlayerScreen(
                     var accumulatedDragY = 0f
                     var touchMode = 0 // 0=NONE, 1=SEEK, 2=VOLUME, 3=BRIGHTNESS
                     val touchSlop = 50f // Threshold to lock gesture
-                    
+
                     var dragStartPosition = 0L
                     var startVolume = 0
                     var startBrightness = 0.5f
@@ -232,13 +232,13 @@ fun MobilePlayerScreen(
                             touchMode = 0
                             startX = offset.x
                         },
-                        onDragEnd = { 
+                        onDragEnd = {
                              if (touchMode == 1) { // SEEK
                                  viewModel.onSeekEnd()
                              }
                              touchMode = 0
                         },
-                        onDragCancel = { 
+                        onDragCancel = {
                             if (touchMode == 1) {
                                 viewModel.onSeekEnd()
                             }
@@ -247,10 +247,10 @@ fun MobilePlayerScreen(
                     ) { _, dragAmount ->
                         val width = containerSize.width.toFloat()
                         val height = containerSize.height.toFloat()
-                        
+
                         accumulatedDragX += dragAmount.x
                         accumulatedDragY += dragAmount.y
-                        
+
                         if (touchMode == 0) {
                             // Detect Lock
                             if (kotlin.math.abs(accumulatedDragX) > touchSlop) {
@@ -270,17 +270,17 @@ fun MobilePlayerScreen(
                                 }
                             }
                         }
-                        
+
                         // Execute based on locked mode
                         when (touchMode) {
                             1 -> { // SEEK
                                  // Sensitivity: 1px = 100ms
-                                 val seekDelta = (accumulatedDragX * 200).toLong() 
+                                 val seekDelta = (accumulatedDragX * 200).toLong()
                                  val duration = viewModel.uiState.value.duration
                                  // Use startPosition + delta to avoid drift/stutter
                                  val newPos = (dragStartPosition + seekDelta).coerceIn(0, duration)
                                  viewModel.updateCurrentPosition(newPos)
-                                 
+
                                  val direction = if (seekDelta > 0) "+" else "-"
                                  val seconds = kotlin.math.abs(seekDelta / 1000)
                                  val icon = if (seekDelta > 0) Icons.Filled.Forward10 else Icons.Filled.Replay10
@@ -290,13 +290,13 @@ fun MobilePlayerScreen(
                                  val verticalDelta = -accumulatedDragY
                                  val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
                                  val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                                 
+
                                  // Full height = max volume change
                                  val changePercent = verticalDelta / height
                                  val changeVol = (changePercent * maxVolume).toInt()
                                  val newVolume = (startVolume + changeVol).coerceIn(0, maxVolume)
                                  audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVolume, 0)
-                                 
+
                                  val percent = (newVolume.toFloat() / maxVolume * 100).toInt()
                                  showGestureFeedback("Volume: $percent%", Icons.AutoMirrored.Filled.VolumeUp)
                             }
@@ -305,7 +305,7 @@ fun MobilePlayerScreen(
                                  // Full height = 1.0 change
                                  val changePercent = verticalDelta / height
                                  val newBrightness = (startBrightness + changePercent).coerceIn(0f, 1f)
-                                 
+
                                  activity?.window?.attributes?.let { attributes ->
                                      attributes.screenBrightness = newBrightness
                                      activity.window.attributes = attributes
@@ -332,7 +332,7 @@ fun MobilePlayerScreen(
                 }
         )
 
-    
+
 
     // 3. Overlay Controls (Top Layer)
         Box(modifier = Modifier.fillMaxSize().zIndex(2f)) {
@@ -359,7 +359,7 @@ fun MobilePlayerScreen(
                 isAudioFile = uiState.isAudioFile
             )
         }
-        
+
         // 4. Gesture Feedback Overlay
         if (gestureMessage != null && gestureIcon != null) {
             Box(
@@ -385,7 +385,7 @@ fun MobilePlayerScreen(
                 }
             }
         }
-        
+
         // 5. Seek Indicator (Existing)
         if (uiState.showSeekIndicator) {
             Box(
@@ -405,7 +405,7 @@ fun MobilePlayerScreen(
                 }
             }
         }
-        
+
         // Loading
          if (uiState.isLoading || uiState.isBuffering) {
              Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -496,9 +496,10 @@ fun MobilePlayerControls(
                             factory = { ctx ->
                                 val activity = ctx.findFragmentActivity()
                                 // MediaRouteButton must use an AppCompat-themed context with opaque colorPrimary
-                                // (MediaRouterThemeHelper crashes on translucent #0). Wrap activity context.
+                                // (MediaRouterThemeHelper crashes on translucent #0). Wrap in Aruvi brand theme
+                                // so the cast icon tints to brand blue instead of default AppCompat blue.
                                 val themedCtx = androidx.appcompat.view.ContextThemeWrapper(
-                                    activity ?: ctx, androidx.appcompat.R.style.Theme_AppCompat_NoActionBar
+                                    activity ?: ctx, com.aruvi.tir.R.style.Theme_Aruvi_CastButton
                                 )
                                 val btn = MediaRouteButton(themedCtx)
                                 btn.layoutParams = ViewGroup.LayoutParams(buttonSizePx, buttonSizePx)
@@ -580,19 +581,19 @@ fun MobilePlayerControls(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            formatTime(currentPosition), 
-                            color = Color.White.copy(alpha = 0.9f), 
+                            formatTime(currentPosition),
+                            color = Color.White.copy(alpha = 0.9f),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Medium
                         )
                         Text(
-                            formatTime(duration), 
-                            color = Color.White.copy(alpha = 0.9f), 
+                            formatTime(duration),
+                            color = Color.White.copy(alpha = 0.9f),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Medium
                         )
                     }
-                    
+
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Slider(
@@ -712,20 +713,20 @@ fun PlayerSettingsSheet(
                              icon = Icons.Filled.Info
                         )
                     }
-                    
+
                     item {
                         HorizontalDivider(
                             modifier = Modifier.padding(vertical = 12.dp),
                             color = MaterialTheme.colorScheme.outlineVariant
                         )
                         Text(
-                            "Subtitle Size", 
-                            style = MaterialTheme.typography.labelLarge, 
+                            "Subtitle Size",
+                            style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
                         )
                     }
-                    
+
                     items(SubtitleSize.values()) { size ->
                         SettingsItem(
                             text = size.displayName,
@@ -763,13 +764,13 @@ fun PlayerSettingsSheet(
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(bottom = 12.dp)
                     )
-                    
+
                     val modes = listOf(
                          "Fit" to androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT,
                          "Fill" to androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL,
                          "Zoom" to androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                     )
-                    
+
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -785,15 +786,15 @@ fun PlayerSettingsSheet(
                             )
                         }
                     }
-                    
+
                     Spacer(modifier = Modifier.height(24.dp))
-                    
+
                     Text(
                         "Custom Zoom: ${(uiState.videoScale * 100).toInt()}%",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary
                     )
-                    
+
                     Slider(
                         value = uiState.videoScale,
                         onValueChange = { onVideoScaleChange(it) },
@@ -801,7 +802,7 @@ fun PlayerSettingsSheet(
                         steps = 0,
                         modifier = Modifier.padding(top = 8.dp)
                     )
-                    
+
                     if (uiState.videoScale != 1.0f) {
                         TextButton(
                             onClick = { onVideoScaleChange(1.0f) },
@@ -812,20 +813,20 @@ fun PlayerSettingsSheet(
                     }
 
                     Spacer(modifier = Modifier.height(24.dp))
-                    
+
                     Text(
                         "Orientation",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(bottom = 12.dp)
                     )
-                    
+
                     val orientationModes = listOf(
                         "Auto" to 0,
                         "Landscape" to 1,
                         "Portrait" to 2
                     )
-                    
+
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -865,12 +866,12 @@ fun SettingsItem(
     ) {
         if (icon != null) {
             Icon(
-                icon, 
-                contentDescription = null, 
+                icon,
+                contentDescription = null,
                 tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        
+
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = text,
@@ -886,7 +887,7 @@ fun SettingsItem(
                 )
             }
         }
-        
+
         if (isSelected) {
             Icon(Icons.Filled.Check, "Selected", tint = MaterialTheme.colorScheme.primary)
         }
@@ -944,7 +945,7 @@ fun PlayerErrorScreen(
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
-            
+
             if (error.technicalDetails != null) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
@@ -957,7 +958,7 @@ fun PlayerErrorScreen(
             }
 
             Spacer(modifier = Modifier.height(32.dp))
-            
+
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 OutlinedButton(
                     onClick = onBack,
@@ -965,13 +966,13 @@ fun PlayerErrorScreen(
                 ) {
                     Text("Go Back")
                 }
-                
+
                 if (error.canRetry) {
                     Button(onClick = onRetry) {
                         Text("Retry")
                     }
                 }
-                
+
                 Button(
                     onClick = onOpenExternal,
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)

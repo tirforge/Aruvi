@@ -404,10 +404,10 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
 
     private fun extractCodecInfo(message: String): String {
         return when {
-            message.contains("hevc", ignoreCase = true) || 
+            message.contains("hevc", ignoreCase = true) ||
             message.contains("hvc1", ignoreCase = true) ||
             message.contains("x265", ignoreCase = true) -> {
-                if (message.contains("10bit", ignoreCase = true) || 
+                if (message.contains("10bit", ignoreCase = true) ||
                     message.contains("10-bit", ignoreCase = true)) {
                     "HEVC 10-bit (HDR)"
                 } else {
@@ -429,13 +429,13 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
 
         tracks.groups.forEachIndexed { groupIndex, group ->
             val trackGroup = group.mediaTrackGroup
-            
+
             for (trackIndex in 0 until trackGroup.length) {
                 val format = trackGroup.getFormat(trackIndex)
                 val isSelected = group.isTrackSelected(trackIndex)
-                
+
                 when {
-                    format.sampleMimeType?.startsWith("audio/") == true || 
+                    format.sampleMimeType?.startsWith("audio/") == true ||
                     group.type == C.TRACK_TYPE_AUDIO -> {
                         audioTracks.add(TrackInfo(
                             index = trackIndex,
@@ -660,7 +660,7 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                             .setUri(streamUrl)
                             .setMediaId(currentFileId.toString())
                             .build()
-                        
+
                         mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
                     }
 
@@ -757,7 +757,7 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
             } catch (e: android.content.ActivityNotFoundException) {
                 Toast.makeText(context, "No external player found", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
-                e.printStackTrace()
+                android.util.Log.w("PlayerViewModel", "external player launch failed", e)
             }
         }
     }
@@ -996,7 +996,7 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
             var ticks = 0
 while (isActive) {
                 updatePosition()
-                
+
                 if (exoPlayer.isPlaying) {
                     ticks++
                     if (ticks >= 15) {
@@ -1006,7 +1006,7 @@ while (isActive) {
                 } else {
                     ticks = 0
                 }
-                
+
                 delay(1000)
             }
         }

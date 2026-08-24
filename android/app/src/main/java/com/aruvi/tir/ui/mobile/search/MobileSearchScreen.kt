@@ -77,14 +77,14 @@ fun MobileSearchScreen(
                         contentDescription = "Search",
                         tint = MobileTextSecondary
                     )
-                    
+
                     Spacer(modifier = Modifier.width(12.dp))
-                    
+
                 TextField(
             value = uiState.query,
-            onValueChange = { 
-                Log.d("MobileSearchScreen", "Query changed: $it")
-                viewModel.onQueryChange(it) 
+            onValueChange = {
+                if (com.aruvi.tir.BuildConfig.DEBUG) Log.d("MobileSearchScreen", "Query changed: $it")
+                viewModel.onQueryChange(it)
             },
             placeholder = { Text("Search files...", color = MobileTextSecondary) },
             colors = TextFieldDefaults.colors(
@@ -100,7 +100,7 @@ fun MobileSearchScreen(
             modifier = Modifier.weight(1f),
             textStyle = MaterialTheme.typography.bodyLarge.copy(color = MobileTextPrimary)
         )
-                    
+
                     if (uiState.query.isNotEmpty()) {
                         IconButton(onClick = { viewModel.onQueryChange("") }) {
                             Icon(Icons.Default.Close, "Clear", tint = MobileTextSecondary)
@@ -127,7 +127,7 @@ fun MobileSearchScreen(
                 }
             }
         } else {
-            Log.d("MobileSearchScreen", "Showing ${uiState.results.size} results")
+            if (com.aruvi.tir.BuildConfig.DEBUG) Log.d("MobileSearchScreen", "Showing ${uiState.results.size} results")
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 150.dp),
                 contentPadding = PaddingValues(16.dp),
@@ -137,8 +137,8 @@ fun MobileSearchScreen(
             ) {
                 items(uiState.results, key = { it.id }) { file ->
                      SearchFileCard(
-                        file = file, 
-                        serverUrl = uiState.serverUrl, 
+                        file = file,
+                        serverUrl = uiState.serverUrl,
                         onClick = onPlayFile,
                         onRename = { showRenameFileDialog = it },
                         onDelete = { showDeleteFileDialog = it },
@@ -148,10 +148,10 @@ fun MobileSearchScreen(
                         onCopyPublic = { viewModel.copyPublicLink(it) },
                         onRevokePublic = { viewModel.revokePublicLink(it) },
                         onCopyDownload = { viewModel.copyDownloadLink(it) },
-                        onGoToFolder = { 
+                        onGoToFolder = {
                             // folderId might be null for root files, but user wants to 'go to folder'
                             // Let's assume folderName is "Home" if folderId is null
-                            onGoToFolder(file.folderId ?: -1, "Files") 
+                            onGoToFolder(file.folderId ?: -1, "Files")
                         }
                     )
                 }
@@ -245,7 +245,7 @@ fun SearchFileCard(
                     modifier = Modifier.fillMaxSize()
                 )
             }
-            
+
             // Context Menu Overlay
             Box(
                 modifier = Modifier
@@ -266,7 +266,7 @@ fun SearchFileCard(
                 )
             }
         }
-        
+
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = file.fileName,

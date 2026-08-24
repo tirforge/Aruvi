@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aruvi.tir.ui.components.TVButton
 import com.aruvi.tir.ui.theme.*
@@ -143,8 +144,8 @@ fun LoginScreen(
                     OutlinedTextField(
                         value = uiState.serverUrl,
                         onValueChange = { viewModel.updateServerUrl(it) },
-                        label = { Text("Server URL") },
-                        placeholder = { Text("http://localhost:7680") },
+                        label = { Text(stringResource(com.aruvi.tir.R.string.login_server_url)) },
+                        placeholder = { Text(stringResource(com.aruvi.tir.R.string.login_server_url_hint)) },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = TVPrimary,

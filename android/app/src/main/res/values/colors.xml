@@ -29,4 +29,8 @@
     
     <color name="overlay_dark">#99000000</color>
     <color name="overlay_light">#33FFFFFF</color>
+
+    <!-- Brand (matches MobilePrimary / TVPrimary in Color.kt) -->
+    <color name="aruvi_primary">#2979FF</color>
+    <color name="aruvi_primary_dark">#1565C0</color>
 </resources>

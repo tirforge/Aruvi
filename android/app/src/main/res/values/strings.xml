@@ -66,4 +66,25 @@
     <string name="ok">OK</string>
     <string name="cancel">Cancel</string>
     <string name="save">Save</string>
+
+    <!-- Grab / Onboarding -->
+    <string name="ready_to_watch">Ready to Watch!</string>
+    <string name="watch_now">Watch Now</string>
+    <string name="close">Close</string>
+    <string name="search_movies_hint">Search movies...</string>
+    <string name="searching">Searching...</string>
+    <string name="no_movies_found">No movies found</string>
+    <string name="search_telegram_groups">Search Telegram groups</string>
+    <string name="try_different_search">Try a different search term</string>
+    <string name="for_movies_to_watch">for movies to watch</string>
+    <string name="dismiss">Dismiss</string>
+    <string name="download_action">Download</string>
+    <string name="vlc">VLC</string>
+    <string name="back">Back</string>
+    <string name="open_external_player">Open in External Player</string>
+    <string name="go_to_folder">Go to Folder Location</string>
+    <string name="rename">Rename</string>
+    <string name="move">Move</string>
+    <string name="login_server_url">Server URL</string>
+    <string name="login_server_url_hint">http://localhost:7680</string>
 </resources>

@@ -3,6 +3,7 @@ package com.aruvi.tir.ui.auth
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aruvi.tir.data.model.AuthResponse
@@ -173,7 +174,7 @@ class LoginViewModel @Inject constructor(
                         startPolling(response.code)
                     },
                     onFailure = { e ->
-                        e.printStackTrace()
+                        Log.w("LoginViewModel", "login request failed", e)
                         _uiState.value = _uiState.value.copy(
                             isLoading = false,
                             error = e.toUserFriendlyMessage(),

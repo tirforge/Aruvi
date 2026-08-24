@@ -35,6 +35,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.ui.res.stringResource
 import com.aruvi.tir.data.model.GrabSearchResult
 import com.aruvi.tir.ui.components.TvAnimatedBackground
 import com.aruvi.tir.ui.theme.*
@@ -247,7 +248,7 @@ items(state.results, key = { "${it.msgId}-${it.row}-${it.col}-${it.label}" }) { 
                 }
             },
             title = {
-                Text("Ready to Watch!", fontWeight = FontWeight.SemiBold)
+                Text(stringResource(com.aruvi.tir.R.string.ready_to_watch), fontWeight = FontWeight.SemiBold)
             },
             text = {
                 Column {
@@ -267,12 +268,12 @@ items(state.results, key = { "${it.msgId}-${it.row}-${it.col}-${it.label}" }) { 
                 ) {
                     Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Watch Now")
+                    Text(stringResource(com.aruvi.tir.R.string.watch_now))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { viewModel.clearGrabResult() }) {
-                    Text("Close", color = TVTextSecondary)
+                    Text(stringResource(com.aruvi.tir.R.string.close), color = TVTextSecondary)
                 }
             },
         )
