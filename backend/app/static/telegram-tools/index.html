@@ -187,6 +187,14 @@
   const val=id=>{const e=q(id);return e?String(e.value).trim():''};
   const on =id=>{const e=q(id);return e?!!e.checked:false};
 
+  const scrollStyle=document.createElement('style');
+  scrollStyle.textContent='#aruviEnv{scroll-margin-top:24px} #aruviEnv.ae-flash{outline:2px solid '+P+';outline-offset:6px;border-radius:.75rem;transition:outline-color .8s}';
+  document.head.appendChild(scrollStyle);
+  const flash=()=>{const e=q('aruviEnv');if(!e)return;
+    e.classList.add('ae-flash');setTimeout(()=>e.classList.remove('ae-flash'),1400);};
+  const scrollToBuilder=()=>{const e=q('aruviEnv');if(!e)return;
+    e.scrollIntoView({behavior:'smooth',block:'start'});flash();};
+
   const toastEl=document.createElement('div');
   toastEl.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:30px;z-index:100001;background:'+getComputedStyle(document.documentElement).getPropertyValue('--color-success-500')+';color:#052e16;padding:9px 18px;border-radius:99px;font-weight:600;font-size:.8rem;opacity:0;transition:opacity .25s;pointer-events:none';
   document.body.appendChild(toastEl);
@@ -282,6 +290,42 @@
     }catch(e){console.error('[ENV-TILE] build failed',(e&&e.stack)||e);}
   }
 
+
+  // ---- Nav card: clone upstream card for identical theme/layout ----
+  let navInjected=false;
+  function tryInjectNavCard(){
+    if(navInjected && document.getElementById('aetu-nav-card')) return;
+    const genBtn=[...document.querySelectorAll('button')].find(b=>
+      b.textContent.includes('Create session strings'));
+    if(!genBtn) return;
+    const grid=genBtn.parentElement;
+    if(!grid || !grid.classList.contains('grid')) return;
+    // remove stale clone if app re-rendered
+    const stale=document.getElementById('aetu-nav-card');
+    if(stale){stale.remove();}
+    const card=genBtn.cloneNode(true);
+    card.id='aetu-nav-card';
+    card.type='button';
+    // rewrite texts
+    const strong=card.querySelector('strong, h3, .font-semibold, span');
+    const divs=card.querySelectorAll('div:not(:has(*))');
+    // simpler: rebuild text nodes
+    const textEls=[...card.querySelectorAll('*')].filter(e=>e.children.length===0 && e.textContent.trim());
+    // first text element = title, second = description
+    if(textEls[0]) textEls[0].textContent='Aruvi .env Builder';
+    if(textEls[1]) textEls[1].textContent='Build your complete .env with toggles';
+    // swap icon to file-code
+    const svg=card.querySelector('svg path');
+    if(svg){
+      svg.setAttribute('d','M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8');
+    }
+    card.addEventListener('click',scrollToBuilder);
+    grid.appendChild(card);
+    navInjected=true;
+  }
+  setInterval(tryInjectNavCard,500);
+  setTimeout(tryInjectNavCard,100);
+
   ['ae-use-channel','ae-grab','ae-cache-on','ae-keep'].forEach(id=>{
     const e=q(id); if(e)e.addEventListener('change',()=>{
       if(id==='ae-grab'&&on('ae-grab')&&!on('ae-use-channel')){
@@ -305,6 +349,7 @@
 })();
 
 </script>
+
 
 </body>
 </html>
