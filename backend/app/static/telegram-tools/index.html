@@ -32,172 +32,266 @@
     <div id="app"></div>
   
 
+
 <script>
 (function(){
   if (window.__aruviEnvTile) return; window.__aruviEnvTile = true;
+  const V = n => `var(${n})`;
+  const P = V('--color-primary-500'), P600 = V('--color-primary-600');
+  const S900 = V('--color-surface-900'), S800 = V('--color-surface-800'),
+        S700 = V('--color-surface-700'), S400 = V('--color-surface-400'),
+        SL950= V('--color-slate-950,#020617'), OK = V('--color-success-500');
+  const MONO = V('--font-mono');
 
   const CSS = `
-  #aetu-card{max-width:960px;margin:26px auto 60px;background:#12121a;border:1px solid rgba(255,255,255,.08);
-    border-radius:16px;padding:24px;color:#E6E8EB;font-family:Inter,system-ui,sans-serif}
-  #aetu-card h2{font-size:1.1rem;margin:0 0 4px;background:linear-gradient(135deg,#6366f1,#ec4899);
-    -webkit-background-clip:text;-webkit-text-fill-color:transparent;display:inline-block}
-  .aetu-sub{color:#9CA3AF;font-size:.76rem;margin:0 0 16px}
-  .aetu-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px}
-  .aetu-box{background:#0d0d15;border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:16px}
-  .aetu-box h3{margin:0 0 10px;font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:#8b8fa3}
-  .aetu-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:10px 0}
-  .aetu-row label.t{display:flex;align-items:center;gap:8px;font-size:.82rem;color:#c7cbd3;cursor:pointer}
-  .aetu-row input[type=checkbox]{accent-color:#a855f7;width:16px;height:16px;cursor:pointer}
-  .aetu-row input[type=text],.aetu-row input[type=number]{width:190px;background:#0a0a0f;border:1px solid rgba(255,255,255,.09);
-    border-radius:7px;padding:7px 10px;color:#E6E8EB;font-size:.75rem;outline:none;font-family:'JetBrains Mono',monospace}
-  .aetu-row input:focus{border-color:#6366f1}
-  #aetu-sess{width:100%;min-height:64px;background:#0a0a0f;border:1px solid rgba(255,255,255,.09);border-radius:8px;
-    padding:10px;color:#E6E8EB;font-size:.72rem;font-family:'JetBrains Mono',monospace;outline:none;resize:vertical;
-    box-sizing:border-box;margin-top:4px}
-  #aetu-sess:focus{border-color:#6366f1}
-  #aetu-sess.captured{border-color:#34d399}
-  textarea#aetu-out{width:100%;box-sizing:border-box;min-height:200px;background:#050507;border:1px dashed rgba(255,255,255,.16);
-    border-radius:10px;padding:12px;color:#34d399;font-size:.72rem;font-family:'JetBrains Mono',monospace;
-    white-space:pre;margin-top:16px;outline:none}
+  #aetu-card{max-width:1100px;margin:28px auto 70px;background:${S900}cc;border:1px solid ${S700};
+    border-radius:.75rem;padding:1.5rem;color:#E2E8F0;font-family:var(--font-sans);backdrop-filter:blur(8px)}
+  #aetu-card h2{font-size:1.25rem;font-weight:700;margin:0 0 2px;letter-spacing:-.025em;
+    background:linear-gradient(90deg,${P},#ec4899);-webkit-background-clip:text;-webkit-text-fill-color:transparent;display:inline-block}
+  .aetu-sub{color:${S400};font-size:.85rem;margin:0 0 18px}
+  .aetu-topbox{background:${SL950};border:1px solid ${S700};border-radius:.6rem;padding:1rem;margin-bottom:16px}
+  #aetu-sess{width:100%;box-sizing:border-box;min-height:64px;background:transparent;border:none;color:#E2E8F0;
+    font-size:.78rem;font-family:${MONO};outline:none;resize:vertical}
+  #aetu-sess.captured{color:${OK}}
+  .aetu-hint{font-size:.68rem;color:${S400};margin:6px 0 0}
+  .aetu-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+  details.aetu-box{background:${SL950};border:1px solid ${S700};border-radius:.6rem;overflow:hidden}
+  details.aetu-box[open]{border-color:${P600}}
+  details.aetu-box summary{list-style:none;cursor:pointer;padding:.8rem 1rem;display:flex;align-items:center;gap:10px;
+    font-size:.82rem;font-weight:600;color:#E2E8F0;user-select:none}
+  details.aetu-box summary::-webkit-details-marker{display:none}
+  details.aetu-box summary .chev{margin-left:auto;transition:transform .2s;color:${S400}}
+  details.aetu-box[open] summary .chev{transform:rotate(90deg)}
+  .aetu-dot{width:8px;height:8px;border-radius:99px;background:${S700};flex-shrink:0}
+  details.aetu-box.on .aetu-dot{background:${OK};box-shadow:0 0 8px ${OK}}
+  .aetu-body{padding:0 1rem 1rem}
+  .aetu-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:9px 0}
+  .aetu-row>label,.aetu-row>.k{font-size:.75rem;color:${S400};min-width:150px}
+  .aetu-row input[type=text],.aetu-row input[type=number],.aetu-row input[type=password]{
+    flex:1;width:190px;background:#000;border:1px solid ${S700};border-radius:.45rem;padding:7px 10px;
+    color:#E2E8F0;font-size:.74rem;outline:none;font-family:${MONO};transition:border-color .15s}
+  .aetu-row input:focus{border-color:${P}}
+  .aetu-row input[type=checkbox]{accent-color:${P};width:16px;height:16px;cursor:pointer}
+  textarea#aetu-out{width:100%;box-sizing:border-box;min-height:220px;background:#000;border:1px dashed ${S700};
+    border-radius:.6rem;padding:12px;color:${OK};font-size:.72rem;font-family:${MONO};white-space:pre;margin-top:16px;outline:none}
   .aetu-actions{display:flex;gap:10px;margin-top:12px}
-  .aetu-btn{flex:1;padding:12px;border:none;border-radius:9px;font-weight:600;font-size:.88rem;cursor:pointer}
-  .aetu-gen{background:linear-gradient(135deg,#6366f1,#a855f7);color:#fff}
-  .aetu-copy{background:#1d1d29;color:#E6E8EB;border:1px solid rgba(255,255,255,.1)}
-  .aetu-hint{font-size:.68rem;color:#6B7280;margin-top:6px}`;
+  .aetu-btn{flex:1;padding:11px;border:none;border-radius:.55rem;font-weight:600;font-size:.88rem;cursor:pointer;
+    transition:filter .15s}
+  .aetu-gen{background:${P};color:#fff}.aetu-gen:hover{background:${P600}}
+  .aetu-copy{background:${S800};color:#E2E8F0;border:1px solid ${S700}}`;
+
+  const SEC = (id,title,on,inner)=>`
+   <details class="aetu-box${on?' on':''}" id="sec-${id}" ${on?'open':''}>
+     <summary><span class="aetu-dot"></span>${title}<span class="chev">›</span></summary>
+     <div class="aetu-body">${inner}</div>
+   </details>`;
+  const R = (k,id,ph='',type='text',val='')=>`<div class="aetu-row"><span class="k">${k}</span>
+     <input type="${type}" id="${id}" placeholder="${ph}" value="${val}" spellcheck="false"></div>`;
+  const C = (id,label,checked=false)=>`<div class="aetu-row"><label class="t" style="min-width:auto">
+     <input type="checkbox" id="${id}" ${checked?'checked':''}> ${label}</label></div>`;
 
   const HTML = `
   <div id="aetu-card">
     <h2>Aruvi .env Builder</h2>
-    <p class="aetu-sub">Your generated session string is grabbed automatically — toggle what you need and copy.</p>
+    <p class="aetu-sub">Every section below maps 1-to-1 to Aruvi's <code style="font-family:${MONO}">.env.example</code>.
+       Your generated string is captured automatically.</p>
 
-    <div class="aetu-box" style="margin-bottom:18px">
-      <h3>Session</h3>
-      <textarea id="aetu-sess" placeholder="Pyrogram string — auto-grabbed after login (or paste here)"></textarea>
-      <p class="aetu-hint">Watch for the green border — it means your string was auto-captured ✓</p>
+    <div class="aetu-topbox">
+      <div class="aetu-row" style="margin:0"><span class="k">Session (auto-grabbed)</span></div>
+      <textarea id="aetu-sess" placeholder="Pyrogram session string appears here after login…"></textarea>
+      <p class="aetu-hint">Green text = captured from your login above ✓ &nbsp;|&nbsp; you may also paste manually</p>
     </div>
 
     <div class="aetu-grid">
-      <div class="aetu-box">
-        <h3>Credentials</h3>
-        <div class="aetu-row"><label class="t"><input type="checkbox" id="aetu-core" checked> Include API credentials</label></div>
-        <div class="aetu-row"><input type="text" id="aetur-apiid"   placeholder="TELEGRAM_API_ID"></div>
-        <div class="aetu-row"><input type="text" id="aetur-apihash" placeholder="TELEGRAM_API_HASH"></div>
-      </div>
+      ${SEC('tg','Telegram',true,
+        R('API ID','aetur-apiid','1234567','text','35927937')+
+        R('API HASH','aetur-apihash','','password','c77b345b46f1a9b1811a1998cd9e1d24')+
+        R('BOT TOKEN','aetur-bottoken','123456:ABC…')+
+        R('STORAGE CHANNEL ID','aetur-channel','-1001234567890'))}
 
-      <div class="aetu-box">
-        <h3>Group / Channel</h3>
-        <div class="aetu-row"><label class="t"><input type="checkbox" id="aetu-group"> Storage channel</label></div>
-        <div class="aetu-row"><input type="text" id="aetur-channel" placeholder="-1001234567890"></div>
-        <div class="aetu-row"><label class="t"><input type="checkbox" id="aetu-auth" checked> Auth &amp; admin IDs</label></div>
-        <div class="aetu-row"><input type="text" id="aetur-authusers" placeholder="AUTH_USERS=your_telegram_id"></div>
-      </div>
+      ${SEC('helper','Helper Bots',false,
+        R('HELPER BOT TOKENS','aetur-helper','token1,token2,token3')+
+        R('BOT SESSION STRINGS','aetur-botstrings','session1,session2'))}
 
-      <div class="aetu-box">
-        <h3>Grabber · Movies</h3>
-        <div class="aetu-row"><label class="t"><input type="checkbox" id="aetu-grab"> Enable grabber</label></div>
-        <div class="aetu-row"><input type="text" id="aetur-groups" placeholder="GRAB_GROUP_USERNAMES=a,b"></div>
-        <div class="aetu-row"><label class="t"><input type="checkbox" id="aetu-keep"> Keep search messages</label></div>
-      </div>
+      ${SEC('auth','Auth & Access',true,
+        C('aetu-auth-on','Include AUTH_USERS / ADMIN_IDS',true)+
+        R('AUTH_USERS','aetur-authusers','your_telegram_id')+
+        R('ADMIN_IDS','aetur-adminids','your_telegram_id')+
+        R('JWT_SECRET','aetur-jwt','openssl rand -hex 32'))}
 
-      <div class="aetu-box">
-        <h3>Cache</h3>
-        <div class="aetu-row"><label class="t"><input type="checkbox" id="aetu-cache" checked> Disk cache</label></div>
-        <div class="aetu-row"><span style="font-size:.72rem;color:#8b8fa3">TTL (s)</span>
-          <input type="number" id="aetur-ttl" value="1800"></div>
-        <div class="aetu-row"><span style="font-size:.72rem;color:#8b8fa3">Max total</span>
-          <input type="text" id="aetur-maxb" value="8589934592"></div>
-        <div class="aetu-row"><span style="font-size:.72rem;color:#8b8fa3">Per video</span>
-          <input type="text" id="aetur-perv" value="2147483648"></div>
-        <div class="aetu-row"><span style="font-size:.72rem;color:#8b8fa3">RAM/video MB</span>
-          <input type="number" id="aetur-ram" value="300"></div>
-      </div>
+      ${SEC('db','Database',false,
+        R('DATABASE_URL','aetur-db','postgresql+asyncpg://user:pass@host/db'))}
+
+      ${SEC('server','Server',true,
+        R('SERVER_PORT','aetur-port','','number','7680')+
+        R('WEB_BASE_URL','aetur-webbase','https://movie.example.com'))}
+
+      ${SEC('stream','Streaming Engine',true,
+        R('STREAM_BATCH_SIZE','aetur-bs','','number','10')+
+        R('STREAM_MAX_CONCURRENT','aetur-mc','','number','4')+
+        R('STREAM_RAM_PER_VIDEO_MB','aetur-ram','','number','300')+
+        R('STREAM_INFLIGHT_MB','aetur-inf','','number','200')+
+        R('STREAM_PREFETCH_AHEAD_MB','aetur-pfa','','number','192')+
+        R('STREAM_PREFETCH_CONCURRENCY','aetur-pfc','','number','3')+
+        R('STREAM_PREFETCH_MAX_STREAMS','aetur-pms','','number','6')+
+        R('STREAM_BATCH_TIMEOUT_S','aetur-bt','','number','30')+
+        R('STREAM_BATCH_STALL_S','aetur-st','','number','15')+
+        R('STREAM_CHUNK_TIMEOUT_S','aetur-ct','','number','15')+
+        R('STREAM_SEM_WAIT_TIMEOUT_S','aetur-sw','','number','10')+
+        R('TELEGRAM_CLIENT_CONCURRENCY','aetur-tcc','','number','8'))}
+
+      ${SEC('cache','Disk Cache',true,
+        C('aetu-cache','Enable disk cache',true)+
+        R('DISK_CACHE_DIR','aetur-cdir','./data/vcache','text','./data/vcache')+
+        R('DISK_CACHE_TTL','aetur-ttl','','number','1800')+
+        R('DISK_CACHE_MAX_BYTES','aetur-maxb','','text','8589934592')+
+        R('DISK_CACHE_PER_VIDEO_BYTES','aetur-perv','','text','2147483648'))}
+
+      ${SEC('opt','Optimized',false,
+        R('STREAM_MEM_PRESSURE_RATIO','aetur-mpr','','text','0.6'))}
+
+      ${SEC('subs','Subtitles',false,
+        R('SUBTITLE_LANGUAGES','aetur-slang','','text','en')+
+        R('SUBTITLE_PROVIDERS','aetur-sprov','','text','podnapisi,tvsubtitles,addic7ed')+
+        R('OPENSUBTITLES_API_KEY','aetur-oskey','','password')+
+        R('OPENSUBTITLES_USERNAME','aetur-osuser','')+
+        R('OPENSUBTITLES_PASSWORD','aetur-ospass','','password'))}
+
+      ${SEC('grab','Grabber · Movies',false,
+        C('aetu-grab','Enable grabber (auto-adds storage channel)')+
+        R('GRAB_GROUP_USERNAMES','aetur-groups','my_movies,my_series')+
+        R('GRAB_BOT_USERNAMES','aetur-gbots','','text','AutoFilterBot')+
+        C('aetu-keep','Keep search messages (GRAB_KEEP_MESSAGES=1)'))}
+
+      ${SEC('gdrive','Google Drive',false,
+        R('GDRIVE_CLIENT_ID','aetur-gcid','','password')+
+        R('GDRIVE_CLIENT_SECRET','aetur-gcs','','password'))}
     </div>
 
-    <textarea id="aetu-out" readonly></textarea>
+    <textarea id="aetu-out" readonly spellcheck="false"></textarea>
     <div class="aetu-actions">
       <button class="aetu-btn aetu-gen"  id="aetu-go">Generate .env</button>
       <button class="aetu-btn aetu-copy" id="aetu-cp">Copy .env</button>
     </div>
   </div>`;
 
-  // inject the card right after the Svelte mount point
   const appEl=document.getElementById('app');
-  const cardHost=document.createElement('div');
-  cardHost.innerHTML=HTML;
-  (appEl&&appEl.parentNode?appEl.parentNode:document.body).insertBefore(cardHost, appEl&&appEl.nextSibling);
+  const host=document.createElement('div'); host.innerHTML=HTML;
+  (appEl&&appEl.parentNode?appEl.parentNode:document.body).insertBefore(host, appEl&&appEl.nextSibling);
 
   const $=id=>document.getElementById(id);
   const toast=document.createElement('div');
-  toast.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:30px;z-index:100001;background:#10b981;color:#04281c;padding:9px 18px;border-radius:99px;font-weight:600;font-size:.8rem;opacity:0;transition:opacity .25s;pointer-events:none';
+  toast.style.cssText=`position:fixed;left:50%;transform:translateX(-50%);bottom:30px;z-index:100001;background:${OK};color:#052e16;padding:9px 18px;border-radius:99px;font-weight:600;font-size:.8rem;opacity:0;transition:opacity .25s;pointer-events:none`;
   document.body.appendChild(toast);
   const showToast=m=>{toast.textContent=m;toast.style.opacity=1;setTimeout(()=>toast.style.opacity=0,2200)};
+  const val=id=>$(id)?$(id).value.trim():'';
+  const chk=id=>$(id)?$(id).checked:false;
 
   function setSession(v){
-    if(!v) return;
-    $('aetu-sess').value=v;
-    $('aetu-sess').classList.add('captured');
+    if(!v)return;
+    $('aetu-sess').value=v; $('aetu-sess').classList.add('captured');
     showToast('Session string captured ✓');
     setTimeout(()=>$('aetu-sess').classList.remove('captured'),1600);
     build();
   }
-
-  const RE=/\b2[A-Za-z0-9_-]{280,}\b/;
-  let lastGrab='';
+  const RE=/\b2[A-Za-z0-9_-]{280,}\b/; let lastGrab='';
   new MutationObserver(()=>{
-    const txt=document.body.innerText||'';
-    const m=txt.match(RE);
-    if(m && m[0]!==lastGrab){ lastGrab=m[0]; setSession(m[0]); }
+    const m=(document.body.innerText||'').match(RE);
+    if(m&&m[0]!==lastGrab){lastGrab=m[0];setSession(m[0]);}
   }).observe(document.body,{childList:true,subtree:true,characterData:true});
 
-  // grabber ON → group defaults ON ("movies=1 ⇒ group included")
   $('aetu-grab').addEventListener('change',()=>{
-    if($('aetu-grab').checked && !$('aetu-group').checked){
+    if(chk('aetu-grab')&&!chk('aetu-group')){
       $('aetu-group').checked=true;
-      showToast('Storage group added (required by grabber)');
+      showToast('Storage channel added (required by grabber)');
     }
     build();
+  });
+  // section dot reflects open+enabled state
+  document.querySelectorAll('#aetu-card details.aetu-box').forEach(d=>{
+    d.addEventListener('toggle',()=>d.classList.toggle('on',d.open));
   });
 
   function build(){
     const L=[];
     L.push('# ── Required: Telegram ──');
-    if($('aetu-core').checked){
-      if($('aetur-apiid').value)   L.push('TELEGRAM_API_ID='+$('aetur-apiid').value);
-      if($('aetur-apihash').value) L.push('TELEGRAM_API_HASH='+$('aetur-apihash').value);
+    if(val('aetur-apiid'))L.push('TELEGRAM_API_ID='+val('aetur-apiid'));
+    if(val('aetur-apihash'))L.push('TELEGRAM_API_HASH='+val('aetur-apihash'));
+    if(val('aetur-bottoken'))L.push('TELEGRAM_BOT_TOKEN='+val('aetur-bottoken'));
+    if(val('aetur-channel'))L.push('TELEGRAM_STORAGE_CHANNEL_ID='+val('aetur-channel'));
+
+    if(chk('sec-helper')&&val('aetur-helper'))
+      L.push('','# ── Helper bots (parallel fetching) ──','TELEGRAM_HELPER_BOT_TOKENS='+val('aetur-helper'));
+    if(val('aetu-sess'))
+      L.push('','# ── User session ──','GRAB_SESSION_STRINGS='+val('aetu-sess'));
+    if(val('aetur-botstrings'))
+      L.push('TELEGRAM_BOT_SESSION_STRINGS='+val('aetur-botstrings'));
+
+    L.push('','# ── Auth ──');
+    if(chk('aetu-auth-on')){
+      if(val('aetur-authusers'))L.push('AUTH_USERS='+val('aetur-authusers'));
+      if(val('aetur-adminids'))L.push('ADMIN_IDS='+val('aetur-adminids'));
     }
-    const sess=$('aetu-sess').value.trim(), grab=$('aetu-grab').checked;
-    if(sess){ L.push('','# User session'); L.push('GRAB_SESSION_STRINGS='+sess); }
-    if($('aetu-group').checked){
-      L.push('','# Storage / streaming channel');
-      if($('aetur-channel').value) L.push('TELEGRAM_STORAGE_CHANNEL_ID='+$('aetur-channel').value);
+    if(val('aetur-jwt'))L.push('JWT_SECRET='+val('aetur-jwt'));
+
+    if(chk('sec-db')&&val('aetur-db'))
+      L.push('','# ── Database ──','DATABASE_URL='+val('aetur-db'));
+
+    L.push('','# ── Server ──');
+    if(val('aetur-port'))L.push('SERVER_PORT='+val('aetur-port'));
+    if(val('aetur-webbase'))L.push('WEB_BASE_URL='+val('aetur-webbase'));
+
+    if(chk('sec-stream')){
+      L.push('','# ── Streaming engine ──');
+      [['aetur-bs','STREAM_BATCH_SIZE'],['aetur-mc','STREAM_MAX_CONCURRENT'],
+       ['aetur-ram','STREAM_RAM_PER_VIDEO_MB'],['aetur-inf','STREAM_INFLIGHT_MB'],
+       ['aetur-pfa','STREAM_PREFETCH_AHEAD_MB'],['aetur-pfc','STREAM_PREFETCH_CONCURRENCY'],
+       ['aetur-pms','STREAM_PREFETCH_MAX_STREAMS'],['aetur-bt','STREAM_BATCH_TIMEOUT_S'],
+       ['aetur-st','STREAM_BATCH_STALL_S'],['aetur-ct','STREAM_CHUNK_TIMEOUT_S'],
+       ['aetur-sw','STREAM_SEM_WAIT_TIMEOUT_S'],['aetur-tcc','TELEGRAM_CLIENT_CONCURRENCY']]
+       .forEach(([i,k])=>{if(val(i))L.push(k+'='+val(i));});
     }
-    if(grab){
-      L.push('','# Grabber (movies)');
-      if($('aetur-groups').value) L.push('GRAB_GROUP_USERNAMES='+$('aetur-groups').value);
-      L.push('GRAB_KEEP_MESSAGES='+($('aetu-keep').checked?'1':'0'));
+    if(chk('sec-cache')){
+      L.push('','# ── Disk cache ──','DISK_CACHE_ENABLED='+(chk('aetu-cache')?'1':'0'));
+      if(val('aetur-cdir'))L.push('DISK_CACHE_DIR='+val('aetur-cdir'));
+      if(val('aetur-ttl'))L.push('DISK_CACHE_TTL='+val('aetur-ttl'));
+      if(val('aetur-maxb'))L.push('DISK_CACHE_MAX_BYTES='+val('aetur-maxb'));
+      if(val('aetur-perv'))L.push('DISK_CACHE_PER_VIDEO_BYTES='+val('aetur-perv'));
     }
-    if($('aetu-cache').checked){
-      L.push('','# Cache');
-      L.push('DISK_CACHE_ENABLED=1',
-             'DISK_CACHE_TTL='+($('aetur-ttl').value||'1800'),
-             'DISK_CACHE_MAX_BYTES='+($('aetur-maxb').value||'8589934592'),
-             'DISK_CACHE_PER_VIDEO_BYTES='+($('aetur-perv').value||'2147483648'),
-             'STREAM_RAM_PER_VIDEO_MB='+($('aetur-ram').value||'300'));
+    if(chk('sec-opt')&&val('aetur-mpr'))
+      L.push('','# ── Optimized ──','STREAM_MEM_PRESSURE_RATIO='+val('aetur-mpr'));
+    if(chk('sec-subs')){
+      L.push('','# ── Subtitles ──');
+      if(val('aetur-slang'))L.push('SUBTITLE_LANGUAGES='+val('aetur-slang'));
+      if(val('aetur-sprov'))L.push('SUBTITLE_PROVIDERS='+val('aetur-sprov'));
+      if(val('aetur-oskey'))L.push('OPENSUBTITLES_API_KEY='+val('aetur-oskey'));
+      if(val('aetur-osuser'))L.push('OPENSUBTITLES_USERNAME='+val('aetur-osuser'));
+      if(val('aetur-ospass'))L.push('OPENSUBTITLES_PASSWORD='+val('aetur-ospass'));
     }
-    if($('aetu-auth').checked && $('aetur-authusers').value){
-      L.push('','# Access',$('aetur-authusers').value);
+    if(chk('sec-grab')||val('aetu-sess')){
+      L.push('','# ── Grab / movie search ──');
+      if(val('aetur-groups'))L.push('GRAB_GROUP_USERNAMES='+val('aetur-groups'));
+      if(val('aetur-gbots'))L.push('GRAB_BOT_USERNAMES='+val('aetur-gbots'));
+      L.push('GRAB_KEEP_MESSAGES='+(chk('aetu-keep')?'1':'0'));
+    }
+    if(chk('sec-gdrive')&&(val('aetur-gcid')||val('aetur-gcs'))){
+      L.push('','# ── Google Drive ──');
+      if(val('aetur-gcid'))L.push('GDRIVE_CLIENT_ID='+val('aetur-gcid'));
+      if(val('aetur-gcs'))L.push('GDRIVE_CLIENT_SECRET='+val('aetur-gcs'));
     }
     $('aetu-out').value=L.join('\n')+'\n';
   }
 
-  ['aetu-core','aetu-group','aetu-grab','aetu-cache','aetu-auth','aetu-keep'].forEach(id=>$(id).addEventListener('change',build));
-  ['aetu-sess','aetur-apiid','aetur-apihash','aetur-channel','aetur-authusers','aetur-groups',
-   'aetur-ttl','aetur-maxb','aetur-perv','aetur-ram'].forEach(id=>$(id).addEventListener('input',build));
+  document.querySelectorAll('#aetu-card details.aetu-box').forEach(d=>{
+    d.addEventListener('toggle',()=>{build();});
+  });
+  $('#aetu-card').addEventListener('input',build);
+  $('#aetu-card').addEventListener('change',build);
   $('aetu-go').onclick=build;
-  $('aetu-cp').onclick=()=>{ build();
+  $('aetu-cp').onclick=()=>{build();
     navigator.clipboard.writeText($('aetu-out').value)
       .then(()=>showToast('.env copied ✓'))
-      .catch(()=>showToast('Copy failed — select manually')); };
+      .catch(()=>showToast('Copy failed — select manually'));};
   build();
 })();
 
