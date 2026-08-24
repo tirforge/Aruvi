@@ -4,59 +4,61 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
-<title>Aruvi Setup Helper</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>Aruvi · Setup</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Inter',system-ui,sans-serif;background:#0a0a0f;color:#E6E8EB;line-height:1.6}
-.wrap{max-width:760px;margin:0 auto;padding:32px 20px}
-h1{font-size:1.6rem;font-weight:800;margin-bottom:8px;background:linear-gradient(135deg,#6366f1,#a855f7,#ec4899);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.sub{color:#9CA3AF;font-size:.88rem;margin-bottom:28px}
-.card{background:#12121a;border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:24px;margin-bottom:20px}
-.card h2{font-size:.95rem;font-weight:700;margin-bottom:10px;color:#E6E8EB}
-.tag{display:inline-block;font-size:.68rem;padding:2px 8px;border-radius:99px;border:1px solid #34d39955;color:#34d399;vertical-align:middle;margin-left:8px}
-.tag.alt{border-color:#a855f755;color:#c084fc}
-p{color:#9CA3AF;font-size:.85rem;margin:8px 0}
-code,pre{font-family:'JetBrains Mono',ui-monospace,monospace}
-pre{background:#0a0a0f;border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:12px 14px;color:#d1d5db;font-size:.78rem;overflow-x:auto;white-space:pre-wrap;word-break:break-all}
-.copy{margin-top:8px;padding:7px 14px;border:1px solid rgba(255,255,255,.12);background:transparent;color:#9CA3AF;border-radius:6px;font-size:.75rem;cursor:pointer}
-.copy:hover{color:#fff;border-color:#fff}
-ol{margin:10px 0 0 18px;color:#9CA3AF;font-size:.83rem}
-li{margin:4px 0}
-b{color:#E6E8EB}
+body{font-family:'Inter',system-ui,sans-serif;background:#0a0a0f;color:#E6E8EB;line-height:1.6;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.wrap{width:100%;max-width:560px;text-align:center}
+h1{font-size:2rem;font-weight:800;background:linear-gradient(135deg,#6366f1,#a855f7,#ec4899);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:6px}
+.sub{color:#9CA3AF;font-size:.9rem;margin-bottom:32px}
+.card{background:#12121a;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:28px;margin-bottom:18px;text-align:left}
+.step{display:flex;align-items:center;gap:12px}
+.num{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#6366f1,#a855f7);display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;flex-shrink:0}
+.step b{font-size:.95rem}
+.step p{color:#9CA3AF;font-size:.78rem;margin-top:2px}
+a.open{display:block;margin-top:14px;padding:13px;border:none;border-radius:10px;background:linear-gradient(135deg,#6366f1,#a855f7);color:#fff;font-size:.92rem;font-weight:600;text-decoration:none}
+a.open:hover{filter:brightness(1.1)}
+label{display:block;font-size:.75rem;font-weight:600;color:#9CA3AF;margin-bottom:6px}
+textarea{width:100%;background:#0a0a0f;border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px;color:#E6E8EB;font-size:.78rem;font-family:'JetBrains Mono',monospace;outline:none;resize:vertical;min-height:70px}
+textarea:focus{border-color:#6366f1}
+.out{margin-top:10px;background:#050507;border:1px dashed rgba(255,255,255,.15);border-radius:8px;padding:10px;color:#34d399;font-size:.75rem;font-family:'JetBrains Mono',monospace;word-break:break-all;min-height:38px}
+button.copy{margin-top:10px;width:100%;padding:11px;border:none;border-radius:8px;background:#1d1d29;color:#E6E8EB;font-size:.85rem;font-weight:600;cursor:pointer}
+button.copy:hover{background:#26263a}
+.hidden{display:none}
+.note{color:#4b5563;font-size:.72rem;margin-top:22px}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Aruvi Setup Helper</h1>
-  <p class="sub">Generate your Telegram <b>session string</b>. Pick whichever path you prefer.</p>
+  <h1>Aruvi Setup</h1>
+  <p class="sub">Generate your Telegram session string — right in your browser.</p>
 
   <div class="card">
-    <h2>Option A — Run on your server <span class="tag">recommended · battle-tested</span></h2>
-    <p>SSH into the machine hosting Aruvi and run:</p>
-    <pre id="cmd">cd /home/container/grabber-deploy/backend &amp;&amp; npx -y telegram-session-generator</pre>
-    <button class="copy" onclick="cp('cmd',this)">Copy command</button>
-    <ol>
-      <li>Paste your <b>api_id</b> and <b>api_hash</b> when prompted (from my.telegram.org).</li>
-      <li>Enter your phone number → Telegram sends you a login code.</li>
-      <li>Enter the code (+ 2FA password if enabled).</li>
-      <li>Copy the printed <b>session string</b> into your <b>.env</b>, then restart the backend.</li>
-    </ol>
-    <p style="margin-top:10px">Your API credentials for reference:
-      <code>35927937</code> / <code>c77b…d24</code> (already in this server's .env).</p>
+    <div class="step"><div class="num">1</div><div><b>Generate session string</b><p>Runs fully in your browser. Nothing touches any server.</p></div></div>
+    <a class="open" href="/telegram-tools/" target="_blank">Open Session Generator ↗</a>
+    <p style="margin-top:12px;font-size:.75rem;color:#6B7280">Inside: Generator → User → enter API ID / HASH → phone → code → done.</p>
   </div>
 
   <div class="card">
-    <h2>Option B — In your browser <span class="tag alt">zero install</span></h2>
-    <p>An open-source (MIT) client-side tool that runs MTProto entirely in your browser and can export <b>Pyrogram-format</b> strings directly.</p>
-    <pre id="link">https://aaruvi.space/telegram-tools/</pre>
-    <button class="copy" onclick="window.open('https://aaruvi.space/telegram-tools/','_blank')">Open tool ↗</button>
-    <p style="margin-top:8px">Choose <b>Generator → User</b>, enter the same api_id/api_hash + phone, then export as <b>Pyrogram</b>.</p>
+    <div class="step"><div class="num">2</div><div><b>Paste your Pyrogram string</b><p>We'll wrap it into a ready-to-paste .env line.</p></div></div>
+    <textarea id="s" placeholder="paste the Pyrogram session string here…"></textarea>
+    <div id="envBox" class="out hidden"></div>
+    <button class="copy hidden" id="cp">Copy .env line</button>
   </div>
+
+  <p class="note">Aruvi streams from your own Telegram channel. Keep this string secret 🔒</p>
 </div>
 <script>
-function cp(id,btn){navigator.clipboard.writeText(document.getElementById(id).innerText)
- .then(()=>{btn.textContent='Copied ✓';setTimeout(()=>btn.textContent='Copy command',1400)})}
+const s=document.getElementById('s'),box=document.getElementById('envBox'),cp=document.getElementById('cp');
+s.addEventListener('input',()=>{
+  const v=s.value.trim();
+  if(!v){box.classList.add('hidden');cp.classList.add('hidden');return}
+  box.textContent='TELEGRAM_SESSION='+v;
+  box.classList.remove('hidden');cp.classList.remove('hidden');
+});
+cp.onclick=()=>navigator.clipboard.writeText(box.textContent)
+  .then(()=>{cp.textContent='Copied ✓';setTimeout(()=>cp.textContent='Copy .env line',1400)});
 </script>
 </body>
 </html>
