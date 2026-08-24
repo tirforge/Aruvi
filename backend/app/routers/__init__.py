@@ -12,5 +12,6 @@ from .legal import router as legal_router
 from .diagnostic import router as diagnostic_router
 from .grab import router as grab_router
 from .subtitles import router as subtitles_router
+from .setup import router as setup_router
 
-__all__ = ["files_router", "folders_router", "streaming_router", "auth_router", "tv_router", "admin_router", "gdrive_router", "legal_router", "diagnostic_router", "grab_router", "subtitles_router"]
+__all__ = ["files_router", "folders_router", "streaming_router", "auth_router", "tv_router", "admin_router", "gdrive_router", "legal_router", "diagnostic_router", "grab_router", "subtitles_router", "setup_router"]

@@ -26,7 +26,7 @@ from .streaming import _evict_idle_ram_caches
 from .utils import bearer_token_matches
 from .gzip_middleware import CompressibleGZipMiddleware
 
-from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, admin_router, gdrive_router, legal_router, diagnostic_router, grab_router, subtitles_router #JT
+from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, admin_router, gdrive_router, legal_router, diagnostic_router, grab_router, subtitles_router, setup_router #JT
 
 # Import bot to register handlers
 from . import bot  # noqa
@@ -217,6 +217,7 @@ app.include_router(legal_router)
 app.include_router(diagnostic_router, prefix="/api") #WH
 app.include_router(grab_router, prefix="/api") #YQ
 app.include_router(subtitles_router, prefix="/api")
+app.include_router(setup_router, prefix="/api")  # one-shot session generator
 
 
 
