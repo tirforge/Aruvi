@@ -277,7 +277,10 @@
   }
   function detectFormat(s){
     if(!s||s.length<50)return 'unknown';
-    if(s[0]==='2')return 'pyrogram';
+    if(s[0]!=='1'){                      // candidate pyrogram/kurigram
+      try{ if(b64ToBytes(s.slice(0)).length===271)return 'pyrogram'; }catch(e){}
+      return 'pyrogram';                 // assume pyro family by default
+    }
     try{
       const r=b64ToBytes(s.slice(1));
       if(r[0]>=1&&r[0]<=5&&r.length>=263){          // dc + addr + port + 256 key
@@ -311,16 +314,15 @@
                             :raw[1+ipLen]|(raw[2+ipLen]<<8); // LE
       auth=raw.slice(1+ipLen+2);
     }
-    // Pyrogram v2: '2' + pack('<B?i256sq?',dc,test,api_id,key,user_id,is_bot)
-    const out=new Uint8Array(1+1+1+4+256+8+1);
-    out[0]=0x32;                       // '2'
-    out[1]=dc;                         // dc_id
-    out[2]=0;                          // test_mode
+    // Pyrogram/Kurigram v2 — struct '>BI?256sQ?' (271 bytes, BE)
+    const out=new Uint8Array(271);
     const dv=new DataView(out.buffer);
-    dv.setInt32(3,Number(apiId)||0,true);
-    out.set(auth,7);
-    dv.setBigInt64(7+256,BigInt(0),true);   // user_id (client refreshes it)
-    out[7+256+8]=0;                    // is_bot
+    out[0]=dc;                              // dc_id            u8
+    dv.setUint32(1,Number(apiId)||0,false); // api_id           u32 BE
+    out[5]=0;                               // test_mode        bool
+    out.set(auth,6);                        // auth_key         256
+    dv.setBigUint64(262,BigInt(0),false);   // user_id          u64 BE
+    out[270]=0;                             // is_bot           bool
     return {str:bytesToB64url(out),fmt};
   }
 
@@ -581,6 +583,7 @@
 })();
 
 </script>
+
 
 
 
