@@ -241,7 +241,11 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                                 _uiState.value = _uiState.value.copy(isCasting = true)
                                 castToDevice()
                             }
-                            override fun onSessionEnded(s: com.google.android.gms.cast.framework.CastSession, e: Int) { _uiState.value = _uiState.value.copy(isCasting = false) }
+                            override fun onSessionEnded(s: com.google.android.gms.cast.framework.CastSession, e: Int) {
+                                _uiState.value = _uiState.value.copy(isCasting = false)
+                                // Resume the local player from where the TV left off.
+                                try { exoPlayer.seekTo(resumePosition) } catch (_: Throwable) {}
+                            }
                             override fun onSessionStarting(s: com.google.android.gms.cast.framework.CastSession) {}
                             override fun onSessionStartFailed(s: com.google.android.gms.cast.framework.CastSession, e: Int) {}
                             override fun onSessionResuming(s: com.google.android.gms.cast.framework.CastSession, r: String) {}
@@ -761,16 +765,16 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
         val player = castPlayer ?: return
         viewModelScope.launch {
             val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
-            val token = authRepository.getAccessToken()
 
-            // Chromecast receivers fetch media over HTTP themselves, so we must
-            // use the server-proxied URL. A Telegram directUrl is not reachable
-            // by the receiver, and the token is passed as a query param because
-            // the receiver cannot send custom auth headers.
-            val url = if (token != null) {
-                "$serverUrl/api/stream/$currentFileId?token=$token"
-            } else {
-                "$serverUrl/api/stream/$currentFileId"
+            // Prefer the public, unauthenticated stream URL so the Chromecast
+            // receiver can fetch it directly (it cannot send bearer tokens or
+            // custom auth headers). Falls back to the token URL if the public
+            // link can't be generated.
+            val publicLink = filesRepository.getPublicLink(currentFileId, serverUrl)
+            val url = publicLink.getOrElse {
+                val token = authRepository.getAccessToken()
+                if (token != null) "$serverUrl/api/stream/$currentFileId?token=$token"
+                else "$serverUrl/api/stream/$currentFileId"
             }
 
             val file = _uiState.value.file
@@ -1024,6 +1028,10 @@ while (isActive) {
             bufferedPosition = p.bufferedPosition,
             duration = p.duration.coerceAtLeast(0)
         )
+        // Keep the resume point in sync with whichever player is active, so the
+        // watch position is saved to the DB and the local player can resume from
+        // the exact same timeline when casting ends.
+        resumePosition = p.currentPosition.coerceAtLeast(0)
     }
 
     fun saveProgress(completed: Boolean = false) {
