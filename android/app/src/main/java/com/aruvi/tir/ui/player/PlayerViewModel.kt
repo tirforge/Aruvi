@@ -217,7 +217,7 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                 // Cast.getSingletonInstance(context).initialize() is idempotent — already called in Application.onCreate
                 try {
                     val cast = androidx.media3.cast.Cast.getSingletonInstance(context)
-                    if (cast.needsInitialization()) {
+                    if (!cast.isInitialized()) {
                         cast.initialize()
                     }
                     val player = androidx.media3.cast.CastPlayer.Builder(context)
