@@ -5,13 +5,13 @@ import { TelegramFile, formatDuration, useUpdateProgress, useFile, getFileDownlo
 import { useAppStore } from '../lib/store';
 import AuthImage from './AuthImage';
 
-// Vendored copy of movi-player@0.3.5 dist/element.js (upstream:
-// https://cdn.jsdelivr.net/npm/movi-player@0.3.5/dist/element.js — keep both
+// Vendored copy of movi-player@0.4.0 dist/element.js (upstream:
+// https://cdn.jsdelivr.net/npm/movi-player@0.4.0/dist/element.js — keep both
 // in sync when upgrading). Self-hosted: loading the playback engine from a
 // third-party CDN leaked every visitor's IP to jsdelivr, broke playback
 // whenever the CDN was blocked/down, and allowed a silent supply-chain swap
 // of the code (no SRI possible for this module format).
-const MOVI_PLAYER_URL = '/vendor/movi-player-0.3.5-element.js';
+const MOVI_PLAYER_URL = '/vendor/movi-player-0.4.0-element.js';
 let moviLoadPromise: Promise<boolean> | null = null;
 
 // Warm the engine in the background once the page has painted, so the first
