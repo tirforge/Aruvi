@@ -892,7 +892,13 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 // hit a zeroed value if updatePosition() synced it from the
                 // still-idle CastPlayer first (androidx/media#25 behaviour).
                 castSessionFileId = currentFileId
-                player.setMediaItem(mediaItem, startPositionMs)
+                // Starting at/after the end (resume of a finished movie) asks
+                // the receiver to seek past the final frame → instant ENDED or
+                // a stuck spinner. Restart cleanly from 0 instead.
+                val localDur = exoPlayer.duration
+                val safeStart =
+                    if (localDur > 0 && startPositionMs >= localDur - 1500) 0L else startPositionMs
+                player.setMediaItem(mediaItem, safeStart)
                 player.prepare()
                 player.play()
             } catch (e: Throwable) {

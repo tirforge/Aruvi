@@ -502,9 +502,7 @@ fun MobilePlayerControls(
                                 if (ctx.packageManager.hasSystemFeature(
                                         android.content.pm.PackageManager.FEATURE_LEANBACK
                                     )
-                                ) {
-                                    return@factory android.widget.FrameLayout(ctx)
-                                }
+                                ) android.widget.FrameLayout(ctx) else
                                 try {
                                     val activity = ctx.findFragmentActivity()
                                     // MediaRouteButton must use an AppCompat-themed context whose
