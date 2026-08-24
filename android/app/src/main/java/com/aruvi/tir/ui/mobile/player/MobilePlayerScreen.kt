@@ -8,7 +8,8 @@ import android.media.AudioManager
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
-import androidx.mediarouter.app.MediaRouteButton
+import com.google.android.gms.cast.framework.media.CastButtonFactory
+import com.google.android.gms.cast.framework.media.MediaRouteButton
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
@@ -503,9 +504,13 @@ fun MobilePlayerControls(
                                     val themedCtx = ContextThemeWrapper(
                                         activity ?: ctx, com.aruvi.tir.R.style.Theme_Aruvi_CastButton
                                     )
-                                    val btn = MediaRouteButton(themedCtx)
-                                    btn.layoutParams = ViewGroup.LayoutParams(buttonSizePx, buttonSizePx)
-                                    btn
+                                val btn = MediaRouteButton(themedCtx)
+                                btn.layoutParams = ViewGroup.LayoutParams(buttonSizePx, buttonSizePx)
+                                // Wire the button to the GMS Cast framework (the documented, reliable
+                                // path used by YouTube/Google Home). Requires CastContext to be
+                                // initialized, which TelePlayApp.onCreate() does eagerly.
+                                CastButtonFactory.setUpMediaRouteButton(themedCtx, btn)
+                                btn
                                 } catch (e: Throwable) {
                                     // Never let a cast-button failure crash the player; show an empty view.
                                     android.widget.FrameLayout(ctx)
