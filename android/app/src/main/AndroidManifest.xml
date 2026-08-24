@@ -72,6 +72,7 @@
         <activity
             android:name=".ui.mobile.MobileMainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:theme="@style/Theme.Aruvi.Mobile"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
         </activity>

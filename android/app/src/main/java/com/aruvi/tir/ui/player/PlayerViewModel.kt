@@ -191,7 +191,12 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
         override fun onDeviceInfoChanged(deviceInfo: DeviceInfo) {
             when (deviceInfo.playbackType) {
                 DeviceInfo.PLAYBACK_TYPE_LOCAL -> {
-                    _uiState.value = _uiState.value.copy(isCasting = false)
+                    // Deliberately NOT clearing isCasting here: this callback can
+                    // fire BEFORE SessionManager.onSessionEnded, and dropping the
+                    // flag early makes activePlayer() switch to the local player,
+                    // whose stale position then overwrites resumePosition before
+                    // the disconnect-seek reads it. Session callbacks own the
+                    // casting=false transition.
                 }
                 DeviceInfo.PLAYBACK_TYPE_REMOTE -> {
                     _uiState.value = _uiState.value.copy(isCasting = true)
@@ -203,6 +208,15 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
         override fun onTracksChanged(tracks: Tracks) {
             // Reflect the cast receiver's audio/subtitle tracks in the UI.
             updateTracks()
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            // Mirror the local player behaviour: when the receiver reports the
+            // media finished, persist progress as completed so Continue Watching
+            // doesn't resurrect a fully watched movie mid-credits.
+            if (playbackState == Player.STATE_ENDED && _uiState.value.isCasting) {
+                saveProgress(completed = true)
+            }
         }
     }
 
