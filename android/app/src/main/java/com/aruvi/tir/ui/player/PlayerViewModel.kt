@@ -192,6 +192,11 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                 }
             }
         }
+
+        override fun onTracksChanged(tracks: Tracks) {
+            // Reflect the cast receiver's audio/subtitle tracks in the UI.
+            updateTracks()
+        }
     }
 
     init {
@@ -410,7 +415,7 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
 
     @OptIn(UnstableApi::class)
     private fun updateTracks() {
-        val tracks = exoPlayer.currentTracks
+        val tracks = activePlayer().currentTracks
         val audioTracks = mutableListOf<TrackInfo>()
         val subtitleTracks = mutableListOf<TrackInfo>()
 
@@ -479,11 +484,12 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
 
     @OptIn(UnstableApi::class)
     fun selectAudioTrack(trackInfo: TrackInfo) {
-        val tracks = exoPlayer.currentTracks
+        val p = activePlayer()
+        val tracks = p.currentTracks
         val group = tracks.groups.getOrNull(trackInfo.groupIndex) ?: return
         val trackGroup = group.mediaTrackGroup
 
-        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+        p.trackSelectionParameters = p.trackSelectionParameters
             .buildUpon()
             .setOverrideForType(
                 TrackSelectionOverride(trackGroup, listOf(trackInfo.index))
@@ -493,18 +499,19 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
 
     @OptIn(UnstableApi::class)
     fun selectSubtitleTrack(trackInfo: TrackInfo?) {
+        val p = activePlayer()
         if (trackInfo == null) {
-            exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+            p.trackSelectionParameters = p.trackSelectionParameters
                 .buildUpon()
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                 .build()
             _uiState.value = _uiState.value.copy(subtitlesEnabled = false)
         } else {
-            val tracks = exoPlayer.currentTracks
+            val tracks = p.currentTracks
             val group = tracks.groups.getOrNull(trackInfo.groupIndex) ?: return
             val trackGroup = group.mediaTrackGroup
 
-            exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+            p.trackSelectionParameters = p.trackSelectionParameters
                 .buildUpon()
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                 .setOverrideForType(
@@ -696,15 +703,16 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
     }
 
     fun togglePlayback() {
-        if (exoPlayer.isPlaying) {
-            exoPlayer.pause()
+        val p = activePlayer()
+        if (p.isPlaying) {
+            p.pause()
             saveProgress()
-        } else if (exoPlayer.playbackState == Player.STATE_ENDED) {
+        } else if (p.playbackState == Player.STATE_ENDED) {
             // Video finished: replay from the start.
-            exoPlayer.seekToDefaultPosition()
-            exoPlayer.play()
+            p.seekToDefaultPosition()
+            p.play()
         } else {
-            exoPlayer.play()
+            p.play()
         }
         showControls()
     }
@@ -755,15 +763,14 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
             val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
             val token = authRepository.getAccessToken()
 
-            val url = if (directUrl != null) {
-                directUrl!!
+            // Chromecast receivers fetch media over HTTP themselves, so we must
+            // use the server-proxied URL. A Telegram directUrl is not reachable
+            // by the receiver, and the token is passed as a query param because
+            // the receiver cannot send custom auth headers.
+            val url = if (token != null) {
+                "$serverUrl/api/stream/$currentFileId?token=$token"
             } else {
-                // For Cast, we MUST use a query parameter as CastPlayer doesn't support headers easily
-                if (token != null) {
-                    "$serverUrl/api/stream/$currentFileId?token=$token"
-                } else {
-                    "$serverUrl/api/stream/$currentFileId"
-                }
+                "$serverUrl/api/stream/$currentFileId"
             }
 
             val file = _uiState.value.file
@@ -863,14 +870,14 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
 
     fun seekBackward() {
         val seekMs = getAcceleratedSeekMs()
-        val newPos = exoPlayer.currentPosition - seekMs
+        val newPos = activePlayer().currentPosition - seekMs
         seekTo(newPos)
         showSeekIndicator(seekMs, false)
     }
 
     fun seekForward() {
         val seekMs = getAcceleratedSeekMs()
-        val newPos = exoPlayer.currentPosition + seekMs
+        val newPos = activePlayer().currentPosition + seekMs
         seekTo(newPos)
         showSeekIndicator(seekMs, true)
     }
@@ -934,7 +941,7 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
     }
 
     fun setPlaybackSpeed(speed: Float) {
-        exoPlayer.setPlaybackSpeed(speed)
+        activePlayer().setPlaybackSpeed(speed)
         _uiState.value = _uiState.value.copy(playbackSpeed = speed)
     }
 
