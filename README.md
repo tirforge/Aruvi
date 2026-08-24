@@ -51,8 +51,10 @@ you control.
 
 ## Casting to Chromecast
 
-The Android app (phone + TV) and the web player can cast to Google Chromecast
-and Cast-enabled TVs using the **default media receiver** (`DefaultCastOptionsProvider`).
+The Android phone/tablet app can cast to Google Chromecast and Cast-enabled TVs
+using the **default media receiver** (`DefaultCastOptionsProvider`). Casting is
+Android-only — the web player and Android TV client stream directly and do not
+expose a cast button.
 
 **The one rule that makes or breaks casting:** the Chromecast device fetches the
 video stream *directly* from whatever server URL the app is pointed at. The Cast
@@ -76,10 +78,9 @@ device. The easiest way is a public tunnel so the stream has a real, routable UR
 
 - Or any reverse proxy / port forward that gives you a public `https://` URL.
 
-Then point the app at that public URL:
+Then point the Android app at that public URL:
 
 - **Android:** Settings → Server URL → `https://movie.your-domain.tunnel.example.com`
-- **Web:** set `WEB_BASE_URL` / the player's server to the same public URL.
 
 > The signed `Aruvi` APKs ship with `https://movie.aaruvi.space` as the default
 > server, which is already publicly reachable — casting works out of the box there.
