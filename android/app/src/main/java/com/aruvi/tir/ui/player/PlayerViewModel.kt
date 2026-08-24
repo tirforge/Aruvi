@@ -783,10 +783,12 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                     .setUri(url)
                     .setMediaId(currentFileId.toString())
                     .setMediaMetadata(mediaMetadata)
-                    .setStartPositionMs(resumePosition)
                     .build()
                 exoPlayer.pause()
-                player.setMediaItem(mediaItem)
+                // MediaItem.Builder has no setStartPositionMs in media3 1.2.1
+                // (added in 1.3.0); resume from the local position via the
+                // Player.setMediaItem(item, startPositionMs) overload instead.
+                player.setMediaItem(mediaItem, resumePosition)
                 player.prepare()
                 player.play()
             } catch (_: Throwable) {}
