@@ -30,5 +30,151 @@
   </head>
   <body>
     <div id="app"></div>
-  </body>
+  
+<script>
+(function(){
+  if (window.__aruviEnvTile) return; window.__aruviEnvTile = true;
+
+  const CSS = `
+  #aetu-fab{position:fixed;right:18px;bottom:18px;z-index:99999;width:54px;height:54px;border-radius:16px;
+    border:none;background:linear-gradient(135deg,#6366f1,#a855f7,#ec4899);color:#fff;font-size:20px;font-weight:800;
+    cursor:pointer;box-shadow:0 8px 24px rgba(99,102,241,.45);font-family:Inter,system-ui,sans-serif}
+  #aetu-panel{position:fixed;inset:0;z-index:100000;background:rgba(5,5,10,.72);backdrop-filter:blur(6px);
+    display:none;align-items:center;justify-content:center;padding:18px;font-family:Inter,system-ui,sans-serif}
+  #aetu-panel.open{display:flex}
+  .aetu-card{width:100%;max-width:640px;max-height:92vh;overflow:auto;background:#12121a;border:1px solid rgba(255,255,255,.08);
+    border-radius:16px;padding:22px;color:#E6E8EB}
+  .aetu-card h2{font-size:1.05rem;margin:0 0 4px;background:linear-gradient(135deg,#6366f1,#ec4899);
+    -webkit-background-clip:text;-webkit-text-fill-color:transparent;display:inline-block}
+  .aetu-sub{color:#9CA3AF;font-size:.75rem;margin:0 0 14px}
+  .aetu-close{float:right;background:none;border:none;color:#9CA3AF;font-size:20px;cursor:pointer}
+  .aetu-row{display:flex;align-items:center;gap:9px;margin:9px 0}
+  .aetu-row input[type=text]{flex:1;background:#0a0a0f;border:1px solid rgba(255,255,255,.09);border-radius:7px;
+    padding:8px 10px;color:#E6E8EB;font-size:.78rem;outline:none;font-family:'JetBrains Mono',monospace}
+  .aetu-row input[type=text]:focus{border-color:#6366f1}
+  .aetu-row label{display:flex;align-items:center;gap:7px;font-size:.8rem;color:#c7cbd3;min-width:150px;cursor:pointer}
+  .aetu-row input[type=checkbox]{accent-color:#a855f7;width:15px;height:15px;cursor:pointer}
+  .aetu-sec{margin:14px 0 4px;font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:#8b8fa3;font-weight:700}
+  textarea#aetu-out{width:100%;min-height:180px;background:#050507;border:1px dashed rgba(255,255,255,.16);border-radius:10px;
+    padding:12px;color:#34d399;font-size:.72rem;font-family:'JetBrains Mono',monospace;white-space:pre;margin-top:12px;outline:none}
+  .aetu-actions{display:flex;gap:10px;margin-top:12px}
+  .aetu-btn{flex:1;padding:11px;border:none;border-radius:9px;font-weight:600;font-size:.85rem;cursor:pointer}
+  .aetu-gen{background:linear-gradient(135deg,#6366f1,#a855f7);color:#fff}
+  .aetu-copy{background:#1d1d29;color:#E6E8EB;border:1px solid rgba(255,255,255,.1)}
+  .aetu-toast{position:fixed;left:50%;transform:translateX(-50%);bottom:86px;z-index:100001;background:#10b981;
+    color:#04281c;padding:9px 18px;border-radius:99px;font-weight:600;font-size:.8rem;opacity:0;transition:opacity .25s;
+    pointer-events:none;font-family:Inter,sans-serif}
+  .aetu-captured{border-color:#34d399 !important}`;
+
+  const HTML = `
+  <button id="aetu-fab" title="Aruvi .env builder">⬇</button>
+  <div id="aetu-panel"><div class="aetu-card">
+    <button class="aetu-close" id="aetu-x">✕</button>
+    <h2>Aruvi .env Builder</h2>
+    <p class="aetu-sub">Your generated string is grabbed automatically — tick what you need, copy the result.</p>
+
+    <div class="aetu-sec">Session</div>
+    <textarea id="aetu-sess" rows="3" placeholder="Pyrogram session string (auto-grabbed after login, or paste here)"
+      style="width:100%;background:#0a0a0f;border:1px solid rgba(255,255,255,.09);border-radius:8px;padding:9px;
+      color:#E6E8EB;font-size:.72rem;font-family:'JetBrains Mono',monospace;outline:none;resize:vertical"></textarea>
+
+    <div class="aetu-sec">Core</div>
+    <div class="aetu-row"><label><input type="checkbox" id="aetu-core" checked> API credentials</label>
+      <input type="text" id="aetur-apiid" placeholder="TELEGRAM_API_ID"></div>
+    <div class="aetu-row"><label>&nbsp;</label>
+      <input type="text" id="aetur-apihash" placeholder="TELEGRAM_API_HASH"></div>
+    <div class="aetu-row"><label><input type="checkbox" id="aetu-group"> Storage group / channel</label>
+      <input type="text" id="aetur-channel" placeholder="-1001234567890"></div>
+    <div class="aetu-row"><label>&nbsp;</label>
+      <input type="text" id="aetur-authusers" placeholder="AUTH_USERS=your_telegram_id"></div>
+
+    <div class="aetu-sec">Extras</div>
+    <div class="aetu-row"><label><input type="checkbox" id="aetu-grab"> Grabber (movie search)</label>
+      <input type="text" id="aetur-groups" placeholder="GRAB_GROUP_USERNAMES=a,b"></div>
+    <div class="aetu-row"><label><input type="checkbox" id="aetu-cache"> Disk cache</label>
+      <input type="text" id="aetur-cache" placeholder="DISK_CACHE_MAX_BYTES=8589934592"></div>
+
+    <textarea id="aetu-out" readonly></textarea>
+    <div class="aetu-actions">
+      <button class="aetu-btn aetu-gen"  id="aetu-go">Generate .env</button>
+      <button class="aetu-btn aetu-copy" id="aetu-cp">Copy</button>
+    </div>
+  </div></div>
+  <div class="aetu-toast" id="aetu-toast">Session string captured ✓</div>`;
+
+  const style=document.createElement('style'); style.textContent=CSS; document.head.appendChild(style);
+  const wrap=document.createElement('div'); wrap.innerHTML=HTML; document.body.appendChild(wrap);
+
+  const $=id=>document.getElementById(id);
+  const toast=$('aetu-toast');
+  const showToast=m=>{toast.textContent=m;toast.style.opacity=1;setTimeout(()=>toast.style.opacity=0,2200)};
+
+  $('aetu-fab').onclick=()=>$('aetu-panel').classList.add('open');
+  $('aetu-x').onclick=()=>$('aetu-panel').classList.remove('open');
+  $('aetu-panel').addEventListener('click',e=>{if(e.target.id==='aetu-panel')e.target.classList.remove('open')});
+
+  function setSession(v){
+    if(!v) return;
+    $('aetu-sess').value=v;
+    $('aetu-sess').classList.add('aetu-captured');
+    showToast('Session string captured ✓');
+    setTimeout(()=>$('aetu-sess').classList.remove('aetu-captured'),1600);
+  }
+
+  // Auto-grab: watch for long base64url blobs (Pyrogram v2 strings) appearing anywhere
+  const RE=/\b2[A-Za-z0-9_-]{280,}\b/;
+  let lastGrab='';
+  new MutationObserver(()=>{
+    const txt=document.body.innerText||'';
+    const m=txt.match(RE);
+    if(m && m[0]!==lastGrab){ lastGrab=m[0]; setSession(m[0]); }
+  }).observe(document.body,{childList:true,subtree:true,characterData:true});
+
+  function build(){
+    const L=[];
+    L.push('# ── Required: Telegram ──');
+    if($('aetu-core').checked){
+      if($('aetur-apiid').value)   L.push('TELEGRAM_API_ID='+$('aetur-apiid').value);
+      if($('aetur-apihash').value) L.push('TELEGRAM_API_HASH='+$('aetur-apihash').value);
+    }
+    const sess=$('aetu-sess').value.trim();
+    const grab=$('aetu-grab').checked;
+    if(sess && grab){
+      L.push('','## User session used by the grabber','');
+      L.push('GRAB_SESSION_STRINGS='+sess);
+    } else if(sess){
+      L.push('','## Pyrogram user session','');
+      L.push('GRAB_SESSION_STRINGS='+sess);
+    }
+    if($('aetu-group').checked){
+      L.push('','# Storage / streaming channel');
+      if($('aetur-channel').value) L.push('TELEGRAM_STORAGE_CHANNEL_ID='+$('aetur-channel').value);
+      if($('aetur-authusers').value) L.push($('aetur-authusers').value.replace(/^/,''));
+    }
+    if(grab){
+      L.push('','# Grab / movie search');
+      if($('aetur-groups').value) L.push('GRAB_GROUP_USERNAMES='+$('aetur-groups').value);
+      L.push('GRAB_KEEP_MESSAGES=0');
+    }
+    if($('aetu-cache').checked){
+      L.push('','# Disk cache (second tier)');
+      L.push('DISK_CACHE_ENABLED=1');
+      L.push('DISK_CACHE_TTL=1800');
+      L.push($('aetur-cache').value || 'DISK_CACHE_MAX_BYTES=8589934592');
+      L.push('DISK_CACHE_PER_VIDEO_BYTES=2147483648');
+    }
+    $('aetu-out').value = L.join('\n')+'\n';
+  }
+  ['aetu-core','aetu-group','aetu-grab','aetu-cache'].forEach(id=>$(id).addEventListener('change',build));
+  ['aetur-apiid','aetur-apihash','aetur-channel','aetur-authusers','aetur-groups','aetur-cache','aetu-sess']
+    .forEach(id=>$(id).addEventListener('input',build));
+  $('aetu-go').onclick=build;
+  $('aetu-cp').onclick=()=>{ build();
+    navigator.clipboard.writeText($('aetu-out').value)
+      .then(()=>showToast('.env copied ✓'))
+      .catch(()=>showToast('Copy failed — select manually')); };
+})();
+
+</script>
+</body>
 </html>
