@@ -2,6 +2,7 @@ package com.aruvi.tir.ui.mobile.player
 
 import android.app.Activity
 import android.content.Context
+import android.content.ContextThemeWrapper
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.view.View
@@ -498,7 +499,7 @@ fun MobilePlayerControls(
                                 // MediaRouteButton must use an AppCompat-themed context with opaque colorPrimary
                                 // (MediaRouterThemeHelper crashes on translucent #0). Wrap in Aruvi brand theme
                                 // so the cast icon tints to brand blue instead of default AppCompat blue.
-                                val themedCtx = android.content.ContextThemeWrapper(
+                                val themedCtx = ContextThemeWrapper(
                                     activity ?: ctx, com.aruvi.tir.R.style.Theme_Aruvi_CastButton
                                 )
                                 val btn = MediaRouteButton(themedCtx)
