@@ -98,8 +98,13 @@ a{color:#a5b4fc}
 <script type="module">
 let TelegramClient=null,StringSession=null;
 try{
-  ({TelegramClient}=await import("telegram"));
-  ({StringSession}=await import("telegram/sessions"));
+  // Import ONLY the root module: it re-exports `sessions`. Importing
+  // telegram/sessions separately creates a SECOND class copy and GramJS's
+  // `instanceof StringSession` guard then rejects our session ("Only
+  // StringSession and StoreSessions are supported").
+  const TG=await import("telegram");
+  TelegramClient=TG.TelegramClient;
+  StringSession=TG.sessions.StringSession;
 }catch(e){
   console.error(e);
   const s=document.getElementById('sendStatus');
