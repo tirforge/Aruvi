@@ -17,8 +17,10 @@ import secrets
 import time
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+
+from ..rate_limit import limiter
 
 router = APIRouter()
 
@@ -40,9 +42,13 @@ def _cleanup_expired() -> None:
 
 
 def _check_key(provided: str | None) -> None:
-    expected = os.environ.get("SETUP_PASSWORD") or os.environ.get("DEBUG_PASSWORD")
+    # PUBLIC RELEASE: this router is OFF until the operator deliberately opts in
+    # by setting SETUP_PASSWORD. We deliberately do NOT fall back to
+    # DEBUG_PASSWORD — debug mode must never silently expose a Telegram-login
+    # relay through the server's IP.
+    expected = os.environ.get("SETUP_PASSWORD")
     if not expected:
-        raise HTTPException(503, "Setup helper disabled: no SETUP_PASSWORD configured")
+        raise HTTPException(503, "Setup helper disabled: set SETUP_PASSWORD to enable")
     if not provided or not secrets.compare_digest(provided, expected):
         raise HTTPException(403, "Invalid setup key")
 
@@ -69,7 +75,8 @@ class SignInIn(BaseModel):
 
 
 @router.post("/setup/send-code")
-async def setup_send_code(body: SendCodeIn):
+@limiter.limit("3/minute")
+async def setup_send_code(request: Request, body: SendCodeIn):
     _check_key(body.setup_key)
     _cleanup_expired()
     from pyrogram import Client  # deferred: heavy import only when actually used
@@ -101,7 +108,8 @@ async def setup_send_code(body: SendCodeIn):
 
 
 @router.post("/setup/sign-in")
-async def setup_sign_in(body: SignInIn):
+@limiter.limit("6/minute")
+async def setup_sign_in(request: Request, body: SignInIn):
     _check_key(body.setup_key)
     _cleanup_expired()
     entry = _get_client(body.token)
