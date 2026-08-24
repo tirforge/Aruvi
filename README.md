@@ -49,6 +49,47 @@ private Telegram channel:
 Your server never talks to anyone else's instance — files live only in channels
 you control.
 
+## Casting to Chromecast
+
+The Android app (phone + TV) and the web player can cast to Google Chromecast
+and Cast-enabled TVs using the **default media receiver** (`DefaultCastOptionsProvider`).
+
+**The one rule that makes or breaks casting:** the Chromecast device fetches the
+video stream *directly* from whatever server URL the app is pointed at. The Cast
+device is a separate piece of hardware on your network (or the internet) — it
+**cannot** reach `localhost`, `127.0.0.1`, or a LAN-only IP like `192.168.x.x`.
+If the app points at `http://localhost:7680`, discovery may still work but playback
+will fail because the Cast device has no route to that address.
+
+### For self-hosters: expose the server over a tunnel
+
+To cast from your own deployment, the server URL must be reachable by the Cast
+device. The easiest way is a public tunnel so the stream has a real, routable URL:
+
+- **Cloudflare Tunnel** (recommended, free, no open ports):
+
+  ```bash
+  # Expose your backend (e.g. on :7680) at a public hostname
+  cloudflared tunnel --url http://localhost:7680
+  # → https://movie.your-domain.tunnel.example.com
+  ```
+
+- Or any reverse proxy / port forward that gives you a public `https://` URL.
+
+Then point the app at that public URL:
+
+- **Android:** Settings → Server URL → `https://movie.your-domain.tunnel.example.com`
+- **Web:** set `WEB_BASE_URL` / the player's server to the same public URL.
+
+> The signed `Aruvi` APKs ship with `https://movie.aaruvi.space` as the default
+> server, which is already publicly reachable — casting works out of the box there.
+
+### Permissions
+
+On Android 12+ the app needs **Nearby devices** (and, on Android 10/11,
+**Location**) permission to discover Cast devices over Wi-Fi. Grant it when
+prompted; discovery will not find devices without it.
+
 ## Quick Start
 
 ### 0. Docker (all-in-one, recommended)
