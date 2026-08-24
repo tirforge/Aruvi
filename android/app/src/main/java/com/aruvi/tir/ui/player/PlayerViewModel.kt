@@ -765,6 +765,7 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
         val player = castPlayer ?: return
         viewModelScope.launch {
             val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
+            val token = authRepository.getAccessToken()
 
             // Prefer the public, unauthenticated stream URL so the Chromecast
             // receiver can fetch it directly (it cannot send bearer tokens or
@@ -772,7 +773,6 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
             // link can't be generated.
             val publicLink = filesRepository.getPublicLink(currentFileId, serverUrl)
             val url = publicLink.getOrElse {
-                val token = authRepository.getAccessToken()
                 if (token != null) "$serverUrl/api/stream/$currentFileId?token=$token"
                 else "$serverUrl/api/stream/$currentFileId"
             }
@@ -780,7 +780,8 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
             val file = _uiState.value.file
             val title = file?.fileName ?: "Aruvi"
 
-            // Use query param for thumbnail as well for the cast device
+            // Thumbnails are also fetched by the receiver, so pass the token as
+            // a query param (best-effort; missing art is non-fatal).
             val thumbnailUrl = if (file?.thumbnailFileId != null) {
                 "$serverUrl/api/stream/$currentFileId/thumbnail" + (if (token != null) "?token=$token" else "")
             } else null

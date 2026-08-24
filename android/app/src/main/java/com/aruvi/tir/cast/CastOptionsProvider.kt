@@ -2,7 +2,7 @@ package com.aruvi.tir.cast
 
 import android.content.Context
 import com.google.android.gms.cast.CastMediaControlIntent
-import com.google.android.gms.cast.framework.CastMediaOptions
+import com.google.android.gms.cast.framework.media.CastMediaOptions
 import com.google.android.gms.cast.framework.CastOptions
 import com.google.android.gms.cast.framework.OptionsProvider
 import com.google.android.gms.cast.framework.SessionProvider
