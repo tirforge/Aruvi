@@ -228,8 +228,14 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                     // When a Cast session starts/resumes, push the current media to the device.
                     castContext.sessionManager.addSessionManagerListener(
                         object : com.google.android.gms.cast.framework.SessionManagerListener<com.google.android.gms.cast.framework.CastSession> {
-                            override fun onSessionStarted(s: com.google.android.gms.cast.framework.CastSession, r: String) { castToDevice() }
-                            override fun onSessionResumed(s: com.google.android.gms.cast.framework.CastSession, wasSuspended: Boolean) { castToDevice() }
+                            override fun onSessionStarted(s: com.google.android.gms.cast.framework.CastSession, r: String) {
+                                _uiState.value = _uiState.value.copy(isCasting = true)
+                                castToDevice()
+                            }
+                            override fun onSessionResumed(s: com.google.android.gms.cast.framework.CastSession, wasSuspended: Boolean) {
+                                _uiState.value = _uiState.value.copy(isCasting = true)
+                                castToDevice()
+                            }
                             override fun onSessionEnded(s: com.google.android.gms.cast.framework.CastSession, e: Int) { _uiState.value = _uiState.value.copy(isCasting = false) }
                             override fun onSessionStarting(s: com.google.android.gms.cast.framework.CastSession) {}
                             override fun onSessionStartFailed(s: com.google.android.gms.cast.framework.CastSession, e: Int) {}
@@ -777,6 +783,7 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                     .setUri(url)
                     .setMediaId(currentFileId.toString())
                     .setMediaMetadata(mediaMetadata)
+                    .setStartPositionMs(resumePosition)
                     .build()
                 exoPlayer.pause()
                 player.setMediaItem(mediaItem)
@@ -793,26 +800,34 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
         } catch (_: Throwable) {}
     }
 
+    // Returns the player that should currently receive control/query calls.
+    // While casting, all playback control must route to the CastPlayer, not the
+    // (paused) local ExoPlayer — otherwise the Chromecast is unaffected.
+    private fun activePlayer(): Player =
+        if (_uiState.value.isCasting) castPlayer ?: exoPlayer else exoPlayer
+
     fun play() {
-        if (exoPlayer.playbackState == Player.STATE_ENDED) {
-            exoPlayer.seekToDefaultPosition()
+        val p = activePlayer()
+        if (p.playbackState == Player.STATE_ENDED) {
+            p.seekToDefaultPosition()
         }
-        exoPlayer.play()
+        p.play()
     }
 
     fun pause() {
-        exoPlayer.pause()
+        activePlayer().pause()
     }
 
     fun seekTo(positionMs: Long) {
-        val state = exoPlayer.playbackState
+        val p = activePlayer()
+        val state = p.playbackState
         // STATE_ENDED must be allowed: at end-of-video a seek is the only
         // operation that restarts playback (media3 play() is a no-op when
         // ENDED, and a seek transitions ENDED → BUFFERING → READY).
         if (state != Player.STATE_READY && state != Player.STATE_BUFFERING && state != Player.STATE_ENDED) return
-        val duration = exoPlayer.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
+        val duration = p.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
         val clampedPosition = positionMs.coerceIn(0, duration)
-        exoPlayer.seekTo(clampedPosition)
+        p.seekTo(clampedPosition)
         updatePosition()
         showControls()
     }
@@ -978,7 +993,7 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
 while (isActive) {
                 updatePosition()
 
-                if (exoPlayer.isPlaying) {
+                if (activePlayer().isPlaying) {
                     ticks++
                     if (ticks >= 15) {
                         saveProgress(completed = false)
@@ -994,16 +1009,18 @@ while (isActive) {
     }
 
     private fun updatePosition() {
+        val p = activePlayer()
         _uiState.value = _uiState.value.copy(
-            currentPosition = exoPlayer.currentPosition,
-            bufferedPosition = exoPlayer.bufferedPosition,
-            duration = exoPlayer.duration.coerceAtLeast(0)
+            currentPosition = p.currentPosition,
+            bufferedPosition = p.bufferedPosition,
+            duration = p.duration.coerceAtLeast(0)
         )
     }
 
     fun saveProgress(completed: Boolean = false) {
-        val position = (exoPlayer.currentPosition / 1000).toInt()
-        val duration = (exoPlayer.duration / 1000).toInt().takeIf { it > 0 }
+        val p = activePlayer()
+        val position = (p.currentPosition / 1000).toInt()
+        val duration = (p.duration / 1000).toInt().takeIf { it > 0 }
 
         if (position <= 0 && !completed) return
         if (currentFileId <= 0) return
