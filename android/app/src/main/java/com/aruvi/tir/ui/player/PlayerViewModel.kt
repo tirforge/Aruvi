@@ -204,10 +204,6 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
 
     init {
         initCastPlayer()
-        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-            .buildUpon()
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-            .build()
         setupPlayerListener()
         loadAndPlay()
         startProgressTracking()
@@ -805,6 +801,8 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                     .setUri(url)
                     .setMediaId(currentFileId.toString())
                     .setMediaMetadata(mediaMetadata)
+                    .setContentType("video/mp4")
+                    .setStreamType(MediaItem.StreamType.BUFFERED)
                     .build()
                 exoPlayer.pause()
                 // MediaItem.Builder has no setStartPositionMs in media3 1.2.1
