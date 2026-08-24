@@ -208,30 +208,12 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
 
     @OptIn(UnstableApi::class)
     private fun initCastPlayer() {
-        // Official Media3 pattern: Cast.getSingletonInstance(app).initialize() is done in TelePlayApp.
-        // Build CastPlayer with Output Switcher support so route changes auto-transfer playback.
-        // Keep legacy CastContext path as fallback for devices without new Cast singleton.
+        // Legacy GMS CastContext path (media3-cast 1.2.1 + play-services-cast-framework).
+        // DefaultCastOptionsProvider is declared in the manifest, so getSharedInstance()
+        // bootstraps the default media receiver. Must run on the main thread to avoid
+        // DeadObjectException and to ensure MediaRouter registration.
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
             try {
-                // Try new Media3 Cast singleton first (developer.android.com/media/media3/cast/create-castplayer)
-                // Cast.getSingletonInstance(context).initialize() is idempotent — already called in Application.onCreate
-                try {
-                    val cast = androidx.media3.cast.Cast.getSingletonInstance(context)
-                    if (!cast.isInitialized()) {
-                        cast.initialize()
-                    }
-                    val player = androidx.media3.cast.CastPlayer.Builder(context)
-                        .setLocalPlayer(exoPlayer)
-                        .build()
-                    player.addListener(castPlayerListener)
-                    castPlayer = player
-                    return@launch
-                } catch (_: Throwable) {
-                    // Fallback to legacy GMS CastContext path for older GMS builds
-                }
-
-                // Legacy fallback — must be called on main thread with Activity-capable context,
-                // not IO dispatcher, to avoid DeadObjectException and ensure MediaRouter registration.
                 val castContext = try {
                     CastContext.getSharedInstance(context)
                 } catch (e: Exception) {
@@ -243,19 +225,18 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                     } catch (_: Throwable) { null }
                     player?.addListener(castPlayerListener)
                     castPlayer = player
-                    // Auto-cast when remote route becomes available — MediaRouteButton handles dialog,
-                    // but we also listen for route switch to transfer current media
+                    // When a Cast session starts/resumes, push the current media to the device.
                     castContext.sessionManager.addSessionManagerListener(
-                        object : com.google.android.gms.cast.framework.SessionManagerListener<com.google.android.gms.cast.framework.Session> {
-                            override fun onSessionStarted(s: com.google.android.gms.cast.framework.Session, r: String) { castToDevice() }
-                            override fun onSessionResumed(s: com.google.android.gms.cast.framework.Session, wasSuspended: Boolean) { castToDevice() }
-                            override fun onSessionEnded(s: com.google.android.gms.cast.framework.Session, e: Int) { _uiState.value = _uiState.value.copy(isCasting = false) }
-                            override fun onSessionStarting(s: com.google.android.gms.cast.framework.Session) {}
-                            override fun onSessionStartFailed(s: com.google.android.gms.cast.framework.Session, e: Int) {}
-                            override fun onSessionResuming(s: com.google.android.gms.cast.framework.Session, r: String) {}
-                            override fun onSessionResumeFailed(s: com.google.android.gms.cast.framework.Session, e: Int) {}
-                            override fun onSessionEnding(s: com.google.android.gms.cast.framework.Session) {}
-                            override fun onSessionSuspended(s: com.google.android.gms.cast.framework.Session, r: Int) {}
+                        object : com.google.android.gms.cast.framework.SessionManagerListener<com.google.android.gms.cast.framework.CastSession> {
+                            override fun onSessionStarted(s: com.google.android.gms.cast.framework.CastSession, r: String) { castToDevice() }
+                            override fun onSessionResumed(s: com.google.android.gms.cast.framework.CastSession, wasSuspended: Boolean) { castToDevice() }
+                            override fun onSessionEnded(s: com.google.android.gms.cast.framework.CastSession, e: Int) { _uiState.value = _uiState.value.copy(isCasting = false) }
+                            override fun onSessionStarting(s: com.google.android.gms.cast.framework.CastSession) {}
+                            override fun onSessionStartFailed(s: com.google.android.gms.cast.framework.CastSession, e: Int) {}
+                            override fun onSessionResuming(s: com.google.android.gms.cast.framework.CastSession, r: String) {}
+                            override fun onSessionResumeFailed(s: com.google.android.gms.cast.framework.CastSession, e: Int) {}
+                            override fun onSessionEnding(s: com.google.android.gms.cast.framework.CastSession) {}
+                            override fun onSessionSuspended(s: com.google.android.gms.cast.framework.CastSession, r: Int) {}
                         }, com.google.android.gms.cast.framework.CastSession::class.java
                     )
                 }

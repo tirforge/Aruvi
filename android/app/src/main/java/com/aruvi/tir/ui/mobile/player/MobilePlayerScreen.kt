@@ -498,7 +498,7 @@ fun MobilePlayerControls(
                                 // MediaRouteButton must use an AppCompat-themed context with opaque colorPrimary
                                 // (MediaRouterThemeHelper crashes on translucent #0). Wrap in Aruvi brand theme
                                 // so the cast icon tints to brand blue instead of default AppCompat blue.
-                                val themedCtx = androidx.appcompat.view.ContextThemeWrapper(
+                                val themedCtx = android.content.ContextThemeWrapper(
                                     activity ?: ctx, com.aruvi.tir.R.style.Theme_Aruvi_CastButton
                                 )
                                 val btn = MediaRouteButton(themedCtx)
