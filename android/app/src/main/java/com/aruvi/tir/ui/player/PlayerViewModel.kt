@@ -810,7 +810,13 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 // MediaItem.Builder has no setStartPositionMs in media3 1.2.1
                 // (added in 1.3.0); resume from the local position via the
                 // Player.setMediaItem(item, startPositionMs) overload instead.
-                player.setMediaItem(mediaItem, resumePosition)
+                // Read the start point from the LOCAL player now, not the
+                // shared resumePosition var: between isCasting flipping true
+                // and this coroutine running, updatePosition() may have synced
+                // resumePosition from the still-idle CastPlayer (= 0), which
+                // made every cast restart at 0 (androidx/media#25 behaviour).
+                val startPositionMs = exoPlayer.currentPosition.coerceAtLeast(0)
+                player.setMediaItem(mediaItem, startPositionMs)
                 player.prepare()
                 player.play()
             } catch (e: Throwable) {
@@ -1049,10 +1055,14 @@ while (isActive) {
             bufferedPosition = p.bufferedPosition,
             duration = p.duration.coerceAtLeast(0)
         )
-        // Keep the resume point in sync with whichever player is active, so the
-        // watch position is saved to the DB and the local player can resume from
-        // the exact same timeline when casting ends.
-        resumePosition = p.currentPosition.coerceAtLeast(0)
+        // Keep the resume point in sync with whichever player is active — but
+        // only when that player actually knows its position (READY/playing).
+        // A CastPlayer before its first status update reports position 0 with
+        // an empty timeline (androidx/media#25); trusting it here zeroed the
+        // saved watch position and broke resume-on-disconnect.
+        if (p.playbackState == Player.STATE_READY || p.isPlaying) {
+            resumePosition = p.currentPosition.coerceAtLeast(0)
+        }
     }
 
     fun saveProgress(completed: Boolean = false) {
