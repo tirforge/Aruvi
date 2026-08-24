@@ -30,6 +30,11 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Set up Gradle (dependency + build cache)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-cleanup: on-success
+
       - name: Configure release keystore
         if: ${{ env.KEYS != '' }}
         env:
@@ -53,7 +58,7 @@ jobs:
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
-          ./gradlew --no-daemon :app:assembleMobileRelease :app:assembleTvRelease
+          ./gradlew --no-daemon --build-cache --parallel :app:assembleMobileRelease :app:assembleTvRelease
           mkdir -p dist
           cp app/build/outputs/apk/mobile/release/app-mobile-release.apk dist/Aruvi-mobile.apk
           cp app/build/outputs/apk/tv/release/app-tv-release.apk dist/Aruvi-tv.apk
