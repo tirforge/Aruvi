@@ -261,7 +261,8 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                     castSessionManagerListener = listener
                     ctx.sessionManager.addSessionManagerListener(listener, com.google.android.gms.cast.framework.CastSession::class.java)
                 }
-            } catch (_: Throwable) {
+            } catch (e: Throwable) {
+                android.util.Log.w("PlayerViewModel", "Cast init failed; cast disabled this session", e)
                 castPlayer = null
             }
         }
@@ -773,6 +774,12 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
             val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
             val token = authRepository.getAccessToken()
 
+            // Capture the local position and silence local playback IMMEDIATELY:
+            // the public-link request below is a network round-trip, and pausing
+            // only after it meant phone + TV played simultaneously for that gap.
+            val startPositionMs = exoPlayer.currentPosition.coerceAtLeast(0)
+            exoPlayer.pause()
+
             // Prefer the public, unauthenticated stream URL so the Chromecast
             // receiver can fetch it directly (it cannot send bearer tokens or
             // custom auth headers). Falls back to the token URL if the public
@@ -806,16 +813,10 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                     // and BUFFERED is already the Cast default stream type.
                     .setMimeType("video/mp4")
                     .build()
-                exoPlayer.pause()
-                // MediaItem.Builder has no setStartPositionMs in media3 1.2.1
-                // (added in 1.3.0); resume from the local position via the
-                // Player.setMediaItem(item, startPositionMs) overload instead.
-                // Read the start point from the LOCAL player now, not the
-                // shared resumePosition var: between isCasting flipping true
-                // and this coroutine running, updatePosition() may have synced
-                // resumePosition from the still-idle CastPlayer (= 0), which
-                // made every cast restart at 0 (androidx/media#25 behaviour).
-                val startPositionMs = exoPlayer.currentPosition.coerceAtLeast(0)
+                // Start where the LOCAL player was when casting began (see
+                // capture above): reading the shared resumePosition instead can
+                // hit a zeroed value if updatePosition() synced it from the
+                // still-idle CastPlayer first (androidx/media#25 behaviour).
                 player.setMediaItem(mediaItem, startPositionMs)
                 player.prepare()
                 player.play()
