@@ -238,7 +238,9 @@
   // Accept Pyrogram("2…") AND GramJS/Telethon("1…") long blobs
   // NOTE: \b fails here — base64 std uses +/ (non-word chars) which would
   // split the match. Use explicit lookarounds over the FULL b64 alphabet.
-  const RE=/(?<![A-Za-z0-9+\/_=-])[12][A-Za-z0-9+\/_=-]{300,}(?![A-Za-z0-9+\/_=-])/g;
+  // Pyrogram strings start with b64-of(dc byte) — NOT a literal '1'/'2'.
+  // Accept ANY ≥300-char base64-ish token; format detection happens after.
+  const RE=/(?<![A-Za-z0-9+\/_=-])[A-Za-z0-9+\/_=-]{300,}(?![A-Za-z0-9+\/_=-])/g;
   let lastGrab='';
   function pickSession(txt){
     let best=null;
@@ -583,6 +585,7 @@
 })();
 
 </script>
+
 
 
 
