@@ -210,6 +210,13 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
             updateTracks()
         }
 
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            // The local listener can't supply this while casting (it's paused);
+            // without it the play/pause button and controls auto-hide run off a
+            // stale isPlaying=false for the entire cast session.
+            _uiState.value = _uiState.value.copy(isPlaying = isPlaying)
+        }
+
         override fun onPlaybackStateChanged(playbackState: Int) {
             // Mirror the local player behaviour: when the receiver reports the
             // media finished, persist progress as completed so Continue Watching
@@ -1059,7 +1066,11 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
     @OptIn(UnstableApi::class)
     private fun applyQualityConstraint(quality: String) {
         val (maxWidth, maxHeight) = getQualityMaxDimensions(quality)
-        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+        // Apply to whichever player currently owns playback — while casting,
+        // constraining only the paused local player left the preference
+        // silently ignored by the receiver.
+        val target = activePlayer()
+        target.trackSelectionParameters = target.trackSelectionParameters
             .buildUpon()
             .setMaxVideoSize(maxWidth, maxHeight)
             .build()
