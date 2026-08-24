@@ -813,7 +813,12 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 player.setMediaItem(mediaItem, resumePosition)
                 player.prepare()
                 player.play()
-            } catch (_: Throwable) {}
+            } catch (e: Throwable) {
+                // Never swallow cast-load failures silently: a rejected load
+                // leaves the receiver idle ("no media selected") with no clue
+                // why. Surface it in logcat under the cast tag.
+                android.util.Log.w("PlayerViewModel", "castToDevice load failed url=$url", e)
+            }
         }
     }
 
