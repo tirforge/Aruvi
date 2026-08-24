@@ -495,18 +495,21 @@ fun MobilePlayerControls(
                     ) {
                         AndroidView(
                             factory = { ctx ->
-                                val activity = ctx.findFragmentActivity()
-                                // MediaRouteButton must use an AppCompat-themed context with opaque colorPrimary
-                                // (MediaRouterThemeHelper crashes on translucent #0). Wrap in Aruvi brand theme
-                                // so the cast icon tints to brand blue instead of default AppCompat blue.
-                                val themedCtx = ContextThemeWrapper(
-                                    activity ?: ctx, com.aruvi.tir.R.style.Theme_Aruvi_CastButton
-                                )
-                                val btn = MediaRouteButton(themedCtx)
-                                btn.layoutParams = ViewGroup.LayoutParams(buttonSizePx, buttonSizePx)
-                                btn.setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                                // Let Cast framework tint icon via theme; Compose will tint via LocalContentColor
-                                btn
+                                try {
+                                    val activity = ctx.findFragmentActivity()
+                                    // MediaRouteButton must use an AppCompat-themed context whose
+                                    // colorPrimary is OPAQUE — MediaRouterThemeHelper throws ("#0") on a
+                                    // translucent/undefined color. Theme.Aruvi.CastButton supplies brand blue.
+                                    val themedCtx = ContextThemeWrapper(
+                                        activity ?: ctx, com.aruvi.tir.R.style.Theme_Aruvi_CastButton
+                                    )
+                                    val btn = MediaRouteButton(themedCtx)
+                                    btn.layoutParams = ViewGroup.LayoutParams(buttonSizePx, buttonSizePx)
+                                    btn
+                                } catch (e: Throwable) {
+                                    // Never let a cast-button failure crash the player; show an empty view.
+                                    android.widget.FrameLayout(ctx)
+                                }
                             },
                             modifier = Modifier.size(48.dp)
                         )
