@@ -497,6 +497,14 @@ fun MobilePlayerControls(
                     ) {
                         AndroidView(
                             factory = { ctx ->
+                                // No cast button on Android TV — the TV is a
+                                // cast receiver, not a sender.
+                                if (ctx.packageManager.hasSystemFeature(
+                                        android.content.pm.PackageManager.FEATURE_LEANBACK
+                                    )
+                                ) {
+                                    return@factory android.widget.FrameLayout(ctx)
+                                }
                                 try {
                                     val activity = ctx.findFragmentActivity()
                                     // MediaRouteButton must use an AppCompat-themed context whose

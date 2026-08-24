@@ -241,6 +241,14 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
         // DefaultCastOptionsProvider is declared in the manifest, so getSharedInstance()
         // bootstraps the default media receiver. Must run on the main thread to avoid
         // DeadObjectException and to ensure MediaRouter registration.
+        // Android TV builds are cast RECEIVERS, not senders — running the
+        // sender stack there only risks weird route pickers and wasted
+        // discovery. Leanback check also keeps CastContext off devices
+        // without proper GMS cast support.
+        if (context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK)) {
+            android.util.Log.i("PlayerViewModel", "Leanback device: cast sender disabled")
+            return
+        }
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
             try {
                 val ctx = try {
