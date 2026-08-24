@@ -9,188 +9,54 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Inter',system-ui,sans-serif;background:#0a0a0f;color:#E6E8EB;line-height:1.6}
-.wrap{max-width:720px;margin:0 auto;padding:32px 20px}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px}
 h1{font-size:1.6rem;font-weight:800;margin-bottom:8px;background:linear-gradient(135deg,#6366f1,#a855f7,#ec4899);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .sub{color:#9CA3AF;font-size:.88rem;margin-bottom:28px}
 .card{background:#12121a;border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:24px;margin-bottom:20px}
-.card h2{font-size:.95rem;font-weight:700;margin-bottom:14px;color:#E6E8EB}
-label{display:block;font-size:.78rem;font-weight:600;color:#9CA3AF;margin:14px 0 6px}
-input{width:100%;background:#0a0a0f;border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:10px 12px;color:#E6E8EB;font-size:.85rem;outline:none}
-input:focus{border-color:#6366f1}
-.hint{font-size:.72rem;color:#6B7280;margin-top:4px}
-.btn{display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#6366f1,#a855f7,#ec4899);color:#E6E8EB;font-size:.85rem;font-weight:700;padding:12px 24px;border-radius:6px;border:0;cursor:pointer;margin-top:18px}
-.btn:hover{opacity:.9}
-.out{background:#07070c;border:1px solid rgba(99,102,241,.2);border-radius:8px;padding:16px;margin-top:16px;font-family:monospace;font-size:.78rem;white-space:pre-wrap;word-break:break-all;display:none}
-.out.show{display:block}
-a{color:#a5b4fc}
-.badge{display:inline-block;background:rgba(99,102,241,.12);border:1px solid rgba(165,180,252,.12);border-radius:99px;padding:4px 10px;font-size:.68rem;font-weight:600;color:#a5b4fc;margin-bottom:16px}
+.card h2{font-size:.95rem;font-weight:700;margin-bottom:10px;color:#E6E8EB}
+.tag{display:inline-block;font-size:.68rem;padding:2px 8px;border-radius:99px;border:1px solid #34d39955;color:#34d399;vertical-align:middle;margin-left:8px}
+.tag.alt{border-color:#a855f755;color:#c084fc}
+p{color:#9CA3AF;font-size:.85rem;margin:8px 0}
+code,pre{font-family:'JetBrains Mono',ui-monospace,monospace}
+pre{background:#0a0a0f;border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:12px 14px;color:#d1d5db;font-size:.78rem;overflow-x:auto;white-space:pre-wrap;word-break:break-all}
+.copy{margin-top:8px;padding:7px 14px;border:1px solid rgba(255,255,255,.12);background:transparent;color:#9CA3AF;border-radius:6px;font-size:.75rem;cursor:pointer}
+.copy:hover{color:#fff;border-color:#fff}
+ol{margin:10px 0 0 18px;color:#9CA3AF;font-size:.83rem}
+li{margin:4px 0}
+b{color:#E6E8EB}
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>Aruvi Setup Helper</h1>
-  <p class="sub">Runs entirely in your browser — credentials never touch this server.</p>
-<p class="sub" style="display:none">Get all the IDs, session strings, and .env config — right here, no install needed.</p>
-  <span class="badge">🔒 Runs directly in your browser — nothing is sent to our server</span>
+  <p class="sub">Generate your Telegram <b>session string</b>. Pick whichever path you prefer.</p>
 
   <div class="card">
-    <h2>1 — API Credentials</h2>
-    <p class="hint">Get from <a href="https://my.telegram.org" target="_blank">my.telegram.org → API development tools</a> → Create app. One app works for all sessions.</p>
-    <label>API_ID (numbers only)</label>
-    <input id="api_id" placeholder="1234567">
-    <label>API_HASH</label>
-    <input id="api_hash" placeholder="abc123...">
+    <h2>Option A — Run on your server <span class="tag">recommended · battle-tested</span></h2>
+    <p>SSH into the machine hosting Aruvi and run:</p>
+    <pre id="cmd">cd /home/container/grabber-deploy/backend &amp;&amp; npx -y telegram-session-generator</pre>
+    <button class="copy" onclick="cp('cmd',this)">Copy command</button>
+    <ol>
+      <li>Paste your <b>api_id</b> and <b>api_hash</b> when prompted (from my.telegram.org).</li>
+      <li>Enter your phone number → Telegram sends you a login code.</li>
+      <li>Enter the code (+ 2FA password if enabled).</li>
+      <li>Copy the printed <b>session string</b> into your <b>.env</b>, then restart the backend.</li>
+    </ol>
+    <p style="margin-top:10px">Your API credentials for reference:
+      <code>35927937</code> / <code>c77b…d24</code> (already in this server's .env).</p>
   </div>
 
   <div class="card">
-    <h2>2 — Your Channels / Groups</h2>
-    <label>Storage Channel ID (where your files live) — <a href="https://t.me/userinfobot" target="_blank">get via @userinfobot</a></label>
-    <input id="storage_id" placeholder="-1001234567890">
-    <div class="hint">Create a channel → add your bot as admin → forward any message to @userinfobot → copy ID (-100...)</div>
-
-    <label>Source Groups for Grabber (usernames only, comma-separated)</label>
-    <input id="grab_groups" placeholder="my_movie_group_1,my_movie_group_2">
-    <div class="hint">Open group → Group Info → @username → use without @, e.g. my_movie_group_1</div>
-
-    <label>Bots in those groups (positional, leave blank to auto-detect)</label>
-    <input id="grab_bots" placeholder="example_bot_1,example_bot_2">
-  </div>
-
-  <div class="card">
-    <h2>3 — Generate .env snippet</h2>
-    <p class="hint">Fill the fields above, then copy the config below into your <code>.env</code> file.</p>
-    <button class="btn" onclick="generate()">Generate .env →</button>
-    <div id="out" class="out"></div>
-    <div id="next" style="display:none;margin-top:16px;font-size:.82rem;color:#9CA3AF">
-      <b style="color:#E6E8EB">Next:</b> For <code>GRAB_SESSION_STRINGS</code> you need a phone account. Run in Codespaces:<br>
-      <code style="background:#0a0a0f;padding:4px 8px;border-radius:4px;display:inline-block;margin-top:8px">pip install telethon && python scripts/setup_helper.py</code><br>
-      Choose <code>3) Both</code> → enter same API_ID/HASH + phone → paste the printed string into <code>GRAB_SESSION_STRINGS</code>.<br>
-      Full guide: <a href="https://github.com/tirforge/Aruvi/blob/main/docs/grabber.md" target="_blank">docs/grabber.md</a>
-    </div>
-  </div>
-
-  <div class="card" style="border-color:rgba(99,102,241,.25)">
-    <h2>Need session strings + IDs? Get them right here — no Codespaces needed</h2>
-    <span class="badge">✨ Now runs directly in this website — nothing leaves your browser</span>
-    <p class="hint">Enter your API creds + phone below. We connect directly to Telegram from your browser and generate everything here. <b style="color:#a5b4fc">Your phone/code never touch our server.</b></p>
-    <label>Phone number (with country code)</label>
-    <input id="phone" placeholder="+919876543210">
-    <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
-      <button class="btn" id="btnSend" onclick="sendCode()">Send login code →</button>
-      <span id="sendStatus" class="hint" style="align-self:center"></span>
-    </div>
-    <label style="margin-top:16px">Login code (from Telegram)</label>
-    <input id="code" placeholder="12345">
-    <label>2FA Password (if you have one, else leave empty)</label>
-    <input id="pwd" type="password" placeholder="••••••">
-    <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
-      <button class="btn" id="btnGen" onclick="genSession()">Generate session string + list IDs →</button>
-      <span id="genStatus" class="hint" style="align-self:center"></span>
-    </div>
-    <div id="sessOut" class="out"></div>
-    <div id="listOut" class="out" style="margin-top:12px"></div>
-    <p class="hint" style="margin-top:12px">If this fails (browser WSS blocked), use fallback: <a href="https://codespaces.new/tirforge/Aruvi" target="_blank">Codespaces → python scripts/setup_helper.py → Both</a></p>
+    <h2>Option B — In your browser <span class="tag alt">zero install</span></h2>
+    <p>An open-source (MIT) client-side tool that runs MTProto entirely in your browser and can export <b>Pyrogram-format</b> strings directly.</p>
+    <pre id="link">https://aaruvi.space/telegram-tools/</pre>
+    <button class="copy" onclick="window.open('https://aaruvi.space/telegram-tools/','_blank')">Open tool ↗</button>
+    <p style="margin-top:8px">Choose <b>Generator → User</b>, enter the same api_id/api_hash + phone, then export as <b>Pyrogram</b>.</p>
   </div>
 </div>
-<script type="importmap">
-{"imports":{"telegram":"https://esm.sh/telegram@2.22.2","telegram/sessions":"https://esm.sh/telegram@2.22.2/sessions"}}
-</script>
-<script type="module">
-let TelegramClient=null,StringSession=null;
-try{
-  // Import ONLY the root module: it re-exports `sessions`. Importing
-  // telegram/sessions separately creates a SECOND class copy and GramJS's
-  // `instanceof StringSession` guard then rejects our session ("Only
-  // StringSession and StoreSessions are supported").
-  const TG=await import("telegram");
-  TelegramClient=TG.TelegramClient;
-  StringSession=TG.sessions.StringSession;
-}catch(e){
-  console.error(e);
-  const s=document.getElementById('sendStatus');
-  if(s){s.textContent='Failed to load the Telegram engine (esm.sh). Check connection/adblocker and reload. Details: '+(e.message||e);s.style.color='#f87171';}
-}
-let client=null; let _apiId=null; let _apiHash=null;
-window.sendCode = async ()=>{
-  const id=document.getElementById('api_id').value.trim();
-  const hash=document.getElementById('api_hash').value.trim();
-  const phone=document.getElementById('phone').value.trim();
-  const s=document.getElementById('sendStatus');
-  if(!id||!hash||!phone){ s.textContent='Fill API_ID, API_HASH and phone first.'; s.style.color='#f87171'; return; }
-  _apiId=parseInt(id); _apiHash=hash;
-  s.textContent='Connecting to Telegram...'; s.style.color='#9CA3AF';
-  try{
-    client=new TelegramClient(new StringSession(""), _apiId, _apiHash, {connectionRetries:2});
-    await client.connect();
-    const res=await client.sendCode({apiId:_apiId, apiHash:_apiHash}, phone);
-    s.textContent='Code sent! Check Telegram and enter it below.'; s.style.color='#34d399';
-    window._phone=phone; window._phoneCodeHash=res.phoneCodeHash;
-  }catch(e){ s.textContent='Error: '+(e.message||e); s.style.color='#f87171'; console.error(e); }
-};
-window.genSession = async ()=>{
-  const code=document.getElementById('code').value.trim();
-  const pwd=document.getElementById('pwd').value.trim();
-  const s=document.getElementById('genStatus');
-  const sessOut=document.getElementById('sessOut');
-  const listOut=document.getElementById('listOut');
-  if(!client){ s.textContent='Click "Send login code" first.'; s.style.color='#f87171'; return; }
-  if(!code){ s.textContent='Enter the login code.'; s.style.color='#f87171'; return; }
-  s.textContent='Signing in...'; s.style.color='#9CA3AF';
-  try{
-    await client.signIn({phone:window._phone, phoneCodeHash:window._phoneCodeHash, phoneCode:code});
-  }catch(e){
-    if(e.message && e.message.includes('2FA') || e.errorMessage==='SESSION_PASSWORD_NEEDED'){
-      if(!pwd){ s.textContent='2FA enabled — enter password and try again.'; s.style.color='#f87171'; return; }
-      try{ await client.signInWithPassword({apiId:_apiId, apiHash:_apiHash}, pwd); }
-      catch(e2){ s.textContent='2FA failed: '+(e2.message||e2); s.style.color='#f87171'; return; }
-    } else if(!e.message?.includes('2FA')){ s.textContent='Sign-in failed: '+(e.message||e); s.style.color='#f87171'; return; }
-  }
-  try{
-    const sess=client.session.save();
-    sessOut.textContent='GRAB_SESSION_STRINGS='+sess+'\n\n# Copy this whole line into your .env\n# Keep it secret — it is a full login.';
-    sessOut.classList.add('show');
-    s.textContent='✓ Session generated! Fetching your channels/groups...'; s.style.color='#34d399';
-    const dialogs=await client.getDialogs();
-    let rows=[['Title','Username','ID for .env (-100...)','']];
-    for(const d of dialogs){
-      const ent=d.entity;
-      if(ent.className==='Channel' || ent.className==='Chat'){
-        const isChannel=ent.broadcast||ent.megagroup;
-        const disp=isChannel?`-100${ent.id}`:`${ent.id}`;
-        const uname=ent.username||'(no username)';
-        rows.push([ent.title||'Chat', uname, disp, String(ent.id)]);
-      }
-      if(rows.length>60) break;
-    }
-    rows.sort((a,b)=>a[0].toLowerCase().localeCompare(b[0].toLowerCase()));
-    let txt=rows.map(r=> r[0].padEnd(28).slice(0,28)+'  '+r[1].padEnd(22).slice(0,22)+'  '+r[2]).join('\n');
-    // also show clean GRAB line
-    const withUsername=rows.filter(r=>r[1]!=='(no username)' && r[0]!=='Title').slice(0,8).map(r=>r[1]).join(',');
-    if(withUsername) txt+='\n\n# For .env:\n# GRAB_GROUP_USERNAMES='+withUsername;
-    listOut.textContent=txt;
-    listOut.classList.add('show');
-    s.textContent='Done — copy the session string and IDs above.';
-  }catch(e){ s.textContent='Error: '+(e.message||e); s.style.color='#f87171'; console.error(e); }
-};
-window.generate = function(){
-  const id=document.getElementById('api_id').value.trim();
-  const hash=document.getElementById('api_hash').value.trim();
-  const sid=document.getElementById('storage_id').value.trim();
-  const groups=document.getElementById('grab_groups').value.trim();
-  const bots=document.getElementById('grab_bots').value.trim();
-  let out='';
-  if(id) out+=`TELEGRAM_API_ID=${id}\n`;
-  if(hash) out+=`TELEGRAM_API_HASH=${hash}\n`;
-  if(sid) out+=`TELEGRAM_STORAGE_CHANNEL_ID=${sid}\n`;
-  if(groups) out+=`GRAB_GROUP_USERNAMES=${groups}\n`;
-  if(bots) out+=`GRAB_BOT_USERNAMES=${bots}\n`;
-  out+=`# Add GRAB_SESSION_STRINGS after generating above\n`;
-  out+=`# GRAB_SESSION_STRINGS=PASTE_STRING_HERE\n`;
-  document.getElementById('out').textContent=out;
-  document.getElementById('out').classList.add('show');
-  document.getElementById('next').style.display='block';
-  if(!out.trim()){document.getElementById('out').textContent='Fill at least one field above.';}
-}
+<script>
+function cp(id,btn){navigator.clipboard.writeText(document.getElementById(id).innerText)
+ .then(()=>{btn.textContent='Copied ✓';setTimeout(()=>btn.textContent='Copy command',1400)})}
 </script>
 </body>
 </html>
