@@ -174,6 +174,9 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
     private var lastSeekTime: Long = 0L
 
     private var castPlayer: CastPlayer? = null
+    private var castContext: com.google.android.gms.cast.framework.CastContext? = null
+    private var castSessionManagerListener:
+        com.google.android.gms.cast.framework.SessionManagerListener<com.google.android.gms.cast.framework.CastSession>? = null
     // The ExoPlayer is a @Singleton that outlives this ViewModel — the listener
     // must be removable or each playback session leaks one listener (and the
     // ViewModel it captures) into the shared player forever.
@@ -219,41 +222,48 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
         // DeadObjectException and to ensure MediaRouter registration.
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
             try {
-                val castContext = try {
+                val ctx = try {
                     CastContext.getSharedInstance(context)
                 } catch (e: Exception) {
                     null
                 }
-                if (castContext != null) {
+                if (ctx != null) {
+                    castContext = ctx
                     val player = try {
-                        CastPlayer(castContext)
+                        CastPlayer(ctx)
                     } catch (_: Throwable) { null }
                     player?.addListener(castPlayerListener)
                     castPlayer = player
                     // When a Cast session starts/resumes, push the current media to the device.
-                    castContext.sessionManager.addSessionManagerListener(
-                        object : com.google.android.gms.cast.framework.SessionManagerListener<com.google.android.gms.cast.framework.CastSession> {
-                            override fun onSessionStarted(s: com.google.android.gms.cast.framework.CastSession, r: String) {
-                                _uiState.value = _uiState.value.copy(isCasting = true)
-                                castToDevice()
-                            }
-                            override fun onSessionResumed(s: com.google.android.gms.cast.framework.CastSession, wasSuspended: Boolean) {
-                                _uiState.value = _uiState.value.copy(isCasting = true)
-                                castToDevice()
-                            }
-                            override fun onSessionEnded(s: com.google.android.gms.cast.framework.CastSession, e: Int) {
-                                _uiState.value = _uiState.value.copy(isCasting = false)
-                                // Resume the local player from where the TV left off.
-                                try { exoPlayer.seekTo(resumePosition) } catch (_: Throwable) {}
-                            }
-                            override fun onSessionStarting(s: com.google.android.gms.cast.framework.CastSession) {}
-                            override fun onSessionStartFailed(s: com.google.android.gms.cast.framework.CastSession, e: Int) {}
-                            override fun onSessionResuming(s: com.google.android.gms.cast.framework.CastSession, r: String) {}
-                            override fun onSessionResumeFailed(s: com.google.android.gms.cast.framework.CastSession, e: Int) {}
-                            override fun onSessionEnding(s: com.google.android.gms.cast.framework.CastSession) {}
-                            override fun onSessionSuspended(s: com.google.android.gms.cast.framework.CastSession, r: Int) {}
-                        }, com.google.android.gms.cast.framework.CastSession::class.java
-                    )
+                    val listener = object : com.google.android.gms.cast.framework.SessionManagerListener<com.google.android.gms.cast.framework.CastSession> {
+                        override fun onSessionStarted(s: com.google.android.gms.cast.framework.CastSession, r: String) {
+                            _uiState.value = _uiState.value.copy(isCasting = true)
+                            castToDevice()
+                        }
+                        override fun onSessionResumed(s: com.google.android.gms.cast.framework.CastSession, wasSuspended: Boolean) {
+                            _uiState.value = _uiState.value.copy(isCasting = true)
+                            // The receiver usually still has our media loaded; only (re)load
+                            // when it has nothing, otherwise reconnecting restarts the movie.
+                            if (castPlayer?.playbackState == Player.STATE_IDLE) castToDevice()
+                        }
+                        override fun onSessionEnded(s: com.google.android.gms.cast.framework.CastSession, e: Int) {
+                            _uiState.value = _uiState.value.copy(isCasting = false)
+                            // Resume the local player from where the TV left off.
+                            try { exoPlayer.seekTo(resumePosition) } catch (_: Throwable) {}
+                        }
+                        override fun onSessionStarting(s: com.google.android.gms.cast.framework.CastSession) {}
+                        override fun onSessionStartFailed(s: com.google.android.gms.cast.framework.CastSession, e: Int) {
+                            _uiState.value = _uiState.value.copy(isCasting = false)
+                        }
+                        override fun onSessionResuming(s: com.google.android.gms.cast.framework.CastSession, r: String) {}
+                        override fun onSessionResumeFailed(s: com.google.android.gms.cast.framework.CastSession, e: Int) {
+                            _uiState.value = _uiState.value.copy(isCasting = false)
+                        }
+                        override fun onSessionEnding(s: com.google.android.gms.cast.framework.CastSession) {}
+                        override fun onSessionSuspended(s: com.google.android.gms.cast.framework.CastSession, r: Int) {}
+                    }
+                    castSessionManagerListener = listener
+                    ctx.sessionManager.addSessionManagerListener(listener, com.google.android.gms.cast.framework.CastSession::class.java)
                 }
             } catch (_: Throwable) {
                 castPlayer = null
@@ -808,10 +818,15 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
     }
 
     fun stopCasting() {
+        // End the Cast session (stops the receiver) rather than just pausing it,
+        // so the notification/lock-screen controls are torn down too.
         try {
-            castPlayer?.stop()
+            castContext?.sessionManager?.endCurrentSession(true)
+        } catch (_: Throwable) {}
+        try {
             castPlayer?.clearMediaItems()
         } catch (_: Throwable) {}
+        _uiState.value = _uiState.value.copy(isCasting = false)
     }
 
     // Returns the player that should currently receive control/query calls.
@@ -1095,6 +1110,15 @@ while (isActive) {
             try { it.removeListener(castPlayerListener) } catch (_: Throwable) {}
             try { it.release() } catch (_: Throwable) {}
         }
+        castSessionManagerListener?.let {
+            try {
+                castContext?.sessionManager?.removeSessionManagerListener(
+                    it, com.google.android.gms.cast.framework.CastSession::class.java
+                )
+            } catch (_: Throwable) {}
+        }
+        castSessionManagerListener = null
+        castContext = null
         saveProgress()
         if (!isBackgroundAudioActive) {
             // The ExoPlayer is a shared @Singleton. Only tear down the media
