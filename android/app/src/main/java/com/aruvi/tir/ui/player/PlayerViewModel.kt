@@ -175,6 +175,10 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
 
     private var castPlayer: CastPlayer? = null
     private var castContext: com.google.android.gms.cast.framework.CastContext? = null
+    // The fileId the running Cast session was loaded with. Used so a session
+    // ending AFTER the user already switched movies can't seek the NEW movie
+    // to the OLD movie's last TV position.
+    private var castSessionFileId = -1
     private var castSessionManagerListener:
         com.google.android.gms.cast.framework.SessionManagerListener<com.google.android.gms.cast.framework.CastSession>? = null
     // The ExoPlayer is a @Singleton that outlives this ViewModel — the listener
@@ -244,8 +248,13 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                         }
                         override fun onSessionEnded(s: com.google.android.gms.cast.framework.CastSession, e: Int) {
                             _uiState.value = _uiState.value.copy(isCasting = false)
-                            // Resume the local player from where the TV left off.
-                            try { exoPlayer.seekTo(resumePosition) } catch (_: Throwable) {}
+                            // Resume the local player from where the TV left off —
+                            // but only if this session was for the movie still open.
+                            // endCurrentSession() fired during a movie switch must not
+                            // seek the freshly loaded file to the old timeline.
+                            if (currentFileId == castSessionFileId) {
+                                try { exoPlayer.seekTo(resumePosition) } catch (_: Throwable) {}
+                            }
                         }
                         override fun onSessionStarting(s: com.google.android.gms.cast.framework.CastSession) {}
                         override fun onSessionStartFailed(s: com.google.android.gms.cast.framework.CastSession, e: Int) {
@@ -559,6 +568,14 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
 
+            // Opening/switching a movie while casting would leave the TV on the
+            // old file while progress tracking pairs its position with the new
+            // currentFileId. End the cast session up front.
+            if (_uiState.value.isCasting) {
+                try { castContext?.sessionManager?.endCurrentSession(true) } catch (_: Throwable) {}
+                _uiState.value = _uiState.value.copy(isCasting = false)
+            }
+
             val directStreamUrl = directUrl
             if (directStreamUrl != null) {
                 val mediaItem = MediaItem.Builder()
@@ -695,6 +712,10 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
     }
 
     fun playNextFile(newFileId: Int) {
+        if (_uiState.value.isCasting) {
+            try { castContext?.sessionManager?.endCurrentSession(true) } catch (_: Throwable) {}
+            _uiState.value = _uiState.value.copy(isCasting = false)
+        }
         currentFileId = newFileId
         resumePosition = 0
         exoPlayer.stop()
@@ -817,6 +838,7 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 // capture above): reading the shared resumePosition instead can
                 // hit a zeroed value if updatePosition() synced it from the
                 // still-idle CastPlayer first (androidx/media#25 behaviour).
+                castSessionFileId = currentFileId
                 player.setMediaItem(mediaItem, startPositionMs)
                 player.prepare()
                 player.play()
@@ -937,7 +959,7 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
     }
 
     fun jumpToPercent(percent: Int) {
-        val dur = exoPlayer.duration
+        val dur = activePlayer().duration
         if (dur <= 0) return
         val target = (dur * percent / 100L)
         seekTo(target)
