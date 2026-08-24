@@ -839,14 +839,19 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                     .setTitle(title)
                     .setArtworkUri(thumbnailUrl?.let { Uri.parse(it) })
                     .build()
+                // media3 1.2.1 MediaItem.Builder has no setContentType/
+                // setStreamType; setMimeType is the supported equivalent and
+                // BUFFERED is already the Cast default stream type. Use the
+                // file's real MIME so audio files aren't mislabelled video —
+                // the Default Receiver picks its renderer from this hint.
+                val mimeType = file?.mimeType
+                    ?.takeIf { it.startsWith("video/") || it.startsWith("audio/") }
+                    ?: "video/mp4"
                 val mediaItem = MediaItem.Builder()
                     .setUri(url)
                     .setMediaId(currentFileId.toString())
                     .setMediaMetadata(mediaMetadata)
-                    // media3 1.2.1 MediaItem.Builder has no setContentType/
-                    // setStreamType; setMimeType is the supported equivalent
-                    // and BUFFERED is already the Cast default stream type.
-                    .setMimeType("video/mp4")
+                    .setMimeType(mimeType)
                     .build()
                 // Start where the LOCAL player was when casting began (see
                 // capture above): reading the shared resumePosition instead can
