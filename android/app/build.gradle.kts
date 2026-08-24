@@ -24,14 +24,14 @@ android {
         create("tv") {
             dimension = "device"
             targetSdk = 36
-            versionCode = 15
-            versionName = "2.0.0"
+            versionCode = 16
+            versionName = "2.0.1"
         }
         create("mobile") {
             dimension = "device"
             targetSdk = 36
-            versionCode = 17
-            versionName = "2.0.0"
+            versionCode = 18
+            versionName = "2.0.1"
         }
     }
 
