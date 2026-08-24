@@ -208,36 +208,58 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
 
     @OptIn(UnstableApi::class)
     private fun initCastPlayer() {
-        val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
-        castExecutor = executor
+        // Official Media3 pattern: Cast.getSingletonInstance(app).initialize() is done in TelePlayApp.
+        // Build CastPlayer with Output Switcher support so route changes auto-transfer playback.
+        // Keep legacy CastContext path as fallback for devices without new Cast singleton.
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
             try {
-                // Defensive initialization of CastContext to avoid DeadObjectException on Main thread
-                val castContextTask = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    try {
-                        CastContext.getSharedInstance(context, executor)
-                    } catch (e: Exception) {
-                        null
+                // Try new Media3 Cast singleton first (developer.android.com/media/media3/cast/create-castplayer)
+                // Cast.getSingletonInstance(context).initialize() is idempotent — already called in Application.onCreate
+                try {
+                    val cast = androidx.media3.cast.Cast.getSingletonInstance(context)
+                    if (cast.needsInitialization()) {
+                        cast.initialize()
                     }
+                    val player = androidx.media3.cast.CastPlayer.Builder(context)
+                        .setLocalPlayer(exoPlayer)
+                        .build()
+                    player.addListener(castPlayerListener)
+                    castPlayer = player
+                    return@launch
+                } catch (_: Throwable) {
+                    // Fallback to legacy GMS CastContext path for older GMS builds
                 }
 
-                castContextTask?.addOnSuccessListener { castContext ->
-                    viewModelScope.launch {
-                        val player = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            try {
-                                CastPlayer(castContext)
-                            } catch (_: Throwable) {
-                                null
-                            }
-                        }
-                        castPlayer = player
-                        player?.addListener(castPlayerListener)
-                    }
-                }?.addOnFailureListener {
-                    castPlayer = null
+                // Legacy fallback — must be called on main thread with Activity-capable context,
+                // not IO dispatcher, to avoid DeadObjectException and ensure MediaRouter registration.
+                val castContext = try {
+                    CastContext.getSharedInstance(context)
+                } catch (e: Exception) {
+                    null
                 }
-            } catch (e: Exception) {
-                // Ignore GMS failures
+                if (castContext != null) {
+                    val player = try {
+                        CastPlayer(castContext)
+                    } catch (_: Throwable) { null }
+                    player?.addListener(castPlayerListener)
+                    castPlayer = player
+                    // Auto-cast when remote route becomes available — MediaRouteButton handles dialog,
+                    // but we also listen for route switch to transfer current media
+                    castContext.sessionManager.addSessionManagerListener(
+                        object : com.google.android.gms.cast.framework.SessionManagerListener<com.google.android.gms.cast.framework.Session> {
+                            override fun onSessionStarted(s: com.google.android.gms.cast.framework.Session, r: String) { castToDevice() }
+                            override fun onSessionResumed(s: com.google.android.gms.cast.framework.Session, wasSuspended: Boolean) { castToDevice() }
+                            override fun onSessionEnded(s: com.google.android.gms.cast.framework.Session, e: Int) { _uiState.value = _uiState.value.copy(isCasting = false) }
+                            override fun onSessionStarting(s: com.google.android.gms.cast.framework.Session) {}
+                            override fun onSessionStartFailed(s: com.google.android.gms.cast.framework.Session, e: Int) {}
+                            override fun onSessionResuming(s: com.google.android.gms.cast.framework.Session, r: String) {}
+                            override fun onSessionResumeFailed(s: com.google.android.gms.cast.framework.Session, e: Int) {}
+                            override fun onSessionEnding(s: com.google.android.gms.cast.framework.Session) {}
+                            override fun onSessionSuspended(s: com.google.android.gms.cast.framework.Session, r: Int) {}
+                        }, com.google.android.gms.cast.framework.CastSession::class.java
+                    )
+                }
+            } catch (_: Throwable) {
                 castPlayer = null
             }
         }
@@ -451,14 +473,19 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
 
     @OptIn(UnstableApi::class)
     private fun getTrackName(format: Format, index: Int, type: String): String {
-        val language = format.language?.let { lang ->
-            java.util.Locale(lang).displayLanguage.takeIf { it.isNotBlank() }
+        val lang = format.language?.let { java.util.Locale(it).displayLanguage.takeIf { b -> b.isNotBlank() } }
+        val rawLabel = format.label?.trim()?.takeIf { it.isNotBlank() }
+        // Rips often abuse label for site/encoder: filter website/rip junk, keep useful codec tags
+        val label = rawLabel?.takeIf {
+            !it.contains("www.", true) && !it.contains(".com", true) &&
+            !it.contains(".xyz", true) && !it.contains(".store", true) &&
+            !it.contains("Rip", true) && it.length < 30 &&
+            lang?.let { l -> !it.equals(l, true) } ?: true
         }
-        val label = format.label?.takeIf { it.isNotBlank() }
-        
         return when {
+            lang != null && label != null -> "$lang ($label)"
+            lang != null -> lang
             label != null -> label
-            language != null -> language
             else -> "$type Track $index"
         }
     }

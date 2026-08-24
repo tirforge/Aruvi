@@ -495,9 +495,15 @@ fun MobilePlayerControls(
                         AndroidView(
                             factory = { ctx ->
                                 val activity = ctx.findFragmentActivity()
-                                val btn = MediaRouteButton(activity ?: ctx)
+                                // MediaRouteButton must use an AppCompat-themed context with opaque colorPrimary
+                                // (MediaRouterThemeHelper crashes on translucent #0). Wrap activity context.
+                                val themedCtx = androidx.appcompat.view.ContextThemeWrapper(
+                                    activity ?: ctx, androidx.appcompat.R.style.Theme_AppCompat_NoActionBar
+                                )
+                                val btn = MediaRouteButton(themedCtx)
                                 btn.layoutParams = ViewGroup.LayoutParams(buttonSizePx, buttonSizePx)
-                                btn.setBackgroundColor(android.graphics.Color.BLACK)
+                                btn.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                // Let Cast framework tint icon via theme; Compose will tint via LocalContentColor
                                 btn
                             },
                             modifier = Modifier.size(48.dp)

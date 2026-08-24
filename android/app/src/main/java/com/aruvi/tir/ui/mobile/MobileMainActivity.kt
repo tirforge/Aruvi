@@ -27,17 +27,25 @@ class MobileMainActivity : FragmentActivity() {
         enableEdgeToEdge()
         setContent {
             val context = LocalContext.current
+            // Cast discovery needs NEARBY_WIFI_DEVICES (13+) or FINE_LOCATION (12 and below)
+            val castPermission = if (android.os.Build.VERSION.SDK_INT >= 33) {
+                android.Manifest.permission.NEARBY_WIFI_DEVICES
+            } else {
+                android.Manifest.permission.ACCESS_FINE_LOCATION
+            }
             val permissions = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
                 arrayOf(
                     android.Manifest.permission.READ_MEDIA_IMAGES,
                     android.Manifest.permission.READ_MEDIA_VIDEO,
                     android.Manifest.permission.READ_MEDIA_AUDIO,
-                    android.Manifest.permission.POST_NOTIFICATIONS
+                    android.Manifest.permission.POST_NOTIFICATIONS,
+                    castPermission
                 )
             } else {
                 arrayOf(
                     android.Manifest.permission.READ_EXTERNAL_STORAGE,
-                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                    castPermission
                 )
             }
 

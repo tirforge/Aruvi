@@ -21,6 +21,13 @@ class TelePlayApp : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
+        // Initialize Cast early — must happen before any MediaRouteButton/CastPlayer is created
+        // (developer.android.com/media/media3/cast/create-castplayer, Cast#getSingletonInstance)
+        try {
+            androidx.media3.cast.Cast.getSingletonInstance(this).initialize()
+        } catch (_: Throwable) {
+            // Cast not available (no GMS / leanback) — ignore
+        }
     }
 
     override fun newImageLoader(): ImageLoader {
