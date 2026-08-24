@@ -196,6 +196,20 @@
   const scrollToBuilder=()=>{const e=q('aruviEnv');if(!e)return;
     e.scrollIntoView({behavior:'smooth',block:'start'});flash();};
 
+  const pill=document.createElement('div');
+  pill.id='ae-listen-pill';
+  pill.style.cssText='position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:100001;display:none;'
+    +'align-items:center;gap:8px;background:'+S800+';border:1px solid '+P+';color:#E2E8F0;'
+    +'padding:9px 16px;border-radius:99px;font-size:.8rem;font-weight:600;font-family:var(--font-sans)';
+  pill.innerHTML='<span style="width:8px;height:8px;border-radius:99px;background:'+OK+
+    ';animation:ae-pulse 1s infinite"></span> Listening for your session… complete the login above';
+  const pulseStyle=document.createElement('style');
+  pulseStyle.textContent='@keyframes ae-pulse{0%,100%{opacity:1}50%{opacity:.25}}';
+  document.head.appendChild(pulseStyle);
+  document.body.appendChild(pill);
+  const showPill=()=>pill.style.display='flex';
+  const hidePill=()=>pill.style.display='none';
+
   const toastEl=document.createElement('div');
   toastEl.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:30px;z-index:100001;background:'+getComputedStyle(document.documentElement).getPropertyValue('--color-success-500')+';color:#052e16;padding:9px 18px;border-radius:99px;font-weight:600;font-size:.8rem;opacity:0;transition:opacity .25s;pointer-events:none';
   document.body.appendChild(toastEl);
@@ -205,7 +219,6 @@
   function setSession(v){
     if(!v)return;
     window.__aruviSession=v;
-    window.dispatchEvent(new CustomEvent('aruvi-session',{detail:v}));
     const e=q('ae-sess'); if(!e)return;
     e.value=v; e.classList.add('captured');
     toast('Session string captured ✓');
@@ -219,7 +232,10 @@
     try{
       const txt=document.body?document.body.innerText:'';
       const m=txt.match(RE);
-      if(m&&m[0]!==lastGrab){lastGrab=m[0];setSession(m[0]);}
+      if(m&&m[0]!==lastGrab){lastGrab=m[0];
+        if(captureHandler){fireCapture(m[0]);}
+        else{setSession(m[0]);}
+      }
     }catch(e){/* never break the page */}
   },700);
 
@@ -350,106 +366,116 @@
   document.body.appendChild(wiz);
 
   let wizWantGrab=false;
+  let captureHandler=null;   // armed while user is off completing login
 
+  function wizClose(){wiz.style.display='none';
+    if(captureHandler){window.removeEventListener('aruvi-session',captureHandler);captureHandler=null;}}
+  const WBTN=(id,label,primary)=>'<button id="'+id+'" style="flex:1;padding:11px;border-radius:.55rem;font-weight:600;font-size:.88rem;cursor:pointer;border:1px solid '+S7+';'+
+    (primary?'background:'+P+';color:#fff;border-color:transparent':'background:'+S800+';color:#E2E8F0')+'">'+label+'</button>';
   function wizRender(html){
     wiz.innerHTML='<div style="width:100%;max-width:520px;background:'+S9+';border:1px solid '+S7+
       ';border-radius:.9rem;padding:26px;color:#E2E8F0">'+html+'</div>';
     wiz.style.display='flex';
   }
-  function wizClose(){wiz.style.display='none';}
-  const WBTN=(id,label,primary)=>'<button id="'+id+'" style="flex:1;padding:11px;border-radius:.55rem;font-weight:600;font-size:.88rem;cursor:pointer;border:1px solid '+S7+';'+
-    (primary?'background:'+P+';color:#fff;border-color:transparent':'background:'+S800+';color:#E2E8F0')+'">'+label+'</button>';
 
-  function wizAsk(){
+  function applyCapture(v){
+    if(wizWantGrab){const g=q('ae-grab');if(g&&!g.checked){g.checked=true;g.dispatchEvent(new Event('change'));}}
+    setSession(v);
+  }
+
+  // Fires no matter where the string came from (generator above, paste box,
+  // another tab of this page) — then brings the user down to the builder.
+  function fireCapture(v){
+    v=String(v); hidePill();
+    if(captureHandler){
+      const h=captureHandler; captureHandler=null;
+      window.removeEventListener('aruvi-session',h);
+      h({detail:v});
+    }
+  }
+  function armCapture(){
+    if(captureHandler)return;
+    captureHandler=ev=>{
+      const v=(ev&&ev.detail)||window.__aruviSession;
+      if(!v)return;
+      captureHandler=null;
+      window.removeEventListener('aruvi-session',captureHandler);
+      applyCapture(v);
+      toast('✓ Session captured — opening .env builder');
+      setTimeout(()=>{wizClose();hidePill();scrollToBuilder();},500);
+    };
+    window.addEventListener('aruvi-session',captureHandler);
+    showPill();
+  }
+
+  function openWizard(){
+    wizWantGrab=false;
     wizRender(`
       <h2 style="margin:0 0 6px;font-size:1.15rem;font-weight:700">Movie Grabber?</h2>
       <p style="color:${S4};font-size:.85rem;margin:0 0 18px">
-        Do you want Aruvi to <b style="color:#E2E8F0">search & fetch movies</b> from your Telegram groups
-        (the Grabber feature)?</p>
+        Do you want Aruvi to <b style="color:#E2E8F0">search & fetch movies</b> from your Telegram groups?</p>
       <div style="display:flex;gap:10px">
         ${WBTN('w-yes','Yes — enable Grabber',true)}
         ${WBTN('w-no','No')}
       </div>
-      <p style="margin:14px 0 0;font-size:.72rem;color:${S4}">You can change this later in the .env builder below.</p>`);
+      <p style="margin:14px 0 0;font-size:.72rem;color:${S4}">Changeable later in the .env builder.</p>`);
     document.getElementById('w-yes').onclick=()=>{wizWantGrab=true;wizNeedSession();};
-    document.getElementById('w-no').onclick =()=>{wizWantGrab=false;wizFinish();};
+    document.getElementById('w-no').onclick=()=>{
+      wizWantGrab=false;
+      wizClose();
+      scrollToBuilder();
+    };
   }
 
   function wizNeedSession(){
-    if(window.__aruviSession){ wizDone(); return; }
+    if(window.__aruviSession){          // already have one — straight through
+      applyCapture(window.__aruviSession);
+      wizClose();scrollToBuilder();
+      return;
+    }
     wizRender(`
       <h2 style="margin:0 0 6px;font-size:1.15rem;font-weight:700">Grabber needs your account</h2>
       <p style="color:${S4};font-size:.85rem;margin:0 0 14px">
-        Movie search runs through a <b style="color:#E2E8F0">Telegram user session</b>.
-        We'll create one now using the <b style="color:#E2E8F0">Generator</b> above —
-        phone → code → done. Everything stays on this page.</p>
+        We'll create a <b style="color:#E2E8F0">Telegram user session</b> with the
+        <b style="color:#E2E8F0">Generator</b> right here — phone → code → done.</p>
       <ol style="color:${S4};font-size:.8rem;margin:0 0 16px;padding-left:20px">
         <li>Click “Open Generator”.</li>
-        <li>Choose <b>User</b>, enter API ID / HASH + your phone.</li>
-        <li>Approve the login code (and 2FA if asked).</li>
-        <li>Come back — we capture the string automatically.</li>
+        <li>User → API ID / HASH → phone → code (2FA if asked).</li>
+        <li>The moment the string appears, we jump back here automatically.</li>
       </ol>
       <div style="display:flex;gap:10px">
         ${WBTN('w-open','Open Generator ↑',true)}
         ${WBTN('w-cancel','Cancel')}
       </div>
-      <div id="w-status" style="margin-top:14px;font-size:.8rem;color:${S4}">
-        Waiting for session…
-      </div>
+      <div id="w-status" style="margin-top:12px;font-size:.8rem;color:${OK}">Listening…</div>
       <textarea id="w-paste" placeholder="…or paste a Pyrogram string here"
-        style="margin-top:12px;width:100%;box-sizing:border-box;min-height:56px;background:#000;
+        style="margin-top:10px;width:100%;box-sizing:border-box;min-height:52px;background:#000;
         border:1px solid ${S7};border-radius:.5rem;padding:8px;color:#E2E8F0;font-size:.72rem;
         font-family:${MONO};outline:none"></textarea>
       <button id="w-usepaste" class="aetu-btn aetu-copy" style="margin-top:8px;width:100%">Use pasted string</button>`);
     document.getElementById('w-open').onclick=()=>{
-      // drive the app's own Generator without leaving the page
-      const genBtn=[...document.querySelectorAll('button')].find(b=>b.textContent.includes('Create session strings'));
-      if(genBtn){genBtn.scrollIntoView({behavior:'smooth',block:'start'});genBtn.click();}
+      wizClose();                                  // free the page first
+      armCapture();                                // still listening while away
+      const gen=[...document.querySelectorAll('button')].find(b=>b.textContent.includes('Create session strings'));
+      if(gen){gen.scrollIntoView({behavior:'smooth',block:'start'});
+              setTimeout(()=>gen.click(),350);}
       else scrollToBuilder();
+      toast('Generator opened — complete login, we take over from there');
     };
-    document.getElementById('w-cancel').onclick=wizClose;
+    document.getElementById('w-cancel').onclick=()=>{wizClose();hidePill();};
+    document.getElementById('w-paste').addEventListener('input',e=>{
+      const v=e.target.value.trim();
+      if(v.length>=50){                            // pasted enough → treat as captured
+        applyCapture(v); wizClose(); scrollToBuilder();
+        toast('✓ Pasted session applied');
+      }
+    });
     document.getElementById('w-usepaste').onclick=()=>{
       const v=document.getElementById('w-paste').value.trim();
       if(v.length<50){document.getElementById('w-status').textContent='That string looks too short.';return;}
-      window.__aruviSession=v; window.dispatchEvent(new CustomEvent('aruvi-session',{detail:v}));
-      setSession(v); wizDone();
+      document.getElementById('w-paste').dispatchEvent(new Event('input'));
     };
-    // live wait for capture
-    const iv=setInterval(()=>{
-      if(!wiz.style.display||wiz.style.display==='none'){clearInterval(iv);return;}
-      if(window.__aruviSession){
-        clearInterval(iv);
-        const st=document.getElementById('w-status');
-        if(st){st.textContent='✓ Session captured ('+window.__aruviSession.slice(0,10)+'…)';st.style.color=OK;}
-        setTimeout(wizDone,900);
-      }
-    },500);
-  }
-
-  function wizDone(){
-    if(wizWantGrab){
-      const g=q('ae-grab'); if(g&&!g.checked)g.checked=true;
-      g&&g.dispatchEvent(new Event('change'));       // pulls storage channel in too
-      setSession(window.__aruviSession);              // ensure session in tile
-    }
-    wizRender(`
-      <h2 style="margin:0 0 6px;font-size:1.15rem;font-weight:700">All set ✓</h2>
-      <p style="color:${S4};font-size:.85rem;margin:0 0 18px">
-        Grabber: <b style="color:#E2E8F0">${wizWantGrab?'enabled':'off'}</b>
-        ${window.__aruviSession?' · session: <b style="color:#E2E8F0">'+window.__aruviSession.slice(0,10)+'…</b>':''}<br>
-        Fine-tune any value below, then copy your .env.</p>
-      <div style="display:flex;gap:10px">${WBTN('w-done','Open .env builder ↓',true)}</div>`);
-    document.getElementById('w-done').onclick=()=>{wizClose();scrollToBuilder();};
-  }
-
-  function openWizard(){
-    if(window.__aruviWizardBusy)return;
-    window.__aruviWizardBusy=true;
-    wizAsk();
-    const obs=new MutationObserver(()=>{
-      if(wiz.style.display==='none'){obs.disconnect();window.__aruviWizardBusy=false;}
-    });
-    obs.observe(wiz,{attributes:true,attributeFilter:['style']});
+    armCapture();
   }
 
   const go=q('ae-go'),cp=q('ae-copy'),out=q('ae-out');
@@ -463,6 +489,9 @@
 })();
 
 </script>
+
+
+
 
 
 
