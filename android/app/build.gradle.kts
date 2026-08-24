@@ -170,6 +170,7 @@ dependencies {
     implementation("com.github.anilbeesetti.nextlib:nextlib-media3ext:0.6.0")
     implementation(files("libs/lib-decoder-av1-release.aar"))
     implementation("androidx.mediarouter:mediarouter:1.6.0")
+    implementation("androidx.appcompat:appcompat:1.6.1")
 
     // Note: Standard ExoPlayer supports HEVC, VP9, Opus, AAC, and most common formats
     // For DTS/AC3 software decoding, add FFmpeg extension manually if needed

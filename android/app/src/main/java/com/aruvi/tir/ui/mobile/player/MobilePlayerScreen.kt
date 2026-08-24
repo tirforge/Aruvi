@@ -2,7 +2,7 @@ package com.aruvi.tir.ui.mobile.player
 
 import android.app.Activity
 import android.content.Context
-import android.content.ContextThemeWrapper
+import androidx.appcompat.view.ContextThemeWrapper
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.view.View
