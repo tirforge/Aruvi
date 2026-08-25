@@ -622,38 +622,75 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
 
     @OptIn(UnstableApi::class)
     fun selectAudioTrack(trackInfo: TrackInfo) {
-        // When casting to Default Receiver, the muxed MP4's audio streams are exposed
-        // as MediaTracks (see castToDevice() → MediaInfo.setMediaTracks). The Default
-        // Receiver's Shaka player switches via RemoteMediaClient.setActiveTrackIds(),
-        // not ExoPlayer's TrackSelectionOverride. Publishing the local demux's tracks
-        // as MediaTracks is what unlocks switching on the Default Receiver for
-        // non-MKV (MP4/WebM) sources. MKV still won't demux on Default Receiver,
-        // but MP4 with multiple audio now works without a Custom Receiver.
+        // Default Receiver ignores AUDIO setActiveTrackIds per docs (only TEXT works),
+        // so we make the mobile's selected audio the TV's default via server remux:
+        // /api/stream/{id}/cast?audio=N keeps only that audio as the sole default.
+        // This is what fulfills "audio track used in mobile as default track in the tv"
+        // without a Custom Receiver. For completeness we still try setActiveTrackIds
+        // first (works on Custom), then fall back to remux reload.
         if (_uiState.value.isCasting) {
+            // Optimistic UI – so Mobile and TV show same selection instantly
+            _uiState.value = _uiState.value.copy(
+                audioTracks = _uiState.value.audioTracks.map { it.copy(isSelected = it.groupIndex == trackInfo.groupIndex && it.index == trackInfo.index) }
+            )
+            // Try Custom Receiver path first (fast, no reload)
+            var handled = false
             try {
                 val remote = castContext?.sessionManager?.currentCastSession?.remoteMediaClient
                 if (remote != null) {
                     val audioId = castTrackId(trackInfo.groupIndex, trackInfo.index)
-                    // Preserve current subtitle active state – Default Receiver expects
-                    // the full active set (audio + text) on each call.
                     val currentActive = try { remote.mediaStatus?.activeTrackIds?.toList() ?: emptyList() } catch (_: Throwable) { emptyList<Long>() }
                     val textIds = currentActive.filter { id ->
-                        // Heuristic: text track ids we published are also castTrackId-based but we can't
-                        // distinguish; keep any id that matches a known subtitle TrackInfo, otherwise drop.
                         _uiState.value.subtitleTracks.any { castTrackId(it.groupIndex, it.index) == id }
                     }
                     val newIds = (listOf(audioId) + textIds).toLongArray()
                     remote.setActiveTrackIds(newIds)
-                    android.util.Log.i("PlayerViewModel", "Cast setActiveTrackIds audio=$audioId -> ${newIds.contentToString()}")
-                    // Optimistic UI – remote status will confirm via onTracksChanged
-                    _uiState.value = _uiState.value.copy(
-                        audioTracks = _uiState.value.audioTracks.map { it.copy(isSelected = it.groupIndex == trackInfo.groupIndex && it.index == trackInfo.index) }
-                    )
-                    return
+                    android.util.Log.i("PlayerViewModel", "Cast setActiveTrackIds audio=$audioId -> ${newIds.contentToString()} (Custom path)")
+                    handled = true
+                    // For Default this will be ignored – we still reload via remux below to make it effective
                 }
             } catch (e: Throwable) {
-                android.util.Log.w("PlayerViewModel", "Cast audio select via RemoteMediaClient failed, falling back to CastPlayer", e)
+                android.util.Log.w("PlayerViewModel", "Cast audio setActiveTrackIds failed", e)
             }
+            // Default Receiver fallback: reload cast media with ?audio=N so TV's fMP4 has that track as default
+            // This works even though Default ignores AUDIO MediaTracks, because the file itself now only contains the chosen audio.
+            viewModelScope.launch {
+                try {
+                    val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
+                    val token = authRepository.getAccessToken()
+                    val curPos = try { castPlayer?.currentPosition ?: _uiState.value.currentPosition } catch (_: Throwable) { _uiState.value.currentPosition }
+                    val baseCastUrl = "$serverUrl/api/stream/$currentFileId/cast"
+                    val query = listOfNotNull(token?.let { "token=$it" }, "audio=${trackInfo.index}").joinToString("&")
+                    val url = if (query.isNotEmpty()) "$baseCastUrl?$query" else baseCastUrl
+                    val file = _uiState.value.file
+                    val title = file?.fileName ?: "Aruvi"
+                    val castCtx = castContext
+                    val session = castCtx?.sessionManager?.currentCastSession
+                    val remoteClient = session?.remoteMediaClient
+                    if (remoteClient != null) {
+                        val mimeType = "video/mp4" // remuxed fMP4
+                        val castMetadata = com.google.android.gms.cast.MediaMetadata(com.google.android.gms.cast.MediaMetadata.MEDIA_TYPE_MOVIE).apply {
+                            putString(com.google.android.gms.cast.MediaMetadata.KEY_TITLE, title)
+                        }
+                        val mediaInfo = com.google.android.gms.cast.MediaInfo.Builder(url)
+                            .setStreamType(com.google.android.gms.cast.MediaInfo.STREAM_TYPE_BUFFERED)
+                            .setContentType(mimeType)
+                            .setMetadata(castMetadata)
+                            .build()
+                        val loadRequest = com.google.android.gms.cast.MediaLoadRequestData.Builder()
+                            .setMediaInfo(mediaInfo)
+                            .setAutoplay(true)
+                            .setCurrentTime(curPos.coerceAtLeast(0))
+                            .build()
+                        remoteClient.load(loadRequest)
+                        android.util.Log.i("PlayerViewModel", "Cast reload with audio=${trackInfo.index} at pos $curPos for Default fallback")
+                    }
+                } catch (e: Throwable) {
+                    android.util.Log.w("PlayerViewModel", "Cast reload with audio failed", e)
+                }
+            }
+            if (handled) return // Custom case already handled; Default case also reloaded above
+            return
         }
         val p = activePlayer()
         val tracks = p.currentTracks
@@ -1021,10 +1058,20 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
             // capable Cast devices like Ultra/Google TV).
             val isMkvSource = file?.fileName?.lowercase()?.endsWith(".mkv") == true ||
                 (file?.mimeType?.lowercase() == "video/x-matroska")
-            val url = if (isMkvSource) {
+            // Mobile's selected audio → TV's default: Default Receiver ignores AUDIO
+            // setActiveTrackIds per docs, so we make the mobile's choice the file's
+            // sole default audio via ?audio=N on the cast endpoint (backend remux
+            // keeps only that track with -map 0:a:N). Works for both MKV and MP4
+            // multi-audio, and keeps existing behavior when no explicit selection.
+            val selectedAudioForCast = _uiState.value.audioTracks.find { it.isSelected }
+            val url = if (isMkvSource || selectedAudioForCast != null) {
                 // Cast-optimized remux endpoint; token may still be needed if public hash not yet ready
+                // For MKV always remux (container fix); for MP4 only when audio selection needed
                 val baseCastUrl = "$serverUrl/api/stream/$currentFileId/cast"
-                if (token != null) "$baseCastUrl?token=$token" else baseCastUrl
+                val tokenPart = token?.let { "token=$it" }
+                val audioPart = selectedAudioForCast?.let { "audio=${it.index}" }
+                val query = listOfNotNull(tokenPart, audioPart).joinToString("&")
+                if (query.isNotEmpty()) "$baseCastUrl?$query" else baseCastUrl
             } else {
                 val publicLink = filesRepository.getPublicLink(currentFileId, serverUrl)
                 publicLink.getOrElse {

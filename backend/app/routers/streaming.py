@@ -653,8 +653,16 @@ async def stream_for_cast(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(get_current_user_opt),
+    audio: int | None = Query(None, description="Audio track index (0-based) to use as default for Cast; when set, only that audio is muxed so Default Receiver (which ignores AUDIO MediaTracks) plays the mobile's selected track as default"),
 ):
     """Cast-optimized stream: remuxes MKV → fragmented MP4 for Default Receiver.
+    Query `?audio=N` (added in this patch for Default multitrack fallback) selects
+    which audio track from the source is muxed as the single default audio in the
+    fMP4. This lets the mobile's currently selected audio (`_uiState.audioTracks.find { isSelected }`)
+    become the TV's default even though Default Receiver ignores
+    `RemoteMediaClient.setActiveTrackIds()` for AUDIO per docs (only TEXT works
+    on Default). Without `audio` param, all audio tracks are kept (`-map 0:a?`)
+    – useful for future Custom Receiver or for non-MKV where HLS would be needed.
 
     Default Media Receiver lists only MP4/WebM/MP2T as supported containers
     (https://developers.google.com/cast/docs/media) – MKV (`video/x-matroska`)
@@ -681,8 +689,10 @@ async def stream_for_cast(
         raise HTTPException(status_code=404, detail="Message not found in channel")
 
     is_mkv = file.file_name.lower().endswith(".mkv") or (file.mime_type or "").lower() == "video/x-matroska"
-    # Non-MKV: serve as MP4 with correct mime so Default Receiver's Shaka picks fMP4 demuxer
-    if not is_mkv:
+    # Non-MKV without audio selection: serve as MP4 passthrough (Shaka fMP4)
+    # With ?audio=N we need to remux even for MP4 to select that audio as default
+    # (Default ignores AUDIO MediaTracks, so we make the mobile's choice the file's sole default audio)
+    if not is_mkv and audio is None:
         mime_type = "video/mp4"
         from urllib.parse import quote
         encoded_filename = quote(file.file_name.rsplit(".", 1)[0] + ".mp4")
@@ -719,10 +729,14 @@ async def stream_for_cast(
     spawn_background(prefetch_first_batch_safe(tg_client, message, 0))
 
     async def ffmpeg_remux_stream():
+        # If ?audio=N is set (mobile's selected track), mux only that audio as default
+        # so Default Receiver (which ignores AUDIO setActiveTrackIds per docs) still
+        # plays the mobile's choice. Otherwise keep all audio for future Custom/HLS.
+        audio_map = f"0:a:{audio}?" if audio is not None else "0:a?"
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg", "-hide_banner", "-loglevel", "error",
             "-i", "pipe:0",
-            "-map", "0:v:0?", "-map", "0:a?", "-map", "0:s?",
+            "-map", "0:v:0?", "-map", audio_map, "-map", "0:s?",
             "-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text",
             "-f", "mp4", "-movflags", "frag_keyframe+empty_moov+faststart",
             "pipe:1",
