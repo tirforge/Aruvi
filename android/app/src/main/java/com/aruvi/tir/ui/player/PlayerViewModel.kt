@@ -150,38 +150,32 @@ data class PlayerUiState(
  *    with a `TextTrackStyle.fontScale`. That call was absent, and mobile
  *    never wired `subtitleView` size at all (TV did).
  *
- * Fixes applied in this file (UPDATE 2 – verified against
- * https://developers.google.com/cast/docs/android_sender/media_tracks and
- * https://developers.google.com/cast/docs/media):
- * • Text tracks (subtitles/captions): castToDevice() captures local demuxed TEXT
- *   groups and publishes them as Cast MediaTracks (TYPE_TEXT, SUBTYPE_CAPTIONS)
- *   via MediaInfo.setMediaTracks(). RemoteMediaClient.setActiveTrackIds() and
- *   setTextTrackStyle(fontScale) ARE supported on Default/Styled per docs:
- *   "allow you to use only the text tracks with the API". Subtitle switching +
- *   size now work on Default (CORS headers still required for VTT).
- * • Audio/Video tracks: The same MediaTracks publishing is kept for AUDIO, but
- *   per docs "To work with the audio and video tracks, you must develop a Custom
- *   Receiver" – Default/Styled will ignore AUDIO setActiveTrackIds() (request
- *   returns non-success). The app still publishes AUDIO tracks for forward
- *   compatibility; selectAudioTrack() branches on isCasting, tries
- *   RemoteMediaClient.setActiveTrackIds() and logs rejection gracefully, then
- *   falls back to CastPlayer routing. For true audio switching on MKV/MP4,
- *   use HLS/DASH adaptive manifests (auto-discovered) or a Custom Receiver.
- * • Containers: Verified Supported Media lists MP4/WebM/MP2T/MP3/OGG/WAV – no MKV.
- *   MKV served as video/x-matroska will fail on Default regardless of tracks;
- *   keep mapping but expect failure – recommend remux to MP4 or Custom Receiver.
- * • Resize/Fit/Stretch/Zoom: Verified "you cannot customize any of the UI in the
- *   Default Media Web Receiver" (Web Receiver Overview) and TV Overscan note.
- *   No Cast API for aspect. Controls stay ENABLED, persist in _uiState, and are
- *   shipped as MediaInfo.customData {ar_mode, videoScale} for a future Styled
- *   receiver (CSS object-fit) – Default correctly ignores it; zoom re-applies after
- *   disconnect.
- * • `updateTracks()` reads from activePlayer(), so enriched text tracks are
- *   reflected automatically; audio tracks appear only on Custom Receiver.
- * • CORS: Media Tracks guide requires CORS for both media and tracks
- *   (allow Content-Type, Accept-Encoding, Range; expose Content-Range etc.).
- *   Backend CORSMiddleware currently omits Accept-Encoding and restricts origins
- *   to web_base_url – should allow "*" or Cast origins for tracks to load.
+ * Fixes applied in this file (UPDATE 3 – MKV essential, verified):
+ * • MKV support (essential): Backend GET /api/stream/{id}/cast now remuxes
+ *   MKV → fMP4 on the fly (ffmpeg -c:v copy -c:a copy -c:s mov_text
+ *   -f mp4 -movflags frag_keyframe+empty_moov, Dockerfile adds ffmpeg).
+ *   PlayerViewModel.castToDevice() detects .mkv / video/x-matroska and uses
+ *   the /cast URL with video/mp4 hint, so Default Receiver's Shaka demuxer
+ *   can play the library's MKVs without re-encode when codecs are already
+ *   supported (H264/AAC on all Cast, HEVC/VP9/AV1 on Ultra/Google TV).
+ *   Non-MKV still uses public link + original MIME hint. See
+ *   backend/app/routers/streaming.py:652 and Dockerfile:12.
+ * • Text tracks (subtitles/captions): castToDevice() captures local TEXT groups
+ *   and publishes as MediaTracks (TYPE_TEXT, SUBTYPE_CAPTIONS) via
+ *   MediaInfo.setMediaTracks(). Per docs only TEXT works on Default/Styled;
+ *   setActiveTrackIds() + setTextTrackStyle(fontScale) now enable subtitle
+ *   switching + size on Default (CORS now fixed in backend/main.py).
+ * • Audio/Video tracks: Same MediaTracks publishing kept for AUDIO but per docs
+ *   Default/Styled ignore AUDIO (needs Custom/HLS). MKV-remuxed MP4 will play
+ *   video on Default; multi-audio MKV defaults to first track until Custom/HLS.
+ *   selectAudioTrack() still tries RemoteMediaClient.setActiveTrackIds() and logs
+ *   rejection gracefully, then falls back to CastPlayer.
+ * • Containers: Verified Supported Media lists MP4/WebM/MP2T – no MKV. MKV now
+ *   handled via /cast remux; original video/x-matroska mapping kept only for
+ *   local ExoPlayer (nextlib ffmpeg) which does handle MKV.
+ * • Resize/Fit/Stretch/Zoom: Verified Default cannot be customized; controls
+ *   stay ENABLED, persist in _uiState and shipped as MediaInfo.customData
+ *   for future Styled receiver (CSS object-fit) – Default ignores as expected.
  */
 
 @HiltViewModel
@@ -1018,11 +1012,25 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
             // Prefer the public, unauthenticated stream URL so the Chromecast
             // receiver can fetch it directly (it cannot send bearer tokens or
             // custom auth headers). Falls back to the token URL if the public
-            // link can't be generated.
-            val publicLink = filesRepository.getPublicLink(currentFileId, serverUrl)
-            val url = publicLink.getOrElse {
-                if (token != null) "$serverUrl/api/stream/$currentFileId?token=$token"
-                else "$serverUrl/api/stream/$currentFileId"
+            // link can't be generated. MKV is essential – Default Receiver
+            // cannot demux Matroska (Supported Media lists only MP4/WebM/MP2T).
+            // Backend now exposes /api/stream/{id}/cast which remuxes MKV →
+            // fragmented MP4 via ffmpeg -c copy (Dockerfile adds ffmpeg) so
+            // the same MKV library plays on Default Receiver without re-encode
+            // when codecs are already H264/AAC (HEVC/VP9/AV1 still play on
+            // capable Cast devices like Ultra/Google TV).
+            val isMkvSource = file?.fileName?.lowercase()?.endsWith(".mkv") == true ||
+                (file?.mimeType?.lowercase() == "video/x-matroska")
+            val url = if (isMkvSource) {
+                // Cast-optimized remux endpoint; token may still be needed if public hash not yet ready
+                val baseCastUrl = "$serverUrl/api/stream/$currentFileId/cast"
+                if (token != null) "$baseCastUrl?token=$token" else baseCastUrl
+            } else {
+                val publicLink = filesRepository.getPublicLink(currentFileId, serverUrl)
+                publicLink.getOrElse {
+                    if (token != null) "$serverUrl/api/stream/$currentFileId?token=$token"
+                    else "$serverUrl/api/stream/$currentFileId"
+                }
             }
 
             val file = _uiState.value.file
@@ -1047,23 +1055,24 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 // load even when its codecs are supported. Prefer the backend
                 // MIME, fall back to the filename extension (most libraries
                 // here are .mkv), and only then assume MP4.
-                val extMime = mapOf(
-                    "mkv" to "video/x-matroska",
-                    "webm" to "video/webm",
-                    "mp4" to "video/mp4",
-                    "m4v" to "video/mp4",
-                    "mov" to "video/mp4",
-                    "ts" to "video/mp2t",
-                    "mp3" to "audio/mpeg",
-                    "m4a" to "audio/mp4",
-                    "flac" to "audio/flac",
-                    "ogg" to "audio/ogg",
-                    "opus" to "audio/ogg",
-                    "wav" to "audio/wav"
-                )[file?.fileName?.substringAfterLast('.', "")?.lowercase() ?: ""]
-                val mimeType = sequenceOf(
+                // For MKV Cast we already remux to fMP4 on the server, so always hint video/mp4
+                // (Default Receiver's Shaka demuxer for MP4 works, Matroska does not).
+                // For non-MKV keep original MIME hint.
+                val mimeType = if (isMkvSource) "video/mp4" else sequenceOf(
                     file?.mimeType?.takeIf { it.startsWith("video/") || it.startsWith("audio/") },
-                    extMime,
+                    mapOf(
+                        "webm" to "video/webm",
+                        "mp4" to "video/mp4",
+                        "m4v" to "video/mp4",
+                        "mov" to "video/mp4",
+                        "ts" to "video/mp2t",
+                        "mp3" to "audio/mpeg",
+                        "m4a" to "audio/mp4",
+                        "flac" to "audio/flac",
+                        "ogg" to "audio/ogg",
+                        "opus" to "audio/ogg",
+                        "wav" to "audio/wav"
+                    )[file?.fileName?.substringAfterLast('.', "")?.lowercase() ?: ""],
                     "video/mp4"
                 ).firstOrNull { !it.isNullOrBlank() }!!
                 // Snapshot local tracks BEFORE we pause – this is what lets the

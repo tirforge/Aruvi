@@ -647,5 +647,121 @@ async def stream_public_file(
         headers=headers
     )
 
+@router.get("/{file_id}/cast")
+async def stream_for_cast(
+    file_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_opt),
+):
+    """Cast-optimized stream: remuxes MKV → fragmented MP4 for Default Receiver.
 
+    Default Media Receiver lists only MP4/WebM/MP2T as supported containers
+    (https://developers.google.com/cast/docs/media) – MKV (`video/x-matroska`)
+    fails to load regardless of codecs, even though local ExoPlayer (nextlib
+    ffmpeg) handles it. This endpoint pipes the Telegram file through
+    ``ffmpeg -c copy`` into ``-f mp4 -movflags frag_keyframe+empty_moov`` when
+    the source is MKV, producing a Cast-playable fMP4 on the fly (no
+    re-encode when codecs are already H264/AAC; HEVC/VP9/AV1 still play on
+    capable Cast devices like Ultra/Google TV). Non-MKV files are streamed
+    directly with ``video/mp4`` hint. CORS headers are included so
+    MediaTrack VTT side-loads succeed (see CORSMiddleware note).
+    Range is not supported for remuxed output (unknown length, chunked).
+    """
+    if not current_user:
+        current_user = await _user_from_download_token(request, file_id, db)
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    result = await db.execute(select(File).where(File.id == file_id, File.user_id == current_user.id))
+    file = result.scalar_one_or_none()
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
+    message = await get_message_from_channel(file.channel_message_id)
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found in channel")
+
+    is_mkv = file.file_name.lower().endswith(".mkv") or (file.mime_type or "").lower() == "video/x-matroska"
+    # Non-MKV: serve as MP4 with correct mime so Default Receiver's Shaka picks fMP4 demuxer
+    if not is_mkv:
+        mime_type = "video/mp4"
+        from urllib.parse import quote
+        encoded_filename = quote(file.file_name.rsplit(".", 1)[0] + ".mp4")
+        headers = {
+            "Content-Type": mime_type,
+            "Content-Disposition": f"inline; filename*=utf-8''{encoded_filename}",
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "private, max-age=300",
+            "Content-Length": str(file.file_size),
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length, Content-Type",
+        }
+        spawn_background(prefetch_first_batch_safe(tg_client, message, 0))
+        async def passthrough():
+            async for chunk in stream_file_chunks(tg_client, message, 0, file.file_size - 1, request=request):
+                yield chunk
+        return StreamingResponse(passthrough(), media_type=mime_type, headers=headers)
+
+    import asyncio, shutil
+    if shutil.which("ffmpeg") is None:
+        raise HTTPException(status_code=501, detail="ffmpeg not installed on server – cannot remux MKV for Cast")
+
+    from urllib.parse import quote
+    encoded_filename = quote(file.file_name.rsplit(".", 1)[0] + ".mp4")
+    headers = {
+        "Content-Type": "video/mp4",
+        "Content-Disposition": f"inline; filename*=utf-8''{encoded_filename}",
+        "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length, Content-Type",
+        "X-Accel-Buffering": "no",
+    }
+    spawn_background(prefetch_first_batch_safe(tg_client, message, 0))
+
+    async def ffmpeg_remux_stream():
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-hide_banner", "-loglevel", "error",
+            "-i", "pipe:0",
+            "-map", "0:v:0?", "-map", "0:a?", "-map", "0:s?",
+            "-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text",
+            "-f", "mp4", "-movflags", "frag_keyframe+empty_moov+faststart",
+            "pipe:1",
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        async def feed_stdin():
+            try:
+                async for chunk in stream_file_chunks(tg_client, message, 0, file.file_size - 1, request=request):
+                    if proc.stdin is None:
+                        break
+                    proc.stdin.write(chunk)
+                    await proc.stdin.drain()
+                if proc.stdin:
+                    proc.stdin.close()
+            except Exception as e:
+                logger.warning("cast remux feed_stdin aborted: %s", e)
+                try:
+                    if proc.stdin:
+                        proc.stdin.close()
+                except Exception:
+                    pass
+        feed_task = asyncio.create_task(feed_stdin())
+        try:
+            while True:
+                out = await proc.stdout.read(64 * 1024)
+                if not out:
+                    break
+                yield out
+            await feed_task
+            rc = await proc.wait()
+            if rc != 0:
+                err = (await proc.stderr.read()).decode(errors="ignore")[:2000]
+                logger.warning("ffmpeg remux exited %d: %s", rc, err)
+        finally:
+            feed_task.cancel()
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+
+    return StreamingResponse(ffmpeg_remux_stream(), media_type="video/mp4", headers=headers)
 

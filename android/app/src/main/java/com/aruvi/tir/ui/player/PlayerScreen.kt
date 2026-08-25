@@ -1510,7 +1510,7 @@ private fun SettingsPanel(
                         SettingsSectionLabel(title = "Audio Track", icon = Icons.AutoMirrored.Filled.VolumeUp)
                         if (isCasting) {
                             Text(
-                                "Audio switching requires Custom Receiver (Default/Styled only TEXT per docs) – will be ignored on Default; use HLS adaptive or Custom for multi-audio",
+                                "Audio switching requires Custom Receiver (Default: MKV now remuxed to fMP4; AUDIO still needs Custom per docs – TEXT works)",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color(0xFFEF9A9A),
                                 modifier = Modifier.padding(bottom = 6.dp)
@@ -1528,7 +1528,7 @@ private fun SettingsPanel(
                     } else if (isCasting) {
                         SettingsSectionLabel(title = "Audio Track", icon = Icons.AutoMirrored.Filled.VolumeUp)
                         Text(
-                            "No audio tracks – Default/Styled ignore AUDIO MediaTracks (docs). Use Custom Receiver or HLS; MKV not supported at all.",
+                            "No audio tracks – Default: MKV video now plays via remux; audio still needs Custom/HLS (Default ignores AUDIO per docs).",
                             style = MaterialTheme.typography.bodySmall,
                             color = TVTextSecondary.copy(alpha = 0.6f),
                             lineHeight = 16.sp,

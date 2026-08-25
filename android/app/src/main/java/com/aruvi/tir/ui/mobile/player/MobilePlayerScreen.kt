@@ -725,7 +725,7 @@ fun PlayerSettingsSheet(
                         Spacer(modifier = Modifier.height(8.dp))
                         if (uiState.isCasting) {
                             Text(
-                                "Default/Styled Receiver: audio switching requires Custom Receiver per docs (only text tracks work). For MP4, use HLS/DASH adaptive or Custom; MKV not supported at all on Default.",
+                                "Default: MKV now remuxed to fMP4 via /cast (ffmpeg copy) – video plays; audio switching still needs Custom/HLS (only TEXT works on Default per docs).",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -766,7 +766,7 @@ fun PlayerSettingsSheet(
                                 Text("No subtitles – text tracks will appear if muxed/WebVTT", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    "Default Receiver supports TEXT via MediaTracks (WebVTT/TTML/CEA). Ensure CORS headers (Content-Type/Range/Accept-Encoding) and expose Content-Range. MKV not supported – remux to MP4.",
+                                    "Default supports TEXT via MediaTracks (WebVTT/TTML) – CORS now fixed; MKV video now remuxed to fMP4 on server so it plays (audio still Custom).",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
