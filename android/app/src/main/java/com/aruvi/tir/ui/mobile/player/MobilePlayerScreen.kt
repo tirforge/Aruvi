@@ -253,6 +253,7 @@ fun MobilePlayerScreen(
 
                     var dragStartPosition = 0L
                     var startVolume = 0
+                    var startVolumeCast = 0.5f
                     var startBrightness = 0.5f
                     var startX = 0f
 
@@ -296,8 +297,13 @@ fun MobilePlayerScreen(
                                     startBrightness = lp?.screenBrightness?.takeIf { it >= 0 } ?: 0.5f
                                 } else {
                                     touchMode = 2 // VOLUME
-                                    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                                    startVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                                    if (viewModel.uiState.value.isCasting) {
+                                        // TV volume – phone controls Cast stream volume (0f..1f)
+                                        startVolumeCast = try { viewModel.getCastVolume() } catch (_: Throwable) { 0.5f }
+                                    } else {
+                                        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                                        startVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                                    }
                                 }
                             }
                         }
@@ -319,17 +325,22 @@ fun MobilePlayerScreen(
                             }
                             2 -> { // VOLUME
                                  val verticalDelta = -accumulatedDragY
-                                 val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                                 val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-
-                                 // Full height = max volume change
                                  val changePercent = verticalDelta / height
-                                 val changeVol = (changePercent * maxVolume).toInt()
-                                 val newVolume = (startVolume + changeVol).coerceIn(0, maxVolume)
-                                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVolume, 0)
-
-                                 val percent = (newVolume.toFloat() / maxVolume * 100).toInt()
-                                 showGestureFeedback("Volume: $percent%", Icons.AutoMirrored.Filled.VolumeUp)
+                                 if (viewModel.uiState.value.isCasting) {
+                                     // Phone controls TV volume while casting
+                                     val newFraction = (startVolumeCast + changePercent).coerceIn(0f, 1f)
+                                     viewModel.setCastVolume(newFraction)
+                                     val percent = (newFraction * 100).toInt()
+                                     showGestureFeedback("TV Volume: $percent%", Icons.AutoMirrored.Filled.VolumeUp)
+                                 } else {
+                                     val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                                     val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                                     val changeVol = (changePercent * maxVolume).toInt()
+                                     val newVolume = (startVolume + changeVol).coerceIn(0, maxVolume)
+                                     audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVolume, 0)
+                                     val percent = (newVolume.toFloat() / maxVolume * 100).toInt()
+                                     showGestureFeedback("Volume: $percent%", Icons.AutoMirrored.Filled.VolumeUp)
+                                 }
                             }
                             3 -> { // BRIGHTNESS
                                  val verticalDelta = -accumulatedDragY
@@ -454,23 +465,22 @@ fun MobilePlayerScreen(
               )
           }
 
-          // Casting overlay – when TV is renderer, phone is muted (fixes phone+TV both playing)
+          // Casting banner – small top indicator, does NOT block controls so phone can control TV play/track/subtitle
           if (uiState.isCasting) {
               Box(
                   modifier = Modifier
-                      .fillMaxSize()
-                      .background(Color.Black.copy(alpha = 0.85f))
-                      .zIndex(5f),
+                      .fillMaxWidth()
+                      .align(Alignment.TopCenter)
+                      .background(Color.Black.copy(alpha = 0.75f))
+                      .zIndex(5f)
+                      .padding(horizontal = 16.dp, vertical = 10.dp),
                   contentAlignment = Alignment.Center
               ) {
-                  Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-                      Icon(Icons.Filled.Cast, contentDescription = null, tint = Color.White, modifier = Modifier.size(64.dp))
-                      Spacer(modifier = Modifier.height(16.dp))
-                      Text("Casting to TV", style = MaterialTheme.typography.titleLarge, color = Color.White, fontWeight = FontWeight.Bold)
-                      Spacer(modifier = Modifier.height(8.dp))
-                      Text("Phone muted – video & audio now on TV", style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.8f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                      Spacer(modifier = Modifier.height(4.dp))
-                      Text("Use TV remote or disconnect to resume on phone", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.6f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                  Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                      Icon(Icons.Filled.Cast, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                      Text("Casting to TV – Phone controls TV", style = MaterialTheme.typography.labelMedium, color = Color.White, fontWeight = FontWeight.SemiBold)
+                      Spacer(modifier = Modifier.width(8.dp))
+                      Text("Play/track/subtitle from phone", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.7f))
                   }
               }
           }

@@ -190,22 +190,73 @@ class PlayerViewModel @Inject constructor(
 ) : ViewModel() {
 
     fun setResizeMode(mode: Int) {
-        // Enabled on Default Receiver – stored as MediaInfo.customData {ar_mode} and
-        // applied locally. Default Receiver's <video> is object-fit:contain for now
-        // (TV remote's Zoom controls it), but Styled Receiver will honor it.
-        if (_uiState.value.isCasting) {
-            android.util.Log.i("PlayerViewModel", "setResizeMode while casting: saved as customData ar_mode=$mode (Default Receiver shows contain; Styled will apply)")
-        }
         _uiState.value = _uiState.value.copy(toggleResizeMode = mode)
+        if (_uiState.value.isCasting) {
+            android.util.Log.i("PlayerViewModel", "setResizeMode while casting: phone controls TV via reload customData ar_mode=$mode (Default shows contain, Styled will apply)")
+            reloadCastForDisplay()
+        }
     }
 
     fun setVideoScale(scale: Float) {
-        // Keep enabled while casting: local preview scales, and the value is shipped
-        // as customData.videoScale so a Styled receiver could apply CSS transform.
-        if (_uiState.value.isCasting) {
-            android.util.Log.i("PlayerViewModel", "setVideoScale while casting: saved as customData scale=$scale (Default ignores, Styled will apply)")
-        }
         _uiState.value = _uiState.value.copy(videoScale = scale.coerceIn(0.5f, 5.0f))
+        if (_uiState.value.isCasting) {
+            android.util.Log.i("PlayerViewModel", "setVideoScale while casting: phone controls TV customData scale=$scale")
+            reloadCastForDisplay()
+        }
+    }
+
+    /** Phone can control TV volume while casting – Default Receiver uses Cast stream volume */
+    fun setCastVolume(fraction: Float) {
+        val vol = fraction.coerceIn(0f, 1f)
+        try { castPlayer?.volume = vol } catch (_: Throwable) {}
+    }
+    fun getCastVolume(): Float = try { castPlayer?.volume ?: 0.5f } catch (_: Throwable) { 0.5f }
+
+    private fun reloadCastForDisplay() {
+        if (!_uiState.value.isCasting) return
+        viewModelScope.launch {
+            try {
+                val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
+                val token = authRepository.getAccessToken()
+                val curPos = try { castPlayer?.currentPosition ?: _uiState.value.currentPosition } catch (_: Throwable) { _uiState.value.currentPosition }
+                // Reuse current file's cast URL logic but with updated customData
+                val file = _uiState.value.file ?: return@launch
+                val selectedAudio = _uiState.value.audioTracks.find { it.isSelected }
+                val baseCastUrl = "$serverUrl/api/stream/$currentFileId/cast"
+                val query = listOfNotNull(token?.let { "token=$it" }, selectedAudio?.let { "audio=${it.index}" }).joinToString("&")
+                val url = if (query.isNotEmpty()) "$baseCastUrl?$query" else baseCastUrl
+                // Use same enriched load path as castToDevice but at curPos
+                val castCtx = castContext ?: return@launch
+                val remoteClient = castCtx.sessionManager.currentCastSession?.remoteMediaClient ?: return@launch
+                val mimeType = "video/mp4"
+                val castMetadata = com.google.android.gms.cast.MediaMetadata(com.google.android.gms.cast.MediaMetadata.MEDIA_TYPE_MOVIE).apply {
+                    putString(com.google.android.gms.cast.MediaMetadata.KEY_TITLE, file.fileName)
+                }
+                val customData = org.json.JSONObject().apply {
+                    put("ar_mode", when (_uiState.value.toggleResizeMode) {
+                        androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL -> "fill"
+                        androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> "zoom"
+                        else -> "fit"
+                    })
+                    put("videoScale", _uiState.value.videoScale)
+                }
+                val mediaInfo = com.google.android.gms.cast.MediaInfo.Builder(url)
+                    .setStreamType(com.google.android.gms.cast.MediaInfo.STREAM_TYPE_BUFFERED)
+                    .setContentType(mimeType)
+                    .setMetadata(castMetadata)
+                    .setCustomData(customData)
+                    .build()
+                val loadRequest = com.google.android.gms.cast.MediaLoadRequestData.Builder()
+                    .setMediaInfo(mediaInfo)
+                    .setAutoplay(true)
+                    .setCurrentTime(curPos.coerceAtLeast(0))
+                    .build()
+                remoteClient.load(loadRequest)
+                android.util.Log.i("PlayerViewModel", "Reloaded cast for display ar_mode=${customData.getString("ar_mode")} scale=${_uiState.value.videoScale} at $curPos")
+            } catch (e: Throwable) {
+                android.util.Log.w("PlayerViewModel", "reloadCastForDisplay failed", e)
+            }
+        }
     }
 
     fun setVideoPan(x: Float, y: Float) {
