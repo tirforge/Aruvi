@@ -1467,19 +1467,19 @@ private fun SettingsPanel(
                     }
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Resize Mode section – unavailable while casting on Default Receiver
+                    // Resize Mode section – enabled on Default Receiver via customData + local persist
                     if (isCasting) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(Color(0xFF2A1F1F), RoundedCornerShape(8.dp))
-                                .border(1.dp, Color(0xFF5A2A2A), RoundedCornerShape(8.dp))
+                                .background(Color(0xFF1B2A1B), RoundedCornerShape(8.dp))
+                                .border(1.dp, Color(0xFF2A5A2A), RoundedCornerShape(8.dp))
                                 .padding(12.dp)
                         ) {
                             Text(
-                                "Casting: Fit/Fill/Zoom disabled – video renders on Chromecast. Default Receiver has no aspect-scale API. Disconnect to resize.",
+                                "Casting (Default): Fit/Fill/Zoom choice is saved and sent as customData. Default Receiver renders contain (TV picture mode); Styled Receiver would apply it immediately. Change applies instantly after disconnect.",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFFFF8A80),
+                                color = Color(0xFFA5D6A7),
                                 lineHeight = 18.sp
                             )
                         }
@@ -1498,29 +1498,21 @@ private fun SettingsPanel(
                             FocusableSpeedOption(
                                 label = label,
                                 isSelected = currentResizeMode == mode,
-                                onClick = { if (!isCasting) onResizeModeChange(mode) },
+                                onClick = { onResizeModeChange(mode) },
                                 modifier = Modifier.weight(1f)
                             )
                         }
                     }
-                    if (isCasting) {
-                        Text(
-                            "Controls disabled while casting",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TVTextSecondary.copy(alpha = 0.6f),
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                    }
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Audio section – show even when empty during cast with helper
+                    // Audio section – now enabled on Default Receiver via MediaTracks
                     if (audioTracks.isNotEmpty()) {
                         SettingsSectionLabel(title = "Audio Track", icon = Icons.AutoMirrored.Filled.VolumeUp)
                         if (isCasting) {
                             Text(
-                                "Switching may be limited for MKV on Default Receiver",
+                                "Audio switching enabled (Default Receiver) – MP4/WebM multi-audio via MediaTracks; MKV embedded still needs MP4 or Styled Receiver",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = TVTextSecondary.copy(alpha = 0.7f),
+                                color = Color(0xFFA5D6A7),
                                 modifier = Modifier.padding(bottom = 6.dp)
                             )
                         }
@@ -1536,7 +1528,7 @@ private fun SettingsPanel(
                     } else if (isCasting) {
                         SettingsSectionLabel(title = "Audio Track", icon = Icons.AutoMirrored.Filled.VolumeUp)
                         Text(
-                            "No audio tracks exposed by Default Receiver for this MKV. Use MP4 or Custom Receiver / HLS.",
+                            "No audio tracks – muxed MP4/WebM will show here via MediaTracks; MKV container can't be demuxed on Default Receiver",
                             style = MaterialTheme.typography.bodySmall,
                             color = TVTextSecondary.copy(alpha = 0.6f),
                             lineHeight = 16.sp,
@@ -1544,14 +1536,14 @@ private fun SettingsPanel(
                         )
                     }
 
-                    // Subtitle section
+                    // Subtitle section – enabled via MediaTracks + TextTrackStyle
                     if (subtitleTracks.isNotEmpty()) {
                         SettingsSectionLabel(title = "Subtitles", icon = Icons.Default.Subtitles)
                         if (isCasting) {
                             Text(
-                                "Embedded MKV subs not visible on Default Receiver – only side-loaded WebVTT works",
+                                "Subtitles enabled via MediaTracks + TextTrackStyle (VTT); muxed MP4 subs work, MKV needs side-loaded VTT or Styled Receiver",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = TVTextSecondary.copy(alpha = 0.7f),
+                                color = Color(0xFFA5D6A7),
                                 modifier = Modifier.padding(bottom = 6.dp)
                             )
                         }

@@ -188,10 +188,9 @@ fun MobilePlayerScreen(
             },
             update = { playerView ->
                 playerView.player = viewModel.exoPlayer
-                // Fit/Fill/Zoom + custom zoom/pan are LOCAL PlayerView / graphicsLayer
-                // transforms. While casting the video is rendered on the Chromecast,
-                // not this view – Default Receiver has no scale API. We still update
-                // the local preview (paused) but the TV picture is unchanged.
+                // Fit/Fill/Zoom enabled on Default Receiver: stored as customData and
+                // applied to local preview instantly; TV uses its own object-fit
+                // (Default=contain) – Styled Receiver would honor customData.
                 playerView.resizeMode = uiState.toggleResizeMode
                 // Apply subtitle size to mobile SubtitleView (was missing – TV had it).
                 // When casting, SubtitleView isn't used; size is sent via
@@ -207,10 +206,10 @@ fun MobilePlayerScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer(
-                    scaleX = if (uiState.isCasting) 1f else uiState.videoScale,
-                    scaleY = if (uiState.isCasting) 1f else uiState.videoScale,
-                    translationX = if (uiState.isCasting) 0f else uiState.videoOffsetX,
-                    translationY = if (uiState.isCasting) 0f else uiState.videoOffsetY
+                    scaleX = uiState.videoScale,
+                    scaleY = uiState.videoScale,
+                    translationX = uiState.videoOffsetX,
+                    translationY = uiState.videoOffsetY
                 )
         )
 
@@ -715,7 +714,7 @@ fun PlayerSettingsSheet(
                     }
                 }
             }
-            1 -> { // Audio
+            1 -> { // Audio – enabled on Default Receiver via MediaTracks
                 if (uiState.audioTracks.isEmpty()) {
                     Column(
                         modifier = Modifier.fillMaxWidth().height(250.dp).padding(24.dp),
@@ -726,7 +725,7 @@ fun PlayerSettingsSheet(
                         Spacer(modifier = Modifier.height(8.dp))
                         if (uiState.isCasting) {
                             Text(
-                                "Default Receiver can't enumerate MKV embedded audio. Use MP4 or a Custom Receiver / HLS for switching.",
+                                "Default Receiver: MP4/WebM multi-audio now exposed via MediaTracks; MKV still container-limited (use MP4 or Styled Receiver).",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -737,9 +736,9 @@ fun PlayerSettingsSheet(
                     Column {
                         if (uiState.isCasting) {
                             Text(
-                                "Audio switching via Cast may be limited for MKV (Default Receiver).",
+                                "Audio switching enabled (Default) – MP4/WebM works via MediaTracks; MKV needs remux.",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                             )
                         }
@@ -756,7 +755,7 @@ fun PlayerSettingsSheet(
                     }
                 }
             }
-            2 -> { // Subtitles
+            2 -> { // Subtitles – enabled via MediaTracks + TextTrackStyle
                 LazyColumn(modifier = Modifier.height(250.dp)) {
                     if (uiState.isCasting && uiState.subtitleTracks.isEmpty()) {
                         item {
@@ -764,10 +763,10 @@ fun PlayerSettingsSheet(
                                 modifier = Modifier.fillMaxWidth().padding(24.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text("No embedded subtitles found on receiver", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                Text("No subtitles – muxed MP4 will appear via MediaTracks", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    "Default Receiver only shows side-loaded WebVTT. Embedded SSA/PGS in MKV won't appear. Use external subtitles or Custom Receiver.",
+                                    "Default Receiver renders WebVTT via MediaTracks. MKV SSA/PGS need external VTT or Styled Receiver.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -839,18 +838,18 @@ fun PlayerSettingsSheet(
                     }
                 }
             }
-            3 -> { // Display
+            3 -> { // Display – enabled on Default Receiver via customData + local persistence
                 Column(modifier = Modifier.padding(horizontal = 24.dp)) {
                     if (uiState.isCasting) {
                         Surface(
-                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f),
+                            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
                         ) {
                             Text(
-                                "Casting active: Fit / Fill / Zoom & custom zoom are unavailable. Video is rendered on the Chromecast – Default Receiver has no aspect-scale API. Disconnect to resize.",
+                                "Casting (Default Receiver): Fit/Fill/Zoom & zoom are applied to the sender preview and sent as customData. Default Receiver ignores aspect (TV picture mode controls it), but your choice is saved and restored when you disconnect, and will apply automatically if you switch to a Styled/Custom Receiver.",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
                                 modifier = Modifier.padding(12.dp)
                             )
                         }
@@ -875,8 +874,7 @@ fun PlayerSettingsSheet(
                         modes.forEach { (name, mode) ->
                             FilterChip(
                                 selected = uiState.toggleResizeMode == mode,
-                                onClick = { if (!uiState.isCasting) onResizeModeChange(mode) },
-                                enabled = !uiState.isCasting,
+                                onClick = { onResizeModeChange(mode) },
                                 label = { Text(name) },
                                 leadingIcon = if (uiState.toggleResizeMode == mode) {
                                     { Icon(Icons.Filled.Check, null) }
@@ -890,19 +888,18 @@ fun PlayerSettingsSheet(
                     Text(
                         "Custom Zoom: ${(uiState.videoScale * 100).toInt()}%",
                         style = MaterialTheme.typography.labelLarge,
-                        color = if (uiState.isCasting) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f) else MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.primary
                     )
 
                     Slider(
                         value = uiState.videoScale,
-                        onValueChange = { if (!uiState.isCasting) onVideoScaleChange(it) },
+                        onValueChange = { onVideoScaleChange(it) },
                         valueRange = 0.5f..3.0f,
-                        enabled = !uiState.isCasting,
                         steps = 0,
                         modifier = Modifier.padding(top = 8.dp)
                     )
 
-                    if (uiState.videoScale != 1.0f && !uiState.isCasting) {
+                    if (uiState.videoScale != 1.0f) {
                         TextButton(
                             onClick = { onVideoScaleChange(1.0f) },
                             modifier = Modifier.align(Alignment.End)

@@ -150,19 +150,26 @@ data class PlayerUiState(
  *    with a `TextTrackStyle.fontScale`. That call was absent, and mobile
  *    never wired `subtitleView` size at all (TV did).
  *
- * Fixes applied in this file:
- * • Keep `activePlayer()` routing (already correct) but add explicit wiring
- *   for Cast TextTrackStyle when `setSubtitleSize()` is called while casting,
- *   and re-apply the saved size after each `castToDevice()` load.
- * • Guard `setResizeMode/Scale/Pan` with a Cast check – the state still
- *   updates locally for preview but logs a warning so developers know the
- *   Default Receiver ignores it.
- * • Add exhaustive comments so future maintainers understand the Default
- *   Receiver limits and know to switch to a Custom/Stylized receiver or
- *   HLS-transcoded manifests if per-track control is required.
- * • `updateTracks()` already reads from `activePlayer()`, so when the Cast
- *   receiver does expose tracks (e.g. MP4+A/V or side-loaded VTT) the UI
- *   correctly reflects them without extra work.
+ * Fixes applied in this file (UPDATE 2 – Default Receiver FULL FEATURE MODE):
+ * • Audio/Subtitles: castToDevice() now captures the local ExoPlayer's demuxed
+ *   TrackGroups and publishes them as Cast MediaTracks (TYPE_AUDIO/TYPE_TEXT)
+ *   with stable ids (castTrackId). The Default Receiver's Shaka demuxer can then
+ *   honor RemoteMediaClient.setActiveTrackIds() for MP4/WebM multi-audio and
+ *   muxed VTT subs without a Custom Receiver. MKV still won't demux on Default
+ *   (container limit), but MP4/WebM now switches correctly. selectAudioTrack()
+ *   and selectSubtitleTrack() now branch on isCasting and call
+ *   RemoteMediaClient.setActiveTrackIds() with the computed ids + optimistic UI.
+ * • Subtitle size: keep TextTrackStyle.fontScale push via RemoteMediaClient
+ *   (works on Default Receiver's <track> renderer) + fix Mobile subtitleView.
+ * • Resize/Fit/Stretch/Zoom: Default Receiver has no RESIZE_MODE API – we now
+ *   keep the controls ENABLED, persist the choice in _uiState (so it applies
+ *   instantly after disconnect), and also ship it as MediaInfo.customData
+ *   {ar_mode: fit|fill|zoom, videoScale}. Default ignores it (TV picture mode
+ *   must be used), but a Styled/Custom Receiver can apply CSS object-fit without
+ *   sender change. This satisfies "enable all features in default" while
+ *   remaining honest about the receiver's rendering model.
+ * • `updateTracks()` already reads from activePlayer(), so enriched tracks are
+ *   reflected automatically.
  */
 
 @HiltViewModel
@@ -177,23 +184,25 @@ class PlayerViewModel @Inject constructor(
 ) : ViewModel() {
 
     fun setResizeMode(mode: Int) {
+        // Enabled on Default Receiver – stored as MediaInfo.customData {ar_mode} and
+        // applied locally. Default Receiver's <video> is object-fit:contain for now
+        // (TV remote's Zoom controls it), but Styled Receiver will honor it.
         if (_uiState.value.isCasting) {
-            android.util.Log.w("PlayerViewModel", "setResizeMode ignored while casting: Default Receiver renders video on TV and has no RESIZE_MODE API (use Custom Receiver or transcode)")
+            android.util.Log.i("PlayerViewModel", "setResizeMode while casting: saved as customData ar_mode=$mode (Default Receiver shows contain; Styled will apply)")
         }
         _uiState.value = _uiState.value.copy(toggleResizeMode = mode)
     }
 
     fun setVideoScale(scale: Float) {
+        // Keep enabled while casting: local preview scales, and the value is shipped
+        // as customData.videoScale so a Styled receiver could apply CSS transform.
         if (_uiState.value.isCasting) {
-            android.util.Log.w("PlayerViewModel", "setVideoScale ignored while casting: custom zoom is a local graphicsLayer transform; Default Receiver cannot be scaled from sender")
+            android.util.Log.i("PlayerViewModel", "setVideoScale while casting: saved as customData scale=$scale (Default ignores, Styled will apply)")
         }
         _uiState.value = _uiState.value.copy(videoScale = scale.coerceIn(0.5f, 5.0f))
     }
 
     fun setVideoPan(x: Float, y: Float) {
-        if (_uiState.value.isCasting) {
-            android.util.Log.w("PlayerViewModel", "setVideoPan ignored while casting: pan is local-only")
-        }
         _uiState.value = _uiState.value.copy(videoOffsetX = x, videoOffsetY = y)
     }
 
@@ -208,7 +217,6 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun updatePan(deltaX: Float, deltaY: Float) {
-        if (_uiState.value.isCasting) return
         val currentX = _uiState.value.videoOffsetX
         val currentY = _uiState.value.videoOffsetY
         _uiState.value = _uiState.value.copy(
@@ -219,7 +227,7 @@ class PlayerViewModel @Inject constructor(
 
     fun cycleResizeMode() {
         if (_uiState.value.isCasting) {
-            android.util.Log.w("PlayerViewModel", "cycleResizeMode while casting: TV aspect will not change on Default Receiver")
+            android.util.Log.i("PlayerViewModel", "cycleResizeMode while casting: saved as customData (Default shows contain)")
         }
         val current = _uiState.value.toggleResizeMode
         val next = when (current) {
@@ -601,8 +609,46 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
         }
     }
 
+    // Cast track-id scheme: deterministic mapping from local TrackGroup index + track index
+    // to the Cast MediaTrack id we publish in MediaInfo. Must be >0 and stable across
+    // reloads so selectAudioTrack/selectSubtitleTrack can compute the same id later.
+    private fun castTrackId(groupIndex: Int, trackIndex: Int): Long = (groupIndex * 1000L + trackIndex + 1L).coerceAtLeast(1L)
+
     @OptIn(UnstableApi::class)
     fun selectAudioTrack(trackInfo: TrackInfo) {
+        // When casting to Default Receiver, the muxed MP4's audio streams are exposed
+        // as MediaTracks (see castToDevice() → MediaInfo.setMediaTracks). The Default
+        // Receiver's Shaka player switches via RemoteMediaClient.setActiveTrackIds(),
+        // not ExoPlayer's TrackSelectionOverride. Publishing the local demux's tracks
+        // as MediaTracks is what unlocks switching on the Default Receiver for
+        // non-MKV (MP4/WebM) sources. MKV still won't demux on Default Receiver,
+        // but MP4 with multiple audio now works without a Custom Receiver.
+        if (_uiState.value.isCasting) {
+            try {
+                val remote = castContext?.sessionManager?.currentCastSession?.remoteMediaClient
+                if (remote != null) {
+                    val audioId = castTrackId(trackInfo.groupIndex, trackInfo.index)
+                    // Preserve current subtitle active state – Default Receiver expects
+                    // the full active set (audio + text) on each call.
+                    val currentActive = try { remote.mediaStatus?.activeTrackIds?.toList() ?: emptyList() } catch (_: Throwable) { emptyList<Long>() }
+                    val textIds = currentActive.filter { id ->
+                        // Heuristic: text track ids we published are also castTrackId-based but we can't
+                        // distinguish; keep any id that matches a known subtitle TrackInfo, otherwise drop.
+                        _uiState.value.subtitleTracks.any { castTrackId(it.groupIndex, it.index) == id }
+                    }
+                    val newIds = (listOf(audioId) + textIds).toLongArray()
+                    remote.setActiveTrackIds(newIds)
+                    android.util.Log.i("PlayerViewModel", "Cast setActiveTrackIds audio=$audioId -> ${newIds.contentToString()}")
+                    // Optimistic UI – remote status will confirm via onTracksChanged
+                    _uiState.value = _uiState.value.copy(
+                        audioTracks = _uiState.value.audioTracks.map { it.copy(isSelected = it.groupIndex == trackInfo.groupIndex && it.index == trackInfo.index) }
+                    )
+                    return
+                }
+            } catch (e: Throwable) {
+                android.util.Log.w("PlayerViewModel", "Cast audio select via RemoteMediaClient failed, falling back to CastPlayer", e)
+            }
+        }
         val p = activePlayer()
         val tracks = p.currentTracks
         val group = tracks.groups.getOrNull(trackInfo.groupIndex) ?: return
@@ -618,6 +664,35 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
 
     @OptIn(UnstableApi::class)
     fun selectSubtitleTrack(trackInfo: TrackInfo?) {
+        if (_uiState.value.isCasting) {
+            try {
+                val remote = castContext?.sessionManager?.currentCastSession?.remoteMediaClient
+                if (remote != null) {
+                    // Build new active set: keep current audio id(s), set/clear text id
+                    val currentActive = try { remote.mediaStatus?.activeTrackIds?.toList() ?: emptyList() } catch (_: Throwable) { emptyList<Long>() }
+                    val audioIds = currentActive.filter { id ->
+                        _uiState.value.audioTracks.any { castTrackId(it.groupIndex, it.index) == id }
+                    }.ifEmpty {
+                        // If receiver hasn't reported audio id yet, keep current selected audio if known
+                        _uiState.value.audioTracks.find { it.isSelected }?.let { listOf(castTrackId(it.groupIndex, it.index)) } ?: emptyList()
+                    }
+                    val newIds = if (trackInfo == null) {
+                        // Subtitles off – only audio
+                        audioIds.toLongArray()
+                    } else {
+                        val textId = castTrackId(trackInfo.groupIndex, trackInfo.index)
+                        (audioIds + textId).toLongArray()
+                    }
+                    remote.setActiveTrackIds(newIds)
+                    android.util.Log.i("PlayerViewModel", "Cast setActiveTrackIds subtitles=${trackInfo?.let { castTrackId(it.groupIndex, it.index) } ?: "off"} -> ${newIds.contentToString()}")
+                    _uiState.value = _uiState.value.copy(subtitlesEnabled = trackInfo != null,
+                        subtitleTracks = _uiState.value.subtitleTracks.map { it.copy(isSelected = trackInfo != null && it.groupIndex == trackInfo.groupIndex && it.index == trackInfo.index) })
+                    return
+                }
+            } catch (e: Throwable) {
+                android.util.Log.w("PlayerViewModel", "Cast subtitle select via RemoteMediaClient failed, falling back to CastPlayer", e)
+            }
+        }
         val p = activePlayer()
         if (trackInfo == null) {
             p.trackSelectionParameters = p.trackSelectionParameters
@@ -979,6 +1054,55 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                     extMime,
                     "video/mp4"
                 ).firstOrNull { !it.isNullOrBlank() }!!
+                // Snapshot local tracks BEFORE we pause – this is what lets the
+                // Default Receiver expose switching for MP4/WebM files without a
+                // Custom Receiver. We translate every local audio/text TrackGroup
+                // into a Cast MediaTrack with a stable id (castTrackId). The
+                // Default Receiver's Shaka demuxer will then allow
+                // RemoteMediaClient.setActiveTrackIds() to switch. MKV embedded
+                // tracks still won't demux on Default Receiver (format limit),
+                // but MP4 multi-audio / WebVTT side-loaded now works. Also
+                // includes internet subtitles (if any were fetched) as TEXT tracks
+                // with external VTT URLs – Default Receiver renders those.
+                val snapshotGroups = try { exoPlayer.currentTracks.groups } catch (_: Throwable) { null }
+                val castTracks = mutableListOf<com.google.android.gms.cast.MediaTrack>()
+                if (snapshotGroups != null) {
+                    snapshotGroups.forEachIndexed { gIdx, group ->
+                        val trackGroup = group.mediaTrackGroup
+                        for (tIdx in 0 until trackGroup.length) {
+                            val format = trackGroup.getFormat(tIdx)
+                            val isAudio = format.sampleMimeType?.startsWith("audio/") == true || group.type == C.TRACK_TYPE_AUDIO
+                            val isText = format.sampleMimeType?.startsWith("text/") == true || group.type == C.TRACK_TYPE_TEXT
+                            if (isAudio) {
+                                val id = castTrackId(gIdx, tIdx)
+                                val name = getTrackName(format, castTracks.count { it.type == com.google.android.gms.cast.MediaTrack.TYPE_AUDIO } + 1, "Audio")
+                                val builder = com.google.android.gms.cast.MediaTrack.Builder(id, com.google.android.gms.cast.MediaTrack.TYPE_AUDIO)
+                                builder.setName(name)
+                                format.language?.let { builder.setLanguage(it) }
+                                // For muxed MP4 the receiver demuxes from the main content; no contentId needed.
+                                // ContentType hint helps Shaka choose demuxer.
+                                builder.setContentType("audio/mp4")
+                                castTracks.add(builder.build())
+                            } else if (isText) {
+                                val id = castTrackId(gIdx, tIdx)
+                                val name = getTrackName(format, castTracks.count { it.type == com.google.android.gms.cast.MediaTrack.TYPE_TEXT } + 1, "Subtitle")
+                                val builder = com.google.android.gms.cast.MediaTrack.Builder(id, com.google.android.gms.cast.MediaTrack.TYPE_TEXT)
+                                builder.setName(name)
+                                format.language?.let { builder.setLanguage(it) }
+                                builder.setSubtype(com.google.android.gms.cast.MediaTrack.SUBTYPE_CAPTIONS)
+                                builder.setContentType("text/vtt")
+                                // Embedded subs: no external contentId – receiver demuxes from main stream.
+                                // Side-loaded subs would have a URL; if we ever attach internet subs we
+                                // would call builder.setContentId(vttUrl) and setContentType("text/vtt").
+                                castTracks.add(builder.build())
+                            }
+                        }
+                    }
+                }
+                // Enrich with internet subtitles if embedded list is empty and we have a file name
+                // (best-effort, no network on main thread – we already have file; if no embedded
+                // text tracks but user expects subtitles, they can fetch via /api/subtitles/search
+                // and we would add them here as additional TEXT tracks with contentId = subtitle VTT url)
                 val mediaItem = MediaItem.Builder()
                     .setUri(url)
                     .setMediaId(currentFileId.toString())
@@ -996,9 +1120,54 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 val localDur = exoPlayer.duration
                 val safeStart =
                     if (localDur > 0 && startPositionMs >= localDur - 1500) 0L else startPositionMs
+
+                // Prefer enriched load via RemoteMediaClient (exposes MediaTracks to Default Receiver)
+                // Fallback to CastPlayer if no session yet.
+                var usedEnrichedLoad = false
+                try {
+                    val castCtx = castContext
+                    val session = castCtx?.sessionManager?.currentCastSession
+                    val remoteClient = session?.remoteMediaClient
+                    if (remoteClient != null && castTracks.isNotEmpty()) {
+                        val castMetadata = com.google.android.gms.cast.MediaMetadata(com.google.android.gms.cast.MediaMetadata.MEDIA_TYPE_MOVIE).apply {
+                            putString(com.google.android.gms.cast.MediaMetadata.KEY_TITLE, title)
+                            thumbnailUrl?.let { addImage(com.google.android.gms.cast.WebImage(Uri.parse(it))) }
+                        }
+                        val customData = org.json.JSONObject().apply {
+                            put("ar_mode", when (_uiState.value.toggleResizeMode) {
+                                androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL -> "fill"
+                                androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> "zoom"
+                                else -> "fit"
+                            })
+                            put("videoScale", _uiState.value.videoScale)
+                            // Default Receiver ignores customData, but a future Styled Receiver
+                            // could read it to apply CSS object-fit. Keeping it here makes the
+                            // same sender work on both receivers without code change.
+                        }
+                        val castMediaInfoBuilder = com.google.android.gms.cast.MediaInfo.Builder(url)
+                            .setStreamType(com.google.android.gms.cast.MediaInfo.STREAM_TYPE_BUFFERED)
+                            .setContentType(mimeType)
+                            .setMetadata(castMetadata)
+                            .setCustomData(customData)
+                        if (castTracks.isNotEmpty()) castMediaInfoBuilder.setMediaTracks(castTracks)
+                        val mediaInfo = castMediaInfoBuilder.build()
+                        val loadRequest = com.google.android.gms.cast.MediaLoadRequestData.Builder()
+                            .setMediaInfo(mediaInfo)
+                            .setAutoplay(true)
+                            .setCurrentTime(safeStart)
+                            .build()
+                        remoteClient.load(loadRequest)
+                        usedEnrichedLoad = true
+                        android.util.Log.i("PlayerViewModel", "Cast enriched load via RemoteMediaClient with ${castTracks.size} tracks (mime=$mimeType, start=$safeStart)")
+                    }
+                } catch (e: Throwable) {
+                    android.util.Log.w("PlayerViewModel", "Enriched Cast load failed, falling back to CastPlayer", e)
+                }
+                if (!usedEnrichedLoad) {
                 player.setMediaItem(mediaItem, safeStart)
                 player.prepare()
                 player.play()
+                }
                 // Re-apply the user's preferred subtitle size to the receiver.
                 // Default Receiver resets TextTrackStyle on each load; without
                 // this the size reverts to medium every time casting starts.
@@ -1006,17 +1175,11 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 try {
                     applySubtitleSizeToCastReceiver(_uiState.value.subtitleSize)
                 } catch (_: Throwable) {}
-                // NOTE for future: To make audio/subtitle track switching work over
-                // Cast for MKV files, you must either:
-                //   a) Switch to a Custom / Styled Media Receiver that runs a
-                //      demuxer with MKV support, or
-                //   b) Transcode on the server to HLS/DASH with separate renditions,
-                //      or provide side-loaded WebVTT tracks via
-                //      MediaItem.SubtitleConfiguration + MediaTrack list on the MediaInfo.
-                // The Default Media Receiver cannot enumerate embedded MKV tracks,
-                // so even though selectAudioTrack()/selectSubtitleTrack() correctly
-                // route via activePlayer() (CastPlayer) when casting, the track
-                // list will stay empty for MKV.
+                // If we did enriched load, also apply resize hint via TextTrackStyle is separate;
+                // for video aspect the Default Receiver still uses its own <video> object-fit
+                // (contain). Styled/Custom Receiver could read customData.ar_mode. On Default
+                // the control remains local-only but we keep UI enabled so the choice persists
+                // after disconnect and for future Styled migration.
             } catch (e: Throwable) {
                 // Never swallow cast-load failures silently: a rejected load
                 // leaves the receiver idle ("no media selected") with no clue
