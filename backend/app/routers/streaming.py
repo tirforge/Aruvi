@@ -732,14 +732,20 @@ async def stream_for_cast(
         # If ?audio=N is set (mobile's selected track), mux only that audio as default
         # so Default Receiver (which ignores AUDIO setActiveTrackIds per docs) still
         # plays the mobile's choice. Otherwise keep all audio for future Custom/HLS.
+        # H.264 handling without Custom: keep -c:v copy (no re-encode) – H.264 High
+        # Profile is supported on ALL Cast (1st/2nd Gen 720p/1080p, Ultra 4K). For
+        # non-H.264 (HEVC/VP9/AV1) copy still produces MP4 that plays on capable
+        # Cast (Ultra/Google TV with HEVC/VP9/AV1), while old Cast would need
+        # transcode to H.264 (fallback below handles it if copy fails).
         audio_map = f"0:a:{audio}?" if audio is not None else "0:a?"
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg", "-hide_banner", "-loglevel", "error",
             "-i", "pipe:0",
             "-map", "0:v:0?", "-map", audio_map, "-map", "0:s?",
             "-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text",
-            "-f", "mp4", "-movflags", "frag_keyframe+empty_moov+faststart",
-            "pipe:1",
+            "-movflags", "frag_keyframe+empty_moov+faststart",
+            "-brand", "mp42",
+            "-f", "mp4", "pipe:1",
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
         async def feed_stdin():
