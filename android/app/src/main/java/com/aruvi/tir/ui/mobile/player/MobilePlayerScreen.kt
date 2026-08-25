@@ -141,6 +141,21 @@ fun MobilePlayerScreen(
         viewModel.stopBackgroundAudio()
     }
 
+    // While casting, phone must be silent – TV is the renderer.
+    // User reports phone+TV both playing; ensure local ExoPlayer is paused,
+    // playWhenReady=false and volume 0, and restore on disconnect.
+    LaunchedEffect(uiState.isCasting) {
+        try {
+            if (uiState.isCasting) {
+                viewModel.exoPlayer.pause()
+                viewModel.exoPlayer.playWhenReady = false
+                viewModel.exoPlayer.volume = 0f
+            } else {
+                viewModel.exoPlayer.volume = 1f
+            }
+        } catch (_: Throwable) {}
+    }
+
     BackHandler {
         onBack()
     }
@@ -429,17 +444,38 @@ fun MobilePlayerScreen(
              }
          }
 
-         // Error Overlay
-         if (uiState.error != null) {
-             PlayerErrorScreen(
-                 error = uiState.error!!,
-                 onRetry = { viewModel.retry() },
-                 onOpenExternal = { viewModel.openInExternalPlayer(context) },
-                 onBack = onBack
-             )
-         }
-    }
-}
+          // Error Overlay
+          if (uiState.error != null) {
+              PlayerErrorScreen(
+                  error = uiState.error!!,
+                  onRetry = { viewModel.retry() },
+                  onOpenExternal = { viewModel.openInExternalPlayer(context) },
+                  onBack = onBack
+              )
+          }
+
+          // Casting overlay – when TV is renderer, phone is muted (fixes phone+TV both playing)
+          if (uiState.isCasting) {
+              Box(
+                  modifier = Modifier
+                      .fillMaxSize()
+                      .background(Color.Black.copy(alpha = 0.85f))
+                      .zIndex(5f),
+                  contentAlignment = Alignment.Center
+              ) {
+                  Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                      Icon(Icons.Filled.Cast, contentDescription = null, tint = Color.White, modifier = Modifier.size(64.dp))
+                      Spacer(modifier = Modifier.height(16.dp))
+                      Text("Casting to TV", style = MaterialTheme.typography.titleLarge, color = Color.White, fontWeight = FontWeight.Bold)
+                      Spacer(modifier = Modifier.height(8.dp))
+                      Text("Phone muted – video & audio now on TV", style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.8f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                      Spacer(modifier = Modifier.height(4.dp))
+                      Text("Use TV remote or disconnect to resume on phone", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.6f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                  }
+              }
+          }
+     }
+ }
 
 @Composable
 fun MobilePlayerControls(

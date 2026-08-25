@@ -361,6 +361,8 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                         }
                         override fun onSessionEnded(s: com.google.android.gms.cast.framework.CastSession, e: Int) {
                             _uiState.value = _uiState.value.copy(isCasting = false)
+                            try { exoPlayer.volume = 1f } catch (_: Throwable) {}
+                            try { exoPlayer.playWhenReady = false } catch (_: Throwable) {}
                             // Resume the local player from where the TV left off —
                             // but only if this session was for the movie still open.
                             // endCurrentSession() fired during a movie switch must not
@@ -372,10 +374,12 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                         override fun onSessionStarting(s: com.google.android.gms.cast.framework.CastSession) {}
                         override fun onSessionStartFailed(s: com.google.android.gms.cast.framework.CastSession, e: Int) {
                             _uiState.value = _uiState.value.copy(isCasting = false)
+                            try { exoPlayer.volume = 1f } catch (_: Throwable) {}
                         }
                         override fun onSessionResuming(s: com.google.android.gms.cast.framework.CastSession, r: String) {}
                         override fun onSessionResumeFailed(s: com.google.android.gms.cast.framework.CastSession, e: Int) {
                             _uiState.value = _uiState.value.copy(isCasting = false)
+                            try { exoPlayer.volume = 1f } catch (_: Throwable) {}
                         }
                         override fun onSessionEnding(s: com.google.android.gms.cast.framework.CastSession) {}
                         override fun onSessionSuspended(s: com.google.android.gms.cast.framework.CastSession, r: Int) {}
@@ -1043,8 +1047,12 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
             // Capture the local position and silence local playback IMMEDIATELY:
             // the public-link request below is a network round-trip, and pausing
             // only after it meant phone + TV played simultaneously for that gap.
+            // Also mute + playWhenReady=false to guarantee no local audio leaks
+            // while TV plays (user reports phone+TV both playing).
             val startPositionMs = exoPlayer.currentPosition.coerceAtLeast(0)
-            exoPlayer.pause()
+            try { exoPlayer.pause() } catch (_: Throwable) {}
+            try { exoPlayer.playWhenReady = false } catch (_: Throwable) {}
+            try { exoPlayer.volume = 0f } catch (_: Throwable) {}
 
             // Prefer the public, unauthenticated stream URL so the Chromecast
             // receiver can fetch it directly (it cannot send bearer tokens or
@@ -1267,6 +1275,7 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
             castPlayer?.clearMediaItems()
         } catch (_: Throwable) {}
         _uiState.value = _uiState.value.copy(isCasting = false)
+        try { exoPlayer.volume = 1f } catch (_: Throwable) {}
     }
 
     // Returns the player that should currently receive control/query calls.
