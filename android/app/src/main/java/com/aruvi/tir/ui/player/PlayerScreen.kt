@@ -356,6 +356,7 @@ fun PlayerScreen(
                 playbackSpeed = uiState.playbackSpeed,
                 preferredQuality = uiState.preferredQuality,
                 currentResizeMode = uiState.toggleResizeMode,
+                isCasting = uiState.isCasting,
                 onSelectAudio = { viewModel.selectAudioTrack(it) },
                 onSelectSubtitle = { viewModel.selectSubtitleTrack(it) },
                 onSubtitleSizeChange = { viewModel.setSubtitleSize(it) },
@@ -1362,6 +1363,7 @@ private fun SettingsPanel(
     playbackSpeed: Float,
     preferredQuality: String,
     currentResizeMode: Int,
+    isCasting: Boolean = false,
     onSelectAudio: (TrackInfo) -> Unit,
     onSelectSubtitle: (TrackInfo?) -> Unit,
     onSubtitleSizeChange: (SubtitleSize) -> Unit,
@@ -1465,7 +1467,23 @@ private fun SettingsPanel(
                     }
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Resize Mode section
+                    // Resize Mode section – unavailable while casting on Default Receiver
+                    if (isCasting) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF2A1F1F), RoundedCornerShape(8.dp))
+                                .border(1.dp, Color(0xFF5A2A2A), RoundedCornerShape(8.dp))
+                                .padding(12.dp)
+                        ) {
+                            Text(
+                                "Casting: Fit/Fill/Zoom disabled – video renders on Chromecast. Default Receiver has no aspect-scale API. Disconnect to resize.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFFFF8A80),
+                                lineHeight = 18.sp
+                            )
+                        }
+                    }
                     SettingsSectionLabel(title = "Resize Mode", icon = Icons.Default.Crop)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1480,16 +1498,32 @@ private fun SettingsPanel(
                             FocusableSpeedOption(
                                 label = label,
                                 isSelected = currentResizeMode == mode,
-                                onClick = { onResizeModeChange(mode) },
+                                onClick = { if (!isCasting) onResizeModeChange(mode) },
                                 modifier = Modifier.weight(1f)
                             )
                         }
                     }
+                    if (isCasting) {
+                        Text(
+                            "Controls disabled while casting",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TVTextSecondary.copy(alpha = 0.6f),
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Audio section
+                    // Audio section – show even when empty during cast with helper
                     if (audioTracks.isNotEmpty()) {
                         SettingsSectionLabel(title = "Audio Track", icon = Icons.AutoMirrored.Filled.VolumeUp)
+                        if (isCasting) {
+                            Text(
+                                "Switching may be limited for MKV on Default Receiver",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TVTextSecondary.copy(alpha = 0.7f),
+                                modifier = Modifier.padding(bottom = 6.dp)
+                            )
+                        }
                         audioTracks.forEach { track ->
                             FocusableTrackItem(
                                 name = track.name,
@@ -1499,11 +1533,28 @@ private fun SettingsPanel(
                             )
                         }
                         Spacer(modifier = Modifier.height(12.dp))
+                    } else if (isCasting) {
+                        SettingsSectionLabel(title = "Audio Track", icon = Icons.AutoMirrored.Filled.VolumeUp)
+                        Text(
+                            "No audio tracks exposed by Default Receiver for this MKV. Use MP4 or Custom Receiver / HLS.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TVTextSecondary.copy(alpha = 0.6f),
+                            lineHeight = 16.sp,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
                     }
 
                     // Subtitle section
                     if (subtitleTracks.isNotEmpty()) {
                         SettingsSectionLabel(title = "Subtitles", icon = Icons.Default.Subtitles)
+                        if (isCasting) {
+                            Text(
+                                "Embedded MKV subs not visible on Default Receiver – only side-loaded WebVTT works",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TVTextSecondary.copy(alpha = 0.7f),
+                                modifier = Modifier.padding(bottom = 6.dp)
+                            )
+                        }
                         FocusableTrackItem(
                             name = "Off",
                             subtitle = "Disable subtitles",
@@ -1522,6 +1573,38 @@ private fun SettingsPanel(
 
                         // Subtitle size
                         SettingsSectionLabel(title = "Text Size", icon = Icons.Default.FormatSize)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            SubtitleSize.entries.forEach { size ->
+                                FocusableSizeOption(
+                                    label = size.displayName + if (isCasting) " *" else "",
+                                    isSelected = subtitleSize == size,
+                                    onClick = { onSubtitleSizeChange(size) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                        if (isCasting) {
+                            Text(
+                                "* Size sent via TextTrackStyle.fontScale to receiver",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TVTextSecondary.copy(alpha = 0.6f),
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+                    } else if (isCasting) {
+                        SettingsSectionLabel(title = "Subtitles", icon = Icons.Default.Subtitles)
+                        Text(
+                            "No subtitles exposed by Default Receiver. Embedded SSA/PGS in MKV require Custom Receiver or external WebVTT.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TVTextSecondary.copy(alpha = 0.6f),
+                            lineHeight = 16.sp,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+                        // Still show size chips (they affect TextTrackStyle when subs do appear)
+                        SettingsSectionLabel(title = "Text Size (Cast TextTrackStyle)", icon = Icons.Default.FormatSize)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)

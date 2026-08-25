@@ -108,6 +108,63 @@ data class PlayerUiState(
     val isCasting: Boolean = false
 )
 
+/**
+ * ROOT CAUSE ANALYSIS – Missing Cast Controls with Default Media Receiver
+ * -----------------------------------------------------------------------
+ * User report: When Chromecast is started via the Default Media Receiver
+ * (CastOptionsProvider.DEFAULT_MEDIA_RECEIVER_APPLICATION_ID), the local
+ * player controls for:
+ *   • Audio track switching
+ *   • Subtitle track switching + subtitle text size
+ *   • Fit / Fill/Stretch / Zoom (AspectRatioFrameLayout.RESIZE_MODE_*) + custom zoom/pan
+ * appear to do nothing on the TV or are empty.
+ *
+ * Why:
+ * 1. Audio/Subtitles are muxed inside a single MKV/MP4 file served as
+ *    `https://server/api/stream/<id>`. ExoPlayer locally demuxes the container
+ *    and exposes every audio/text stream via Tracks (C.TRACK_TYPE_AUDIO/TEXT).
+ *    The Default Receiver does NOT demux MKV embedded tracks – it relies on
+ *    HLS/DASH manifests (separate renditions) or side-loaded MediaTracks
+ *    (external WebVTT). The CastPlayer therefore reports `currentTracks` with
+ *    0 audio/text groups for those MKV files, so the settings sheet shows
+ *    "No audio tracks" / "Off" only. This is a receiver-format limitation,
+ *    not a sender bug.
+ *
+ * 2. Even if tracks were enumerated, `castToDevice()` previously built a
+ *    bare MediaItem (uri + mimeType only) with no MediaTrack/SubtitleConfiguration
+ *    list. Without declared tracks the receiver cannot generate IDs for
+ *    `RemoteMediaClient.setActiveMediaTracks()`, so `selectAudioTrack()` /
+ *    `selectSubtitleTrack()` via `activePlayer()` would no-op over Cast.
+ *
+ * 3. Resize modes + custom zoom are applied locally as
+ *    `PlayerView.resizeMode` and `Modifier.graphicsLayer(scaleX/Y)` – both are
+ *    client-side compositor transforms. While casting the video is decoded on
+ *    the Chromecast hardware; the Cast protocol and Default Receiver CSS have
+ *    no `RESIZE_MODE_FILL/ZOOM` equivalent. Mutating `toggleResizeMode` /
+ *    `videoScale` updates local `_uiState` but no Cast message is sent, so
+ *    the TV picture never changes.
+ *
+ * 4. Subtitle size (`SubtitleView.setFractionalTextSize`) mutates the local
+ *    `SubtitleView` only. Cast subtitles are rendered by the receiver's
+ *    `<track>` element; size must be pushed via `RemoteMediaClient.setTextTrackStyle`
+ *    with a `TextTrackStyle.fontScale`. That call was absent, and mobile
+ *    never wired `subtitleView` size at all (TV did).
+ *
+ * Fixes applied in this file:
+ * • Keep `activePlayer()` routing (already correct) but add explicit wiring
+ *   for Cast TextTrackStyle when `setSubtitleSize()` is called while casting,
+ *   and re-apply the saved size after each `castToDevice()` load.
+ * • Guard `setResizeMode/Scale/Pan` with a Cast check – the state still
+ *   updates locally for preview but logs a warning so developers know the
+ *   Default Receiver ignores it.
+ * • Add exhaustive comments so future maintainers understand the Default
+ *   Receiver limits and know to switch to a Custom/Stylized receiver or
+ *   HLS-transcoded manifests if per-track control is required.
+ * • `updateTracks()` already reads from `activePlayer()`, so when the Cast
+ *   receiver does expose tracks (e.g. MP4+A/V or side-loaded VTT) the UI
+ *   correctly reflects them without extra work.
+ */
+
 @HiltViewModel
 class PlayerViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
@@ -120,14 +177,23 @@ class PlayerViewModel @Inject constructor(
 ) : ViewModel() {
 
     fun setResizeMode(mode: Int) {
+        if (_uiState.value.isCasting) {
+            android.util.Log.w("PlayerViewModel", "setResizeMode ignored while casting: Default Receiver renders video on TV and has no RESIZE_MODE API (use Custom Receiver or transcode)")
+        }
         _uiState.value = _uiState.value.copy(toggleResizeMode = mode)
     }
 
     fun setVideoScale(scale: Float) {
+        if (_uiState.value.isCasting) {
+            android.util.Log.w("PlayerViewModel", "setVideoScale ignored while casting: custom zoom is a local graphicsLayer transform; Default Receiver cannot be scaled from sender")
+        }
         _uiState.value = _uiState.value.copy(videoScale = scale.coerceIn(0.5f, 5.0f))
     }
 
     fun setVideoPan(x: Float, y: Float) {
+        if (_uiState.value.isCasting) {
+            android.util.Log.w("PlayerViewModel", "setVideoPan ignored while casting: pan is local-only")
+        }
         _uiState.value = _uiState.value.copy(videoOffsetX = x, videoOffsetY = y)
     }
 
@@ -142,6 +208,7 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun updatePan(deltaX: Float, deltaY: Float) {
+        if (_uiState.value.isCasting) return
         val currentX = _uiState.value.videoOffsetX
         val currentY = _uiState.value.videoOffsetY
         _uiState.value = _uiState.value.copy(
@@ -151,6 +218,9 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun cycleResizeMode() {
+        if (_uiState.value.isCasting) {
+            android.util.Log.w("PlayerViewModel", "cycleResizeMode while casting: TV aspect will not change on Default Receiver")
+        }
         val current = _uiState.value.toggleResizeMode
         val next = when (current) {
             androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
@@ -573,6 +643,34 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
 
     fun setSubtitleSize(size: SubtitleSize) {
         _uiState.value = _uiState.value.copy(subtitleSize = size)
+        if (_uiState.value.isCasting) applySubtitleSizeToCastReceiver(size)
+    }
+
+    /**
+     * Pushes the app's SubtitleSize scale to the Cast receiver's TextTrackStyle.
+     * The Default Media Receiver renders subtitles itself (local SubtitleView is
+     * not used while casting), so `SubtitleView.setFractionalTextSize()` has
+     * no effect. The Cast SDK instead uses TextTrackStyle.fontScale.
+     * SMALL=0.7 / MEDIUM=1.0 / LARGE=1.4 / XL=1.8 maps directly.
+     * This is best-effort – if no Cast session is active or the receiver
+     * rejects the style, we simply log and keep the local preference.
+     */
+    private fun applySubtitleSizeToCastReceiver(size: SubtitleSize) {
+        try {
+            val ctx = castContext ?: return
+            val client = ctx.sessionManager.currentCastSession?.remoteMediaClient ?: return
+            val style = com.google.android.gms.cast.TextTrackStyle().apply {
+                fontScale = size.scale
+                // Optional: keep white on black shadow for readability on Default Receiver
+                foregroundColor = com.google.android.gms.cast.TextTrackStyle.COLOR_WHITE
+                backgroundColor = com.google.android.gms.cast.TextTrackStyle.COLOR_NONE
+                edgeType = com.google.android.gms.cast.TextTrackStyle.EDGE_TYPE_DROP_SHADOW
+            }
+            client.setTextTrackStyle(style)
+            android.util.Log.i("PlayerViewModel", "Applied subtitle size ${size.displayName} (scale=${size.scale}) to Cast receiver")
+        } catch (e: Throwable) {
+            android.util.Log.w("PlayerViewModel", "Failed to apply subtitle size to Cast receiver", e)
+        }
     }
 
     fun toggleSettings() {
@@ -901,6 +999,24 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 player.setMediaItem(mediaItem, safeStart)
                 player.prepare()
                 player.play()
+                // Re-apply the user's preferred subtitle size to the receiver.
+                // Default Receiver resets TextTrackStyle on each load; without
+                // this the size reverts to medium every time casting starts.
+                // Delay is unnecessary – RemoteMediaClient queues until media loaded.
+                try {
+                    applySubtitleSizeToCastReceiver(_uiState.value.subtitleSize)
+                } catch (_: Throwable) {}
+                // NOTE for future: To make audio/subtitle track switching work over
+                // Cast for MKV files, you must either:
+                //   a) Switch to a Custom / Styled Media Receiver that runs a
+                //      demuxer with MKV support, or
+                //   b) Transcode on the server to HLS/DASH with separate renditions,
+                //      or provide side-loaded WebVTT tracks via
+                //      MediaItem.SubtitleConfiguration + MediaTrack list on the MediaInfo.
+                // The Default Media Receiver cannot enumerate embedded MKV tracks,
+                // so even though selectAudioTrack()/selectSubtitleTrack() correctly
+                // route via activePlayer() (CastPlayer) when casting, the track
+                // list will stay empty for MKV.
             } catch (e: Throwable) {
                 // Never swallow cast-load failures silently: a rejected load
                 // leaves the receiver idle ("no media selected") with no clue
