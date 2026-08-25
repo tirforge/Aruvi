@@ -275,6 +275,8 @@ async def stream_file_head(
         "Accept-Ranges": "bytes",
         "Cache-Control": "private, max-age=300",
         "Content-Length": str(file.file_size),
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length, Content-Type",
     }
     return Response(status_code=200, content=b"", headers=headers)
 
@@ -337,6 +339,8 @@ async def stream_file(
             "Accept-Ranges": "bytes",
             "Cache-Control": "no-store" if download else "private, max-age=300",
             "Content-Length": "0",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length, Content-Type",
         }
         return Response(status_code=200, content=b"", headers=headers)
 
@@ -391,6 +395,8 @@ async def stream_file(
         "Cache-Control": "no-store" if download else "private, max-age=300",
         "Content-Length": str(content_length),
         "X-Accel-Buffering": "no",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length, Content-Type",
     }
     if range_header:
         headers["Content-Range"] = f"bytes {from_bytes}-{until_bytes}/{file_size}"
@@ -451,6 +457,8 @@ async def get_thumbnail(
 
     _thumb_headers = {
         "Cache-Control": "private, max-age=604800",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length, Content-Type",
         "ETag": f'"thumb-{file_id}"',
     }
     if request.headers.get("if-none-match") == _thumb_headers["ETag"]:
@@ -571,6 +579,8 @@ async def stream_public_file(
             "Accept-Ranges": "bytes",
             "Cache-Control": "public, max-age=86400",
             "Content-Length": "0",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length, Content-Type",
         }
         return Response(status_code=200, content=b"", headers=headers)
 
@@ -624,6 +634,8 @@ async def stream_public_file(
         "Cache-Control": "public, max-age=86400",
         "Content-Length": str(content_length),
         "X-Accel-Buffering": "no",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length, Content-Type",
     }
     if range_header:
         headers["Content-Range"] = f"bytes {from_bytes}-{until_bytes}/{file_size}"

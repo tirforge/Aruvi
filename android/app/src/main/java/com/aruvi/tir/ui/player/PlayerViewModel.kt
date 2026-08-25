@@ -150,26 +150,38 @@ data class PlayerUiState(
  *    with a `TextTrackStyle.fontScale`. That call was absent, and mobile
  *    never wired `subtitleView` size at all (TV did).
  *
- * Fixes applied in this file (UPDATE 2 – Default Receiver FULL FEATURE MODE):
- * • Audio/Subtitles: castToDevice() now captures the local ExoPlayer's demuxed
- *   TrackGroups and publishes them as Cast MediaTracks (TYPE_AUDIO/TYPE_TEXT)
- *   with stable ids (castTrackId). The Default Receiver's Shaka demuxer can then
- *   honor RemoteMediaClient.setActiveTrackIds() for MP4/WebM multi-audio and
- *   muxed VTT subs without a Custom Receiver. MKV still won't demux on Default
- *   (container limit), but MP4/WebM now switches correctly. selectAudioTrack()
- *   and selectSubtitleTrack() now branch on isCasting and call
- *   RemoteMediaClient.setActiveTrackIds() with the computed ids + optimistic UI.
- * • Subtitle size: keep TextTrackStyle.fontScale push via RemoteMediaClient
- *   (works on Default Receiver's <track> renderer) + fix Mobile subtitleView.
- * • Resize/Fit/Stretch/Zoom: Default Receiver has no RESIZE_MODE API – we now
- *   keep the controls ENABLED, persist the choice in _uiState (so it applies
- *   instantly after disconnect), and also ship it as MediaInfo.customData
- *   {ar_mode: fit|fill|zoom, videoScale}. Default ignores it (TV picture mode
- *   must be used), but a Styled/Custom Receiver can apply CSS object-fit without
- *   sender change. This satisfies "enable all features in default" while
- *   remaining honest about the receiver's rendering model.
- * • `updateTracks()` already reads from activePlayer(), so enriched tracks are
- *   reflected automatically.
+ * Fixes applied in this file (UPDATE 2 – verified against
+ * https://developers.google.com/cast/docs/android_sender/media_tracks and
+ * https://developers.google.com/cast/docs/media):
+ * • Text tracks (subtitles/captions): castToDevice() captures local demuxed TEXT
+ *   groups and publishes them as Cast MediaTracks (TYPE_TEXT, SUBTYPE_CAPTIONS)
+ *   via MediaInfo.setMediaTracks(). RemoteMediaClient.setActiveTrackIds() and
+ *   setTextTrackStyle(fontScale) ARE supported on Default/Styled per docs:
+ *   "allow you to use only the text tracks with the API". Subtitle switching +
+ *   size now work on Default (CORS headers still required for VTT).
+ * • Audio/Video tracks: The same MediaTracks publishing is kept for AUDIO, but
+ *   per docs "To work with the audio and video tracks, you must develop a Custom
+ *   Receiver" – Default/Styled will ignore AUDIO setActiveTrackIds() (request
+ *   returns non-success). The app still publishes AUDIO tracks for forward
+ *   compatibility; selectAudioTrack() branches on isCasting, tries
+ *   RemoteMediaClient.setActiveTrackIds() and logs rejection gracefully, then
+ *   falls back to CastPlayer routing. For true audio switching on MKV/MP4,
+ *   use HLS/DASH adaptive manifests (auto-discovered) or a Custom Receiver.
+ * • Containers: Verified Supported Media lists MP4/WebM/MP2T/MP3/OGG/WAV – no MKV.
+ *   MKV served as video/x-matroska will fail on Default regardless of tracks;
+ *   keep mapping but expect failure – recommend remux to MP4 or Custom Receiver.
+ * • Resize/Fit/Stretch/Zoom: Verified "you cannot customize any of the UI in the
+ *   Default Media Web Receiver" (Web Receiver Overview) and TV Overscan note.
+ *   No Cast API for aspect. Controls stay ENABLED, persist in _uiState, and are
+ *   shipped as MediaInfo.customData {ar_mode, videoScale} for a future Styled
+ *   receiver (CSS object-fit) – Default correctly ignores it; zoom re-applies after
+ *   disconnect.
+ * • `updateTracks()` reads from activePlayer(), so enriched text tracks are
+ *   reflected automatically; audio tracks appear only on Custom Receiver.
+ * • CORS: Media Tracks guide requires CORS for both media and tracks
+ *   (allow Content-Type, Accept-Encoding, Range; expose Content-Range etc.).
+ *   Backend CORSMiddleware currently omits Accept-Encoding and restricts origins
+ *   to web_base_url – should allow "*" or Cast origins for tracks to load.
  */
 
 @HiltViewModel

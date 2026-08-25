@@ -1505,14 +1505,14 @@ private fun SettingsPanel(
                     }
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Audio section – now enabled on Default Receiver via MediaTracks
+                    // Audio section – per docs only TEXT works on Default/Styled; AUDIO needs Custom
                     if (audioTracks.isNotEmpty()) {
                         SettingsSectionLabel(title = "Audio Track", icon = Icons.AutoMirrored.Filled.VolumeUp)
                         if (isCasting) {
                             Text(
-                                "Audio switching enabled (Default Receiver) – MP4/WebM multi-audio via MediaTracks; MKV embedded still needs MP4 or Styled Receiver",
+                                "Audio switching requires Custom Receiver (Default/Styled only TEXT per docs) – will be ignored on Default; use HLS adaptive or Custom for multi-audio",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFFA5D6A7),
+                                color = Color(0xFFEF9A9A),
                                 modifier = Modifier.padding(bottom = 6.dp)
                             )
                         }
@@ -1528,7 +1528,7 @@ private fun SettingsPanel(
                     } else if (isCasting) {
                         SettingsSectionLabel(title = "Audio Track", icon = Icons.AutoMirrored.Filled.VolumeUp)
                         Text(
-                            "No audio tracks – muxed MP4/WebM will show here via MediaTracks; MKV container can't be demuxed on Default Receiver",
+                            "No audio tracks – Default/Styled ignore AUDIO MediaTracks (docs). Use Custom Receiver or HLS; MKV not supported at all.",
                             style = MaterialTheme.typography.bodySmall,
                             color = TVTextSecondary.copy(alpha = 0.6f),
                             lineHeight = 16.sp,
@@ -1536,12 +1536,12 @@ private fun SettingsPanel(
                         )
                     }
 
-                    // Subtitle section – enabled via MediaTracks + TextTrackStyle
+                    // Subtitle section – verified enabled on Default via MediaTracks + TextTrackStyle
                     if (subtitleTracks.isNotEmpty()) {
                         SettingsSectionLabel(title = "Subtitles", icon = Icons.Default.Subtitles)
                         if (isCasting) {
                             Text(
-                                "Subtitles enabled via MediaTracks + TextTrackStyle (VTT); muxed MP4 subs work, MKV needs side-loaded VTT or Styled Receiver",
+                                "Subtitles enabled on Default via MediaTracks (WebVTT/TTML/CEA) + TextTrackStyle.fontScale – ensure CORS",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color(0xFFA5D6A7),
                                 modifier = Modifier.padding(bottom = 6.dp)

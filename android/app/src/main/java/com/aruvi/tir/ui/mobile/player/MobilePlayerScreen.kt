@@ -714,7 +714,7 @@ fun PlayerSettingsSheet(
                     }
                 }
             }
-            1 -> { // Audio – enabled on Default Receiver via MediaTracks
+            1 -> { // Audio – per docs only TEXT works on Default/Styled; AUDIO needs Custom
                 if (uiState.audioTracks.isEmpty()) {
                     Column(
                         modifier = Modifier.fillMaxWidth().height(250.dp).padding(24.dp),
@@ -725,7 +725,7 @@ fun PlayerSettingsSheet(
                         Spacer(modifier = Modifier.height(8.dp))
                         if (uiState.isCasting) {
                             Text(
-                                "Default Receiver: MP4/WebM multi-audio now exposed via MediaTracks; MKV still container-limited (use MP4 or Styled Receiver).",
+                                "Default/Styled Receiver: audio switching requires Custom Receiver per docs (only text tracks work). For MP4, use HLS/DASH adaptive or Custom; MKV not supported at all on Default.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -736,9 +736,9 @@ fun PlayerSettingsSheet(
                     Column {
                         if (uiState.isCasting) {
                             Text(
-                                "Audio switching enabled (Default) – MP4/WebM works via MediaTracks; MKV needs remux.",
+                                "Audio switching: Default/Styled ignores setActiveTrackIds() for AUDIO (docs). Will fail gracefully; use Custom Receiver or HLS.",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = MaterialTheme.colorScheme.error,
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                             )
                         }
@@ -755,7 +755,7 @@ fun PlayerSettingsSheet(
                     }
                 }
             }
-            2 -> { // Subtitles – enabled via MediaTracks + TextTrackStyle
+            2 -> { // Subtitles – enabled via MediaTracks + TextTrackStyle (verified on Default)
                 LazyColumn(modifier = Modifier.height(250.dp)) {
                     if (uiState.isCasting && uiState.subtitleTracks.isEmpty()) {
                         item {
@@ -763,10 +763,10 @@ fun PlayerSettingsSheet(
                                 modifier = Modifier.fillMaxWidth().padding(24.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text("No subtitles – muxed MP4 will appear via MediaTracks", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                Text("No subtitles – text tracks will appear if muxed/WebVTT", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    "Default Receiver renders WebVTT via MediaTracks. MKV SSA/PGS need external VTT or Styled Receiver.",
+                                    "Default Receiver supports TEXT via MediaTracks (WebVTT/TTML/CEA). Ensure CORS headers (Content-Type/Range/Accept-Encoding) and expose Content-Range. MKV not supported – remux to MP4.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
