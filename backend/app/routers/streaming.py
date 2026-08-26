@@ -3,6 +3,8 @@ Streaming API endpoints for media playback.
 """
 import re
 import asyncio
+import json
+import shutil
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
 from fastapi.responses import StreamingResponse, HTMLResponse
@@ -647,6 +649,59 @@ async def stream_public_file(
         headers=headers
     )
 
+async def _probe_cast_streams(message, file_size: int, request: Request):
+    """Best-effort ffprobe of the Telegram file (header only) to learn audio-track
+    count, whether text subtitles exist, and duration. Returns None if ffprobe is
+    unavailable or fails. Used by stream_for_cast to avoid remux failures."""
+    if shutil.which("ffprobe") is None:
+        return None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "error",
+            "-show_entries", "stream=index,codec_type,codec_name:format=duration",
+            "-of", "json", "-i", "pipe:0",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        async def _feed():
+            try:
+                async for chunk in stream_file_chunks(tg_client, message, 0, file_size - 1, request=request):
+                    if proc.stdin is None:
+                        break
+                    proc.stdin.write(chunk)
+                    await proc.stdin.drain()
+                if proc.stdin:
+                    proc.stdin.close()
+            except Exception:
+                try:
+                    if proc.stdin:
+                        proc.stdin.close()
+                except Exception:
+                    pass
+
+        feed_task = asyncio.create_task(_feed())
+        out, _ = await proc.communicate()
+        await feed_task
+        data = json.loads(out.decode(errors="ignore"))
+        streams = data.get("streams", [])
+        audio_count = sum(1 for s in streams if s.get("codec_type") == "audio")
+        # Only text subtitle codecs can be carried into MP4 via -c:s mov_text.
+        # Bitmap subs (PGS/dvd_subtitle) cannot, and mapping them breaks the whole
+        # remux (video dies too). Skip subtitles unless we know they are text.
+        TEXT_SUBS = {"ass", "ssa", "srt", "subrip", "webvtt", "text"}
+        has_text_subs = any(
+            s.get("codec_type") == "subtitle" and (s.get("codec_name") in TEXT_SUBS)
+            for s in streams
+        )
+        duration = float(data.get("format", {}).get("duration") or 0) or None
+        return {"audio_count": audio_count, "has_text_subs": has_text_subs, "duration": duration}
+    except Exception as e:  # pragma: no cover - best-effort only
+        logger.warning("cast probe failed: %s", e)
+        return None
+
+
 @router.get("/{file_id}/cast")
 async def stream_for_cast(
     file_id: int,
@@ -712,20 +767,53 @@ async def stream_for_cast(
                 yield chunk
         return StreamingResponse(passthrough(), media_type=mime_type, headers=headers)
 
-    import asyncio, shutil
     if shutil.which("ffmpeg") is None:
         raise HTTPException(status_code=501, detail="ffmpeg not installed on server – cannot remux MKV for Cast")
 
     from urllib.parse import quote
     encoded_filename = quote(file.file_name.rsplit(".", 1)[0] + ".mp4")
+
+    # Probe once (header only) so we can (a) clamp ?audio=N into a valid ffmpeg
+    # audio index and (b) only map subtitle tracks that MP4 can actually carry.
+    # Without this, an out-of-range audio index muxes NO audio, and bitmap subtitle
+    # tracks (PGS/dvd_subtitle) make -c:s mov_text fail and kill the whole remux.
+    probe = await _probe_cast_streams(message, file.file_size, request)
+    audio_count = probe["audio_count"] if probe else None
+    if audio is not None and audio_count is not None and 0 <= audio < audio_count:
+        audio_map = f"0:a:{audio}?"
+    else:
+        if audio is not None:
+            logger.warning("cast audio index %s out of range (have %s) – falling back to all audio", audio, audio_count)
+        audio_map = "0:a?"  # keep all audio tracks (Default ignores AUDIO anyway)
+
+    # Only map subtitles when we KNOW they are text codecs; otherwise skip so a
+    # bitmap/unsupported sub track can never break video playback.
+    map_subs = bool(probe and probe["has_text_subs"])
+
+    # Best-effort seeking: Range -> ffmpeg -ss (before -i) seeks the input while we
+    # still feed the FULL file. Approximate byte<->time mapping via probe duration.
+    range_header = request.headers.get("Range")
+    seek_time = None
+    start_byte = 0
+    if range_header and probe and probe["duration"]:
+        m = re.match(r"bytes=(\d+)-", range_header)
+        if m:
+            start_byte = int(m.group(1))
+            seek_time = start_byte / file.file_size * probe["duration"]
+    status_code = 206 if seek_time is not None else 200
+
     headers = {
         "Content-Type": "video/mp4",
         "Content-Disposition": f"inline; filename*=utf-8''{encoded_filename}",
         "Cache-Control": "no-store",
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length, Content-Type",
+        "Accept-Ranges": "bytes",
         "X-Accel-Buffering": "no",
     }
+    if seek_time is not None:
+        headers["Content-Range"] = f"bytes {start_byte}-{file.file_size - 1}/{file.file_size}"
+
     spawn_background(prefetch_first_batch_safe(tg_client, message, 0))
 
     async def ffmpeg_remux_stream():
@@ -737,19 +825,33 @@ async def stream_for_cast(
         # non-H.264 (HEVC/VP9/AV1) copy still produces MP4 that plays on capable
         # Cast (Ultra/Google TV with HEVC/VP9/AV1), while old Cast would need
         # transcode to H.264 (fallback below handles it if copy fails).
-        audio_map = f"0:a:{audio}?" if audio is not None else "0:a?"
-        proc = await asyncio.create_subprocess_exec(
+        cmd = [
             "ffmpeg", "-hide_banner", "-loglevel", "error",
+        ]
+        if seek_time is not None:
+            cmd += ["-ss", f"{seek_time:.3f}"]
+        cmd += [
             "-i", "pipe:0",
-            "-map", "0:v:0?", "-map", audio_map, "-map", "0:s?",
-            "-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text",
+            "-map", "0:v:0?", "-map", audio_map,
+        ]
+        if map_subs:
+            cmd += ["-map", "0:s?"]
+        cmd += ["-c:v", "copy", "-c:a", "copy"]
+        if map_subs:
+            cmd += ["-c:s", "mov_text"]
+        cmd += [
             "-movflags", "frag_keyframe+empty_moov+faststart",
             "-brand", "mp42",
             "-f", "mp4", "pipe:1",
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
         async def feed_stdin():
             try:
+                # When seeking we still must feed the FULL file (ffmpeg discards
+                # until -ss internally); for non-seek we feed from 0..size-1 too.
                 async for chunk in stream_file_chunks(tg_client, message, 0, file.file_size - 1, request=request):
                     if proc.stdin is None:
                         break
@@ -783,5 +885,5 @@ async def stream_for_cast(
             except Exception:
                 pass
 
-    return StreamingResponse(ffmpeg_remux_stream(), media_type="video/mp4", headers=headers)
+    return StreamingResponse(ffmpeg_remux_stream(), media_type="video/mp4", headers=headers, status_code=status_code)
 
