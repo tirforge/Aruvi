@@ -685,35 +685,86 @@ async def _probe_cast_streams(message, file_size: int, request: Request):
         out, _ = await proc.communicate()
         await feed_task
         data = json.loads(out.decode(errors="ignore"))
-        streams = data.get("streams", [])
-        audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
-        audio_count = len(audio_streams)
-        # Language of each audio stream, in file order (ordinal N -> 0:a:N).
-        # Used to map the sender's selected language to the exact ffmpeg audio
-        # stream, which is robust even when ExoPlayer's track index differs from
-        # ffmpeg's audio ordinal (multiple track groups, interleaved streams).
-        audio_langs = [
-            (s.get("tags") or {}).get("language") for s in audio_streams
-        ]
-        # Only text subtitle codecs can be carried into MP4 via -c:s mov_text.
-        # Only BITMAP subtitle codecs cannot be carried into MP4 via -c:s mov_text
-        # (and mapping them breaks the whole remux). Everything else (mov_text/tx3g
-        # for MP4, ass/ssa/srt/subrip/webvtt/text for MKV/WebM) is text and safe to
-        # keep. Excluding bitmap codecs (rather than allowlisting text ones) is what
-        # avoids the regression where MP4's `mov_text` subs were wrongly dropped.
-        BITMAP_SUBS = {
-            "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle",
-            "dvb_teletext", "eia_608", "eia_708", "arib_caption",
-        }
-        has_text_subs = any(
-            s.get("codec_type") == "subtitle" and (s.get("codec_name") not in BITMAP_SUBS)
-            for s in streams
-        )
-        duration = float(data.get("format", {}).get("duration") or 0) or None
-        return {"audio_count": audio_count, "audio_langs": audio_langs, "has_text_subs": has_text_subs, "duration": duration}
+        return _parse_cast_probe(data)
     except Exception as e:  # pragma: no cover - best-effort only
         logger.warning("cast probe failed: %s", e)
         return None
+
+
+# Subtitle codecs that CANNOT be carried into MP4 via `-c:s mov_text`. Mapping a
+# bitmap sub (PGS/DVD/DVB/…) breaks the whole remux, so we exclude exactly these
+# and keep everything else (mov_text/tx3g for MP4, ass/ssa/srt/subrip/webvtt/text
+# for MKV/WebM). Excluding bitmap codecs (rather than allowlisting text ones) is
+# what avoids the regression where MP4's `mov_text` subs were wrongly dropped.
+BITMAP_SUBS = {
+    "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle",
+    "dvb_teletext", "eia_608", "eia_708", "arib_caption",
+}
+
+
+def _parse_cast_probe(data: dict) -> dict:
+    """Pure: turn ffprobe JSON into the cast-remux decision inputs.
+
+    Split out of ``_probe_cast_streams`` so it can be unit-tested without a real
+    Telegram fetch. ``has_text_subs`` is True for any text subtitle codec (NOT an
+    allowlist), so MP4's ``mov_text`` subs are kept.
+    """
+    streams = data.get("streams", [])
+    audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
+    audio_count = len(audio_streams)
+    # Language of each audio stream, in file order (ordinal N -> 0:a:N).
+    audio_langs = [(s.get("tags") or {}).get("language") for s in audio_streams]
+    has_text_subs = any(
+        s.get("codec_type") == "subtitle" and (s.get("codec_name") not in BITMAP_SUBS)
+        for s in streams
+    )
+    duration = float(data.get("format", {}).get("duration") or 0) or None
+    return {"audio_count": audio_count, "audio_langs": audio_langs, "has_text_subs": has_text_subs, "duration": duration}
+
+
+def _norm_lang(lang) -> str:
+    return (lang or "").strip().lower().split()[0]
+
+
+def _resolve_cast_audio_map(probe, audio: int | None, audio_lang: str | None) -> str:
+    """Pure: choose the ffmpeg audio map (`-map 0:a:N?` / `-map 0:a?`).
+
+    Prefers an exact language match against the probed audio languages; falls back
+    to the raw ffmpeg audio ordinal (clamped), then to all audio.
+    """
+    audio_langs = (probe or {}).get("audio_langs", []) or []
+    audio_count = (probe or {}).get("audio_count", 0) or 0
+    if audio_lang:
+        req = _norm_lang(audio_lang)
+        if len(req) >= 2:
+            for i, lang in enumerate(audio_langs):
+                nl = _norm_lang(lang)
+                if nl and (nl == req or nl.startswith(req) or req.startswith(nl)):
+                    return f"0:a:{i}?"
+            logger.warning("cast audio_lang %r not found in %s – falling back to all audio", audio_lang, audio_langs)
+            return "0:a?"
+        logger.warning("cast audio_lang %r too short – falling back to all audio", audio_lang)
+        return "0:a?"
+    if audio is not None and 0 <= audio < audio_count:
+        return f"0:a:{audio}?"
+    if audio is not None:
+        logger.warning("cast audio index %s out of range (have %s) – falling back to all audio", audio, audio_count)
+    return "0:a?"
+
+
+def _build_cast_remux_cmd(audio_map: str, map_subs: bool, seek_time: float | None) -> list:
+    """Pure: build the ffmpeg argument list for the cast remux."""
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error"]
+    if seek_time is not None:
+        cmd += ["-ss", f"{seek_time:.3f}"]
+    cmd += ["-i", "pipe:0", "-map", "0:v:0?", "-map", audio_map]
+    if map_subs:
+        cmd += ["-map", "0:s?"]
+    cmd += ["-c:v", "copy", "-c:a", "copy"]
+    if map_subs:
+        cmd += ["-c:s", "mov_text"]
+    cmd += ["-movflags", "frag_keyframe+empty_moov+faststart", "-brand", "mp42", "-f", "mp4", "pipe:1"]
+    return cmd
 
 
 @router.get("/{file_id}/cast")
@@ -795,39 +846,9 @@ async def stream_for_cast(
     # Without this, an out-of-range audio index muxes NO audio, and bitmap subtitle
     # tracks (PGS/dvd_subtitle) make -c:s mov_text fail and kill the whole remux.
     probe = await _probe_cast_streams(message, file.file_size, request)
-    audio_count = probe["audio_count"] if probe else None
-    audio_langs = probe["audio_langs"] if probe else []
-
-    def _norm_lang(l):
-        l = (l or "").strip().lower().split()[0]
-        return l
-
-    audio_map = "0:a?"
-    if audio_lang:
-        req = _norm_lang(audio_lang)
-        if len(req) >= 2:
-            matched = False
-            for i, lang in enumerate(audio_langs):
-                nl = _norm_lang(lang)
-                if nl and (nl == req or nl.startswith(req) or req.startswith(nl)):
-                    audio_map = f"0:a:{i}?"
-                    matched = True
-                    break
-            if not matched:
-                logger.warning("cast audio_lang %r not found in %s – falling back to all audio", audio_lang, audio_langs)
-                audio_map = "0:a?"
-        else:
-            logger.warning("cast audio_lang %r too short – falling back to all audio", audio_lang)
-            audio_map = "0:a?"
-    elif audio is not None and audio_count is not None and 0 <= audio < audio_count:
-        audio_map = f"0:a:{audio}?"
-    else:
-        if audio is not None:
-            logger.warning("cast audio index %s out of range (have %s) – falling back to all audio", audio, audio_count)
-        audio_map = "0:a?"  # keep all audio tracks (Default ignores AUDIO anyway)
-
-    # Only map subtitles when we KNOW they are text codecs; otherwise skip so a
-    # bitmap/unsupported sub track can never break video playback.
+    audio_map = _resolve_cast_audio_map(probe, audio, audio_lang)
+    # Keep subtitles only when the probe found text-capable subs; bitmap subs are
+    # skipped so they can never break the whole remux.
     map_subs = bool(probe and probe["has_text_subs"])
 
     # Best-effort seeking: Range -> ffmpeg -ss (before -i) seeks the input while we
@@ -865,25 +886,7 @@ async def stream_for_cast(
         # non-H.264 (HEVC/VP9/AV1) copy still produces MP4 that plays on capable
         # Cast (Ultra/Google TV with HEVC/VP9/AV1), while old Cast would need
         # transcode to H.264 (fallback below handles it if copy fails).
-        cmd = [
-            "ffmpeg", "-hide_banner", "-loglevel", "error",
-        ]
-        if seek_time is not None:
-            cmd += ["-ss", f"{seek_time:.3f}"]
-        cmd += [
-            "-i", "pipe:0",
-            "-map", "0:v:0?", "-map", audio_map,
-        ]
-        if map_subs:
-            cmd += ["-map", "0:s?"]
-        cmd += ["-c:v", "copy", "-c:a", "copy"]
-        if map_subs:
-            cmd += ["-c:s", "mov_text"]
-        cmd += [
-            "-movflags", "frag_keyframe+empty_moov+faststart",
-            "-brand", "mp42",
-            "-f", "mp4", "pipe:1",
-        ]
+        cmd = _build_cast_remux_cmd(audio_map, map_subs, seek_time)
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
