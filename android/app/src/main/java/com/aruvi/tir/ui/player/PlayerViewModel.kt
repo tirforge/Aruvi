@@ -725,7 +725,9 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
     fun selectAudioTrack(trackInfo: TrackInfo) {
         // Default Receiver ignores AUDIO setActiveTrackIds per docs (only TEXT works),
         // so we make the mobile's selected audio the TV's default via server remux:
-        // /api/stream/{id}/cast?audio=N keeps only that audio as the sole default.
+        // /api/stream/{id}/cast?audio_lang=<lang> (or ?audio=N fallback) keeps only that
+        // audio as the sole default. The backend maps the language to the exact ffmpeg
+        // audio stream, so the TV plays what the phone selected.
         // This is what fulfills "audio track used in mobile as default track in the tv"
         // without a Custom Receiver. For completeness we still try setActiveTrackIds
         // first (works on Custom), then fall back to remux reload.
@@ -753,8 +755,9 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
             } catch (e: Throwable) {
                 android.util.Log.w("PlayerViewModel", "Cast audio setActiveTrackIds failed", e)
             }
-            // Default Receiver fallback: reload cast media with ?audio=N so TV's fMP4 has that track as default
-            // This works even though Default ignores AUDIO MediaTracks, because the file itself now only contains the chosen audio.
+            // Default Receiver fallback: reload cast media with ?audio_lang=<lang> (or ?audio=N)
+            // so TV's fMP4 has that track as default. This works even though Default ignores AUDIO
+            // MediaTracks, because the file itself now only contains the chosen audio (language-mapped).
             viewModelScope.launch {
                 try {
                     val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
@@ -1155,7 +1158,8 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 (file?.mimeType?.lowercase() == "video/x-matroska")
             // Mobile's selected audio → TV's default: Default Receiver ignores AUDIO
             // setActiveTrackIds per docs, so we make the mobile's choice the file's
-            // sole default audio via ?audio=N on the cast endpoint (backend remux
+            // sole default audio via ?audio_lang=<lang> (or ?audio=N fallback) on the cast
+            // endpoint (backend remux
             // keeps only that track with -map 0:a:N). Works for both MKV and MP4
             // multi-audio, and keeps existing behavior when no explicit selection.
             val selectedAudioForCast = _uiState.value.audioTracks.find { it.isSelected }

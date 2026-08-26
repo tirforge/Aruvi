@@ -720,13 +720,15 @@ async def stream_for_cast(
     audio_lang: str | None = Query(None, description="Language of the audio track to use as default for Cast (e.g. 'en','eng','english'). Mapped to the exact ffmpeg audio stream via probe, so it is robust even when the sender's track index differs from ffmpeg's audio ordinal."),
 ):
     """Cast-optimized stream: remuxes MKV → fragmented MP4 for Default Receiver.
-    Query `?audio=N` (added in this patch for Default multitrack fallback) selects
-    which audio track from the source is muxed as the single default audio in the
-    fMP4. This lets the mobile's currently selected audio (`_uiState.audioTracks.find { isSelected }`)
-    become the TV's default even though Default Receiver ignores
-    `RemoteMediaClient.setActiveTrackIds()` for AUDIO per docs (only TEXT works
-    on Default). Without `audio` param, all audio tracks are kept (`-map 0:a?`)
-    – useful for future Custom Receiver or for non-MKV where HLS would be needed.
+    Query `?audio_lang=<lang>` selects the audio track whose language matches the
+    requested one (mapped to the exact ffmpeg audio stream via probe); `?audio=N`
+    (0-based ffmpeg audio ordinal) is accepted as a fallback when the track has no
+    language. This lets the mobile's currently selected audio
+    (`_uiState.audioTracks.find { isSelected }`) become the TV's default even though
+    Default Receiver ignores `RemoteMediaClient.setActiveTrackIds()` for AUDIO per
+    docs (only TEXT works on Default). Without either param, all audio tracks are
+    kept (`-map 0:a?`) – useful for future Custom Receiver or for non-MKV where HLS
+    would be needed.
 
     Default Media Receiver lists only MP4/WebM/MP2T as supported containers
     (https://developers.google.com/cast/docs/media) – MKV (`video/x-matroska`)
@@ -754,9 +756,9 @@ async def stream_for_cast(
 
     is_mkv = file.file_name.lower().endswith(".mkv") or (file.mime_type or "").lower() == "video/x-matroska"
     # Non-MKV without audio selection: serve as MP4 passthrough (Shaka fMP4)
-    # With ?audio=N we need to remux even for MP4 to select that audio as default
+    # With ?audio_lang/<audio> we need to remux even for MP4 to select that audio as default
     # (Default ignores AUDIO MediaTracks, so we make the mobile's choice the file's sole default audio)
-    if not is_mkv and audio is None:
+    if not is_mkv and audio is None and not audio_lang:
         mime_type = "video/mp4"
         from urllib.parse import quote
         encoded_filename = quote(file.file_name.rsplit(".", 1)[0] + ".mp4")
@@ -849,9 +851,9 @@ async def stream_for_cast(
     spawn_background(prefetch_first_batch_safe(tg_client, message, 0))
 
     async def ffmpeg_remux_stream():
-        # If ?audio=N is set (mobile's selected track), mux only that audio as default
-        # so Default Receiver (which ignores AUDIO setActiveTrackIds per docs) still
-        # plays the mobile's choice. Otherwise keep all audio for future Custom/HLS.
+        # If ?audio_lang=<lang> (or ?audio=N fallback) is set, mux only that audio as
+        # default so Default Receiver (which ignores AUDIO setActiveTrackIds per docs)
+        # still plays the mobile's choice. Otherwise keep all audio for future Custom/HLS.
         # H.264 handling without Custom: keep -c:v copy (no re-encode) – H.264 High
         # Profile is supported on ALL Cast (1st/2nd Gen 720p/1080p, Ultra 4K). For
         # non-H.264 (HEVC/VP9/AV1) copy still produces MP4 that plays on capable
