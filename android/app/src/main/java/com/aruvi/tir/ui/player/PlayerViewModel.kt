@@ -744,18 +744,26 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                         val castMetadata = com.google.android.gms.cast.MediaMetadata(com.google.android.gms.cast.MediaMetadata.MEDIA_TYPE_MOVIE).apply {
                             putString(com.google.android.gms.cast.MediaMetadata.KEY_TITLE, title)
                         }
-                        val mediaInfo = com.google.android.gms.cast.MediaInfo.Builder(url)
+                        val mediaInfoBuilder = com.google.android.gms.cast.MediaInfo.Builder(url)
                             .setStreamType(com.google.android.gms.cast.MediaInfo.STREAM_TYPE_BUFFERED)
                             .setContentType(mimeType)
                             .setMetadata(castMetadata)
-                            .build()
-                        val loadRequest = com.google.android.gms.cast.MediaLoadRequestData.Builder()
+                        // Re-publish cached audio/subtitle MediaTracks so the reload
+                        // keeps exposing subtitles (otherwise a bare load drops them).
+                        if (castTracksCache.isNotEmpty()) mediaInfoBuilder.setMediaTracks(castTracksCache)
+                        val mediaInfo = mediaInfoBuilder.build()
+                        val loadBuilder = com.google.android.gms.cast.MediaLoadRequestData.Builder()
                             .setMediaInfo(mediaInfo)
                             .setAutoplay(true)
                             .setCurrentTime(curPos.coerceAtLeast(0))
-                            .build()
-                        remoteClient.load(loadRequest)
-                        android.util.Log.i("PlayerViewModel", "Cast reload with audio=${trackInfo.index} at pos $curPos for Default fallback")
+                        // Preserve the active audio (just selected) + subtitle selection.
+                        val activeIds = mutableListOf<Long>(castTrackId(trackInfo.groupIndex, trackInfo.index))
+                        _uiState.value.subtitleTracks.firstOrNull { it.isSelected }?.let { activeIds.add(castTrackId(it.groupIndex, it.index)) }
+                        loadBuilder.setActiveTrackIds(activeIds.toLongArray())
+                        remoteClient.load(loadBuilder.build())
+                        // Default Receiver resets TextTrackStyle on each load – re-apply size.
+                        applySubtitleSizeToCastReceiver(_uiState.value.subtitleSize)
+                        android.util.Log.i("PlayerViewModel", "Cast reload with audio=${trackInfo.index} at pos $curPos for Default fallback, subtitlesOn=${_uiState.value.subtitleTracks.any { it.isSelected }}")
                     }
                 } catch (e: Throwable) {
                     android.util.Log.w("PlayerViewModel", "Cast reload with audio failed", e)
