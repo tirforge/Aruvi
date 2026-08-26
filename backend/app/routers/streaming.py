@@ -686,7 +686,15 @@ async def _probe_cast_streams(message, file_size: int, request: Request):
         await feed_task
         data = json.loads(out.decode(errors="ignore"))
         streams = data.get("streams", [])
-        audio_count = sum(1 for s in streams if s.get("codec_type") == "audio")
+        audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
+        audio_count = len(audio_streams)
+        # Language of each audio stream, in file order (ordinal N -> 0:a:N).
+        # Used to map the sender's selected language to the exact ffmpeg audio
+        # stream, which is robust even when ExoPlayer's track index differs from
+        # ffmpeg's audio ordinal (multiple track groups, interleaved streams).
+        audio_langs = [
+            (s.get("tags") or {}).get("language") for s in audio_streams
+        ]
         # Only text subtitle codecs can be carried into MP4 via -c:s mov_text.
         # Bitmap subs (PGS/dvd_subtitle) cannot, and mapping them breaks the whole
         # remux (video dies too). Skip subtitles unless we know they are text.
@@ -696,7 +704,7 @@ async def _probe_cast_streams(message, file_size: int, request: Request):
             for s in streams
         )
         duration = float(data.get("format", {}).get("duration") or 0) or None
-        return {"audio_count": audio_count, "has_text_subs": has_text_subs, "duration": duration}
+        return {"audio_count": audio_count, "audio_langs": audio_langs, "has_text_subs": has_text_subs, "duration": duration}
     except Exception as e:  # pragma: no cover - best-effort only
         logger.warning("cast probe failed: %s", e)
         return None
@@ -708,7 +716,8 @@ async def stream_for_cast(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(get_current_user_opt),
-    audio: int | None = Query(None, description="Audio track index (0-based) to use as default for Cast; when set, only that audio is muxed so Default Receiver (which ignores AUDIO MediaTracks) plays the mobile's selected track as default"),
+    audio: int | None = Query(None, description="Audio track index (0-based, ffmpeg audio ordinal) to use as default for Cast; kept for compatibility. Prefer audio_lang for exact selection."),
+    audio_lang: str | None = Query(None, description="Language of the audio track to use as default for Cast (e.g. 'en','eng','english'). Mapped to the exact ffmpeg audio stream via probe, so it is robust even when the sender's track index differs from ffmpeg's audio ordinal."),
 ):
     """Cast-optimized stream: remuxes MKV → fragmented MP4 for Default Receiver.
     Query `?audio=N` (added in this patch for Default multitrack fallback) selects
@@ -773,13 +782,36 @@ async def stream_for_cast(
     from urllib.parse import quote
     encoded_filename = quote(file.file_name.rsplit(".", 1)[0] + ".mp4")
 
-    # Probe once (header only) so we can (a) clamp ?audio=N into a valid ffmpeg
-    # audio index and (b) only map subtitle tracks that MP4 can actually carry.
+    # Probe once (header only) so we can (a) map the requested audio to the exact
+    # ffmpeg stream and (b) only map subtitle tracks that MP4 can actually carry.
     # Without this, an out-of-range audio index muxes NO audio, and bitmap subtitle
     # tracks (PGS/dvd_subtitle) make -c:s mov_text fail and kill the whole remux.
     probe = await _probe_cast_streams(message, file.file_size, request)
     audio_count = probe["audio_count"] if probe else None
-    if audio is not None and audio_count is not None and 0 <= audio < audio_count:
+    audio_langs = probe["audio_langs"] if probe else []
+
+    def _norm_lang(l):
+        l = (l or "").strip().lower().split()[0]
+        return l
+
+    audio_map = "0:a?"
+    if audio_lang:
+        req = _norm_lang(audio_lang)
+        if len(req) >= 2:
+            matched = False
+            for i, lang in enumerate(audio_langs):
+                nl = _norm_lang(lang)
+                if nl and (nl == req or nl.startswith(req) or req.startswith(nl)):
+                    audio_map = f"0:a:{i}?"
+                    matched = True
+                    break
+            if not matched:
+                logger.warning("cast audio_lang %r not found in %s – falling back to all audio", audio_lang, audio_langs)
+                audio_map = "0:a?"
+        else:
+            logger.warning("cast audio_lang %r too short – falling back to all audio", audio_lang)
+            audio_map = "0:a?"
+    elif audio is not None and audio_count is not None and 0 <= audio < audio_count:
         audio_map = f"0:a:{audio}?"
     else:
         if audio is not None:

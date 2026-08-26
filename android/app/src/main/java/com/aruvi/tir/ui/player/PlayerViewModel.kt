@@ -270,7 +270,7 @@ class PlayerViewModel @Inject constructor(
                 val file = _uiState.value.file ?: return@launch
                 val selectedAudio = _uiState.value.audioTracks.find { it.isSelected }
                 val baseCastUrl = "$serverUrl/api/stream/$currentFileId/cast"
-                val query = listOfNotNull(token?.let { "token=$it" }, selectedAudio?.let { "audio=${it.index}" }).joinToString("&")
+                val query = listOfNotNull(token?.let { "token=$it" }, audioQueryPart(selectedAudio)).joinToString("&")
                 val url = if (query.isNotEmpty()) "$baseCastUrl?$query" else baseCastUrl
                 // Re-publish tracks + preserve the active audio/subtitle selection across
                 // the reload via the shared helper (otherwise a fresh load drops subtitles).
@@ -707,6 +707,20 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
     // reloads so selectAudioTrack/selectSubtitleTrack can compute the same id later.
     private fun castTrackId(groupIndex: Int, trackIndex: Int): Long = (groupIndex * 1000L + trackIndex + 1L).coerceAtLeast(1L)
 
+    // Build the ?audio_lang= / ?audio= query part for the /cast endpoint.
+    // Prefer language so the backend maps to the EXACT ffmpeg audio stream (robust
+    // when ExoPlayer's track index != ffmpeg's audio ordinal). Fall back to the raw
+    // index only when the track has no language tag.
+    private fun audioQueryPart(track: TrackInfo?): String? {
+        if (track == null) return null
+        val lang = track.language?.takeIf { it.isNotBlank() }
+        return if (lang != null) {
+            "audio_lang=" + java.net.URLEncoder.encode(lang, "UTF-8")
+        } else {
+            "audio=${track.index}"
+        }
+    }
+
     @OptIn(UnstableApi::class)
     fun selectAudioTrack(trackInfo: TrackInfo) {
         // Default Receiver ignores AUDIO setActiveTrackIds per docs (only TEXT works),
@@ -747,7 +761,7 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                     val token = authRepository.getAccessToken()
                     val curPos = try { castPlayer?.currentPosition ?: _uiState.value.currentPosition } catch (_: Throwable) { _uiState.value.currentPosition }
                     val baseCastUrl = "$serverUrl/api/stream/$currentFileId/cast"
-                    val query = listOfNotNull(token?.let { "token=$it" }, "audio=${trackInfo.index}").joinToString("&")
+                    val query = listOfNotNull(token?.let { "token=$it" }, audioQueryPart(trackInfo)).joinToString("&")
                     val url = if (query.isNotEmpty()) "$baseCastUrl?$query" else baseCastUrl
                     val file = _uiState.value.file
                     val title = file?.fileName ?: "Aruvi"
@@ -1150,7 +1164,7 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 // For MKV always remux (container fix); for MP4 only when audio selection needed
                 val baseCastUrl = "$serverUrl/api/stream/$currentFileId/cast"
                 val tokenPart = token?.let { "token=$it" }
-                val audioPart = selectedAudioForCast?.let { "audio=${it.index}" }
+                val audioPart = audioQueryPart(selectedAudioForCast)
                 val query = listOfNotNull(tokenPart, audioPart).joinToString("&")
                 if (query.isNotEmpty()) "$baseCastUrl?$query" else baseCastUrl
             } else {
