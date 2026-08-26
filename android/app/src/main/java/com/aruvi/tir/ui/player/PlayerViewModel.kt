@@ -212,6 +212,53 @@ class PlayerViewModel @Inject constructor(
     }
     fun getCastVolume(): Float = try { castPlayer?.volume ?: 0.5f } catch (_: Throwable) { 0.5f }
 
+    private fun _arModeForCast(): String = when (_uiState.value.toggleResizeMode) {
+        androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL -> "fill"
+        androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> "zoom"
+        else -> "fit"
+    }
+
+    /**
+     * Shared cast reload used by [reloadCastForDisplay] (resize/scale) and
+     * [selectAudioTrack] (audio remux). Re-publishes the cached audio/subtitle
+     * MediaTracks, re-applies the active audio + subtitle selection via
+     * setActiveTrackIds, and re-applies the subtitle TextTrackStyle size – so a
+     * fresh load never drops the user's subtitle choice. Centralizing this keeps
+     * both reload paths identical and avoids the regression where one path forgot
+     * to carry the tracks.
+     */
+    private fun loadCastMediaWithTracks(url: String, title: String, curPos: Long, activeIds: List<Long>) {
+        try {
+            val castCtx = castContext ?: return
+            val remoteClient = castCtx.sessionManager.currentCastSession?.remoteMediaClient ?: return
+            val mimeType = "video/mp4"
+            val castMetadata = com.google.android.gms.cast.MediaMetadata(com.google.android.gms.cast.MediaMetadata.MEDIA_TYPE_MOVIE).apply {
+                putString(com.google.android.gms.cast.MediaMetadata.KEY_TITLE, title)
+            }
+            val customData = org.json.JSONObject().apply {
+                put("ar_mode", _arModeForCast())
+                put("videoScale", _uiState.value.videoScale)
+            }
+            val mediaInfoBuilder = com.google.android.gms.cast.MediaInfo.Builder(url)
+                .setStreamType(com.google.android.gms.cast.MediaInfo.STREAM_TYPE_BUFFERED)
+                .setContentType(mimeType)
+                .setMetadata(castMetadata)
+                .setCustomData(customData)
+            if (castTracksCache.isNotEmpty()) mediaInfoBuilder.setMediaTracks(castTracksCache)
+            val mediaInfo = mediaInfoBuilder.build()
+            val loadBuilder = com.google.android.gms.cast.MediaLoadRequestData.Builder()
+                .setMediaInfo(mediaInfo)
+                .setAutoplay(true)
+                .setCurrentTime(curPos.coerceAtLeast(0))
+            if (activeIds.isNotEmpty()) loadBuilder.setActiveTrackIds(activeIds.toLongArray())
+            remoteClient.load(loadBuilder.build())
+            // Default Receiver resets TextTrackStyle on every load – re-apply size.
+            applySubtitleSizeToCastReceiver(_uiState.value.subtitleSize)
+        } catch (e: Throwable) {
+            android.util.Log.w("PlayerViewModel", "loadCastMediaWithTracks failed", e)
+        }
+    }
+
     private fun reloadCastForDisplay() {
         if (!_uiState.value.isCasting) return
         viewModelScope.launch {
@@ -225,45 +272,13 @@ class PlayerViewModel @Inject constructor(
                 val baseCastUrl = "$serverUrl/api/stream/$currentFileId/cast"
                 val query = listOfNotNull(token?.let { "token=$it" }, selectedAudio?.let { "audio=${it.index}" }).joinToString("&")
                 val url = if (query.isNotEmpty()) "$baseCastUrl?$query" else baseCastUrl
-                // Use same enriched load path as castToDevice but at curPos
-                val castCtx = castContext ?: return@launch
-                val remoteClient = castCtx.sessionManager.currentCastSession?.remoteMediaClient ?: return@launch
-                val mimeType = "video/mp4"
-                val castMetadata = com.google.android.gms.cast.MediaMetadata(com.google.android.gms.cast.MediaMetadata.MEDIA_TYPE_MOVIE).apply {
-                    putString(com.google.android.gms.cast.MediaMetadata.KEY_TITLE, file.fileName)
-                }
-                val customData = org.json.JSONObject().apply {
-                    put("ar_mode", when (_uiState.value.toggleResizeMode) {
-                        androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL -> "fill"
-                        androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> "zoom"
-                        else -> "fit"
-                    })
-                    put("videoScale", _uiState.value.videoScale)
-                }
-                val mediaInfoBuilder = com.google.android.gms.cast.MediaInfo.Builder(url)
-                    .setStreamType(com.google.android.gms.cast.MediaInfo.STREAM_TYPE_BUFFERED)
-                    .setContentType(mimeType)
-                    .setMetadata(castMetadata)
-                    .setCustomData(customData)
-                // Re-publish the audio/subtitle MediaTracks captured at cast start so the
-                // receiver keeps exposing them after this reload (otherwise a fresh load
-                // drops all subtitle tracks and the active selection).
-                if (castTracksCache.isNotEmpty()) mediaInfoBuilder.setMediaTracks(castTracksCache)
-                val mediaInfo = mediaInfoBuilder.build()
-                val loadBuilder = com.google.android.gms.cast.MediaLoadRequestData.Builder()
-                    .setMediaInfo(mediaInfo)
-                    .setAutoplay(true)
-                    .setCurrentTime(curPos.coerceAtLeast(0))
-                // Preserve the user's active audio + subtitle selection across the reload.
+                // Re-publish tracks + preserve the active audio/subtitle selection across
+                // the reload via the shared helper (otherwise a fresh load drops subtitles).
                 val activeIds = mutableListOf<Long>()
                 selectedAudio?.let { activeIds.add(castTrackId(it.groupIndex, it.index)) }
                 _uiState.value.subtitleTracks.firstOrNull { it.isSelected }?.let { activeIds.add(castTrackId(it.groupIndex, it.index)) }
-                if (activeIds.isNotEmpty()) loadBuilder.setActiveTrackIds(activeIds.toLongArray())
-                remoteClient.load(loadBuilder.build())
-                // Default Receiver resets TextTrackStyle on every load – re-apply the
-                // user's subtitle size so it doesn't revert to medium on each resize/scale.
-                applySubtitleSizeToCastReceiver(_uiState.value.subtitleSize)
-                android.util.Log.i("PlayerViewModel", "Reloaded cast for display ar_mode=${customData.getString("ar_mode")} scale=${_uiState.value.videoScale} at $curPos, subtitlesOn=${_uiState.value.subtitleTracks.any { it.isSelected }}, tracks=${castTracksCache.size}")
+                loadCastMediaWithTracks(url, file.fileName, curPos, activeIds)
+                android.util.Log.i("PlayerViewModel", "Reloaded cast for display ar_mode=${_arModeForCast()} scale=${_uiState.value.videoScale} at $curPos, subtitlesOn=${_uiState.value.subtitleTracks.any { it.isSelected }}, tracks=${castTracksCache.size}")
             } catch (e: Throwable) {
                 android.util.Log.w("PlayerViewModel", "reloadCastForDisplay failed", e)
             }
@@ -740,29 +755,11 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                     val session = castCtx?.sessionManager?.currentCastSession
                     val remoteClient = session?.remoteMediaClient
                     if (remoteClient != null) {
-                        val mimeType = "video/mp4" // remuxed fMP4
-                        val castMetadata = com.google.android.gms.cast.MediaMetadata(com.google.android.gms.cast.MediaMetadata.MEDIA_TYPE_MOVIE).apply {
-                            putString(com.google.android.gms.cast.MediaMetadata.KEY_TITLE, title)
-                        }
-                        val mediaInfoBuilder = com.google.android.gms.cast.MediaInfo.Builder(url)
-                            .setStreamType(com.google.android.gms.cast.MediaInfo.STREAM_TYPE_BUFFERED)
-                            .setContentType(mimeType)
-                            .setMetadata(castMetadata)
-                        // Re-publish cached audio/subtitle MediaTracks so the reload
-                        // keeps exposing subtitles (otherwise a bare load drops them).
-                        if (castTracksCache.isNotEmpty()) mediaInfoBuilder.setMediaTracks(castTracksCache)
-                        val mediaInfo = mediaInfoBuilder.build()
-                        val loadBuilder = com.google.android.gms.cast.MediaLoadRequestData.Builder()
-                            .setMediaInfo(mediaInfo)
-                            .setAutoplay(true)
-                            .setCurrentTime(curPos.coerceAtLeast(0))
-                        // Preserve the active audio (just selected) + subtitle selection.
+                        // Preserve the active audio (just selected) + subtitle selection
+                        // across the remux reload via the shared helper.
                         val activeIds = mutableListOf<Long>(castTrackId(trackInfo.groupIndex, trackInfo.index))
                         _uiState.value.subtitleTracks.firstOrNull { it.isSelected }?.let { activeIds.add(castTrackId(it.groupIndex, it.index)) }
-                        loadBuilder.setActiveTrackIds(activeIds.toLongArray())
-                        remoteClient.load(loadBuilder.build())
-                        // Default Receiver resets TextTrackStyle on each load – re-apply size.
-                        applySubtitleSizeToCastReceiver(_uiState.value.subtitleSize)
+                        loadCastMediaWithTracks(url, title, curPos, activeIds)
                         android.util.Log.i("PlayerViewModel", "Cast reload with audio=${trackInfo.index} at pos $curPos for Default fallback, subtitlesOn=${_uiState.value.subtitleTracks.any { it.isSelected }}")
                     }
                 } catch (e: Throwable) {
