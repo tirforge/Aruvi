@@ -240,19 +240,30 @@ class PlayerViewModel @Inject constructor(
                     })
                     put("videoScale", _uiState.value.videoScale)
                 }
-                val mediaInfo = com.google.android.gms.cast.MediaInfo.Builder(url)
+                val mediaInfoBuilder = com.google.android.gms.cast.MediaInfo.Builder(url)
                     .setStreamType(com.google.android.gms.cast.MediaInfo.STREAM_TYPE_BUFFERED)
                     .setContentType(mimeType)
                     .setMetadata(castMetadata)
                     .setCustomData(customData)
-                    .build()
-                val loadRequest = com.google.android.gms.cast.MediaLoadRequestData.Builder()
+                // Re-publish the audio/subtitle MediaTracks captured at cast start so the
+                // receiver keeps exposing them after this reload (otherwise a fresh load
+                // drops all subtitle tracks and the active selection).
+                if (castTracksCache.isNotEmpty()) mediaInfoBuilder.setMediaTracks(castTracksCache)
+                val mediaInfo = mediaInfoBuilder.build()
+                val loadBuilder = com.google.android.gms.cast.MediaLoadRequestData.Builder()
                     .setMediaInfo(mediaInfo)
                     .setAutoplay(true)
                     .setCurrentTime(curPos.coerceAtLeast(0))
-                    .build()
-                remoteClient.load(loadRequest)
-                android.util.Log.i("PlayerViewModel", "Reloaded cast for display ar_mode=${customData.getString("ar_mode")} scale=${_uiState.value.videoScale} at $curPos")
+                // Preserve the user's active audio + subtitle selection across the reload.
+                val activeIds = mutableListOf<Long>()
+                selectedAudio?.let { activeIds.add(castTrackId(it.groupIndex, it.index)) }
+                _uiState.value.subtitleTracks.firstOrNull { it.isSelected }?.let { activeIds.add(castTrackId(it.groupIndex, it.index)) }
+                if (activeIds.isNotEmpty()) loadBuilder.setActiveTrackIds(activeIds.toLongArray())
+                remoteClient.load(loadBuilder.build())
+                // Default Receiver resets TextTrackStyle on every load – re-apply the
+                // user's subtitle size so it doesn't revert to medium on each resize/scale.
+                applySubtitleSizeToCastReceiver(_uiState.value.subtitleSize)
+                android.util.Log.i("PlayerViewModel", "Reloaded cast for display ar_mode=${customData.getString("ar_mode")} scale=${_uiState.value.videoScale} at $curPos, subtitlesOn=${_uiState.value.subtitleTracks.any { it.isSelected }}, tracks=${castTracksCache.size}")
             } catch (e: Throwable) {
                 android.util.Log.w("PlayerViewModel", "reloadCastForDisplay failed", e)
             }
@@ -297,6 +308,12 @@ class PlayerViewModel @Inject constructor(
 
     private var currentFileId: Int = savedStateHandle.get<Int>("fileId") ?: 0
 private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.takeIf { it.isNotEmpty() }
+
+    // Cast MediaTracks (audio + subtitle) captured at cast start. Cached so that
+    // reloadCastForDisplay() can re-publish them on the reloaded MediaInfo; without
+    // this the receiver loses subtitle tracks (and the active selection) on every
+    // resize/scale reload.
+    private var castTracksCache: List<com.google.android.gms.cast.MediaTrack> = emptyList()
 
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
@@ -1276,7 +1293,10 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                             .setContentType(mimeType)
                             .setMetadata(castMetadata)
                             .setCustomData(customData)
-                        if (castTracks.isNotEmpty()) castMediaInfoBuilder.setMediaTracks(castTracks)
+                        if (castTracks.isNotEmpty()) {
+                            castMediaInfoBuilder.setMediaTracks(castTracks)
+                            castTracksCache = castTracks
+                        }
                         val mediaInfo = castMediaInfoBuilder.build()
                         val loadRequest = com.google.android.gms.cast.MediaLoadRequestData.Builder()
                             .setMediaInfo(mediaInfo)
