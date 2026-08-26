@@ -159,7 +159,12 @@ allowed_origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_origin_regex=".*",  # Cast devices (Default/Styled) fetch media/tracks from varied origins (https://www.gstatic.com, chrome-extension://) – must be CORS-allowed for TextTrack MediaTracks (see /cast/docs/android_sender/media_tracks CORS note). Regex allows any origin while keeping allow_credentials for web dashboard.
+    # NOTE: Do NOT use allow_origin_regex=".*" together with allow_credentials=True.
+    # That combination lets any origin make credentialed requests (CSRF/credential
+    # theft). Cast receivers fetch media from varied origins, but those requests are
+    # non-credentialed and are already covered by the explicit "Access-Control-Allow-Origin: *"
+    # headers set per-response on the streaming endpoints below. Authenticated web
+    # dashboard traffic stays restricted to `allowed_origins`.
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "Range", "Accept-Encoding"],
