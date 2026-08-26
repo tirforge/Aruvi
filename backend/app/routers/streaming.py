@@ -696,11 +696,17 @@ async def _probe_cast_streams(message, file_size: int, request: Request):
             (s.get("tags") or {}).get("language") for s in audio_streams
         ]
         # Only text subtitle codecs can be carried into MP4 via -c:s mov_text.
-        # Bitmap subs (PGS/dvd_subtitle) cannot, and mapping them breaks the whole
-        # remux (video dies too). Skip subtitles unless we know they are text.
-        TEXT_SUBS = {"ass", "ssa", "srt", "subrip", "webvtt", "text"}
+        # Only BITMAP subtitle codecs cannot be carried into MP4 via -c:s mov_text
+        # (and mapping them breaks the whole remux). Everything else (mov_text/tx3g
+        # for MP4, ass/ssa/srt/subrip/webvtt/text for MKV/WebM) is text and safe to
+        # keep. Excluding bitmap codecs (rather than allowlisting text ones) is what
+        # avoids the regression where MP4's `mov_text` subs were wrongly dropped.
+        BITMAP_SUBS = {
+            "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle",
+            "dvb_teletext", "eia_608", "eia_708", "arib_caption",
+        }
         has_text_subs = any(
-            s.get("codec_type") == "subtitle" and (s.get("codec_name") in TEXT_SUBS)
+            s.get("codec_type") == "subtitle" and (s.get("codec_name") not in BITMAP_SUBS)
             for s in streams
         )
         duration = float(data.get("format", {}).get("duration") or 0) or None
