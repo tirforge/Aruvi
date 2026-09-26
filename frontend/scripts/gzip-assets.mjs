@@ -8,8 +8,11 @@
 import { gzipSync } from 'node:zlib';
 import { readdirSync, statSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, extname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const OUT_DIR = new URL('../../backend/app/static/', import.meta.url).pathname;
+// fileURLToPath (not .pathname): .pathname keeps %20-style escapes, so the
+// walk breaks on checkouts whose path contains spaces or special chars.
+const OUT_DIR = fileURLToPath(new URL('../../backend/app/static/', import.meta.url));
 
 const COMPRESSIBLE = new Set(['.js', '.css', '.html', '.svg', '.json', '.webmanifest', '.ico', '.txt']);
 

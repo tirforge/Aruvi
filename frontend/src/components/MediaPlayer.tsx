@@ -171,8 +171,9 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         const reader = new FileReader();
         reader.onload = () => {
             let text = reader.result as string;
-            // Convert SRT to VTT if needed
-            if (file.name.endsWith('.srt')) {
+            // Convert SRT to VTT if needed (case-insensitive: ".SRT" uploads
+            // would otherwise skip conversion and render as garbage cues)
+            if (file.name.toLowerCase().endsWith('.srt')) {
                 text = srtToVtt(text);
             }
             const blob = new Blob([text], { type: 'text/vtt' });
@@ -262,8 +263,8 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
 
     const getAbsoluteUrl = (url: string) => {
         if (!url) return '';
-        if (url.startsWith('http')) return url;
-        return `${window.location.origin}${url}`;
+        if (/^https?:\/\//i.test(url)) return url;
+        return `${window.location.origin}${url.startsWith('/') ? url : `/${url}`}`;
     };
 
     // Capture the authorized stream URL once per file so a token refresh
@@ -272,10 +273,10 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
     // link already in stream_url, so a second `?` would swallow both tokens
     // into one malformed query value and the stream comes back "not authed".
     const authorizedStreamUrl = useMemo(() => {
-        const token = localStorage.getItem('access_token');
+        const token = localStorage.getItem('access_token') || '';
         const base = getAbsoluteUrl(file.stream_url || '');
         const sep = base.includes('?') ? '&' : '?';
-        return `${base}${sep}token=${token}`;
+        return `${base}${sep}token=${encodeURIComponent(token)}`;
     }, [file.id, file.stream_url]);
     // Still images don't risk restarting playback, so use the reactive token:
     // if it rotates mid-viewing, the <img> re-renders with a fresh token instead
@@ -285,7 +286,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         if (!isImage) return authorizedStreamUrl;
         const base = getAbsoluteUrl(file.stream_url || '');
         const sep = base.includes('?') ? '&' : '?';
-        return `${base}${sep}token=${reactiveToken}`;
+        return `${base}${sep}token=${encodeURIComponent(reactiveToken)}`;
     }, [file.stream_url, file.id, isImage, reactiveToken, authorizedStreamUrl]);
     const externalUrl = getAbsoluteUrl((extendedFile || file).public_stream_url || '') || authorizedStreamUrl;
     const vlcUrl = `vlc://${externalUrl}`;
@@ -311,7 +312,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         // would replay the stale token the rotation just invalidated.
         const base = getAbsoluteUrl(file.stream_url || '');
         const sep = base.includes('?') ? '&' : '?';
-        const freshUrl = `${base}${sep}token=${reactiveToken}`;
+        const freshUrl = `${base}${sep}token=${encodeURIComponent(reactiveToken)}`;
         el.source({
             video: { src: freshUrl, type: 'video/mp4' },
         });

@@ -328,8 +328,8 @@ if (!('access_token' in data)) {
 
 function BotLink({ code }: { code?: string }) {
     const { data: botInfo } = useBotInfo();
-    const botUrl = botInfo?.username 
-        ? `https://t.me/${botInfo.username}${code ? `?start=${code}` : ''}` 
+    const botUrl = botInfo?.username
+        ? `https://t.me/${botInfo.username}${code ? `?start=${encodeURIComponent(code)}` : ''}`
         : '#';
 
     return (

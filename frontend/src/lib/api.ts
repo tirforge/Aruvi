@@ -128,7 +128,8 @@ export type CodeVerificationResponse = AuthResponse | PendingCodeResponse;
 
 // API client — use runtime config (set by index.html) or fallback to /api.
 // Exported so thumbnail/image URL builders share the same origin logic.
-export const API_BASE = (window as any).__BACKEND_URL__ || '';
+// Trailing slashes are trimmed: otherwise API_BASE + '/api' yields '//api'.
+export const API_BASE = String((window as any).__BACKEND_URL__ || '').replace(/\/+$/, '');
 export const api = axios.create({
 baseURL: API_BASE + '/api',
 });

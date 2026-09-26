@@ -180,8 +180,13 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
   const highlightMatch = (text: string, q: string) => {
     const needle = q.trim();
     if (!needle) return text;
-    const re = new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-    const m = re.exec(text);
+    let m: RegExpExecArray | null = null;
+    try {
+      const re = new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      m = re.exec(text);
+    } catch {
+      return text;
+    }
     if (!m) return text;
     return (
       <>

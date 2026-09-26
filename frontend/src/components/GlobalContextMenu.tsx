@@ -3,6 +3,22 @@ import { useAppStore } from '../lib/store';
 import { TelegramFile, Folder, api, useFolders, getFileDownloadToken, useAccessToken } from '../lib/api';
 import { Play, Download, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, ExternalLink } from 'lucide-react';
 
+// Absolute backend URLs pass through untouched (public_stream_url may be
+// absolute in some deploys); relative paths are joined with exactly one '/'.
+const toAbsoluteUrl = (path: string): string => {
+    if (/^https?:\/\//i.test(path)) return path;
+    const base = `${window.location.protocol}//${window.location.host}`;
+    return `${base}${path.startsWith('/') ? path : `/${path}`}`;
+};
+
+// Appends a token with the right separator: grabbed files already carry a
+// `?token=` download link in stream_url, so a second `?` would merge both
+// tokens into one malformed query value ("not authed").
+const withToken = (url: string, token: string): string => {
+    const sep = url.includes('?') ? '&' : '?';
+    return `${url}${sep}token=${encodeURIComponent(token)}`;
+};
+
 export default function GlobalContextMenu() {
     // Narrow selectors: this component mounts permanently at the app root —
     // a whole-store subscription re-rendered it on every drag/toast/selection.
@@ -17,6 +33,7 @@ export default function GlobalContextMenu() {
     const selectedFolderIds = useAppStore((s) => s.selectedFolderIds);
     const selectedFiles = useAppStore((s) => s.selectedFiles);
     const currentFolderId = useAppStore((s) => s.currentFolderId);
+    const addToast = useAppStore((s) => s.addToast);
     // Reactive: the token may be written after this menu mounts (e.g. the
     // /auth callback logs in without a page reload), so `hasToken` must re-
     // evaluate instead of being captured once at mount — otherwise the folder
@@ -104,6 +121,7 @@ export default function GlobalContextMenu() {
             setTimeout(() => setCopiedId(null), 2000);
         } catch (err) {
             console.error('Failed to copy:', err);
+            addToast('Failed to copy to clipboard', 'error');
         }
     };
 
@@ -121,12 +139,13 @@ export default function GlobalContextMenu() {
             }
         } catch (error) {
             console.error('Failed to revoke share:', error);
+            addToast('Failed to revoke public link', 'error');
         }
     };
 
     const ensurePublicLink = async (file: TelegramFile): Promise<string | null> => {
         if (file.public_stream_url) {
-            return `${window.location.protocol}//${window.location.host}${file.public_stream_url}`;
+            return toAbsoluteUrl(file.public_stream_url);
         }
         try {
             const { data } = await api.post(`/files/${file.id}/share`);
@@ -134,10 +153,11 @@ export default function GlobalContextMenu() {
                 if (activeContextMenu && activeContextMenu.type === 'file') {
                     setActiveContextMenu({ ...activeContextMenu, item: data });
                 }
-                return `${window.location.protocol}//${window.location.host}${data.public_stream_url}`;
+                return toAbsoluteUrl(data.public_stream_url);
             }
         } catch (err) {
             console.error('Failed to create public link:', err);
+            addToast('Failed to create public link', 'error');
         }
         return null;
     };
@@ -151,12 +171,13 @@ export default function GlobalContextMenu() {
                 console.warn('Failed to get download token, falling back to session token:', err);
             }
             const dlUrl = `${api.defaults.baseURL}/stream/dl?id=${file.id}&token=${encodeURIComponent(token)}`;
-            const url = dlUrl.startsWith('http')
+            const url = /^https?:\/\//i.test(dlUrl)
                 ? dlUrl
-                : `${window.location.protocol}//${window.location.host}${dlUrl}`;
+                : `${window.location.protocol}//${window.location.host}${dlUrl.startsWith('/') ? dlUrl : `/${dlUrl}`}`;
             window.open(url, '_blank', 'noopener,noreferrer');
         } catch (err) {
             console.error('Failed to download:', err);
+            addToast('Failed to start download', 'error');
         }
     };
 
@@ -219,13 +240,13 @@ export default function GlobalContextMenu() {
                                             // external app — never embed the account-wide JWT.
                                             (async () => {
                                                 try {
-                                                    const baseUrl = `${window.location.protocol}//${window.location.host}`;
                                                     const url = f.public_stream_url
-                                                        ? `${baseUrl}${f.public_stream_url}`
-                                                        : `${baseUrl}${f.stream_url}?token=${await getFileDownloadToken(f.id)}`;
+                                                        ? toAbsoluteUrl(f.public_stream_url)
+                                                        : withToken(toAbsoluteUrl(f.stream_url), await getFileDownloadToken(f.id));
                                                     window.open(`vlc://${url}`, '_blank');
                                                 } catch (err) {
                                                     console.error('Failed to mint stream token:', err);
+                                                    addToast('Failed to open in VLC', 'error');
                                                 }
                                             })();
                                         }}>
@@ -238,13 +259,14 @@ export default function GlobalContextMenu() {
                                             // short-lived file-bound token, not the account JWT.
                                             (async () => {
                                                 try {
-                                                    const baseUrl = `${window.location.protocol}//${window.location.host}`;
                                                     const url = f.public_stream_url
-                                                        ? `${baseUrl}${f.public_stream_url}`
-                                                        : `${baseUrl}${f.stream_url}?token=${await getFileDownloadToken(f.id)}`;
+                                                        ? toAbsoluteUrl(f.public_stream_url)
+                                                        : withToken(toAbsoluteUrl(f.stream_url), await getFileDownloadToken(f.id));
                                                     await navigator.clipboard.writeText(url);
+                                                    addToast('Stream URL copied!', 'success');
                                                 } catch (err) {
                                                     console.error('Failed to mint stream token:', err);
+                                                    addToast('Failed to copy stream URL', 'error');
                                                 }
                                             })();
                                         }}>
