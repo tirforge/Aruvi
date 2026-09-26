@@ -5,7 +5,7 @@ kurigram[fast]>=2.2.23
 
 # Web Framework
 fastapi>=0.109.0
-uvicorn[standard]>=0.27.0
+uvicorn[standard]>=0.53.0
 
 # Database
 sqlalchemy>=2.0.0
