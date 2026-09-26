@@ -68,9 +68,4 @@ async def run():
     await server.serve()
 
 
-try:
-    import uvloop  # disabled
-    # asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-except ImportError:
-    pass
 asyncio.run(run())
