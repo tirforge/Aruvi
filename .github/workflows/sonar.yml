@@ -1,0 +1,27 @@
+name: SonarCloud
+
+# Free static analysis for public repos: bugs, smells, duplication,
+# quality gate on every PR. One-time setup (2 min):
+#  1. sonarcloud.io -> + -> Analyze new project -> import tirforge/Aruvi
+#     (project key must be tirforge_Aruvi, org tirforge)
+#  2. My Account -> Security -> Generate Token -> repo Settings ->
+#     Secrets -> Actions -> New secret named SONAR_TOKEN
+# Until then this job fails safely (does NOT block: no required check).
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: SonarSource/sonarqube-scan-action@v4
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
