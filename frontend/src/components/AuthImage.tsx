@@ -64,6 +64,26 @@ export default function AuthImage({ src, alt, className }: AuthImageProps) {
 
         const url = getAbsoluteUrl(src);
 
+        // Bearer-leak guard: the Authorization header must only ever go to
+        // our own backend (API_BASE or same origin). If `src` ever resolves
+        // to a foreign origin, refuse instead of sending the token there.
+        let fetchUrl = url;
+        try {
+            const ownOrigins = new Set([
+                new URL(API_BASE || window.location.origin, window.location.origin).origin,
+                window.location.origin,
+            ]);
+            const parsed = new URL(url, window.location.origin);
+            if (!ownOrigins.has(parsed.origin)) {
+                setError(true);
+                return;
+            }
+            fetchUrl = parsed.href;
+        } catch {
+            setError(true);
+            return;
+        }
+
         let cancelled = false;
         // Abort the in-flight download on unmount/src change/token rotation.
         // The old `cancelled` flag only skipped setState — the fetch kept
@@ -73,7 +93,7 @@ export default function AuthImage({ src, alt, className }: AuthImageProps) {
         const signal = controller.signal;
 
         const loadImage = (authToken: string) =>
-            fetch(url, {
+            fetch(fetchUrl, {
                 signal,
                 headers: { 'Authorization': `Bearer ${authToken}` }
             })

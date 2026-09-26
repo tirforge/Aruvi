@@ -82,14 +82,20 @@ export default function RenameModal({ isOpen, onClose, onRename, currentName, it
 
     // Escape closes the modal. Separate effect: the open-transition effect
     // above must not re-subscribe on every parent render (inline onClose).
+    // Guarded while the rename POST is in flight — closing mid-mutation
+    // confuses (the rename still completes + toasts, so the close looks
+    // like a cancel that wasn't).
     const onCloseRef = useRef(onClose);
     onCloseRef.current = onClose;
+    const isPendingRef = useRef(isPending);
+    isPendingRef.current = isPending;
+    const safeClose = () => { if (!isPendingRef.current) onCloseRef.current(); };
     useEffect(() => {
         if (!isOpen) return;
         const handleEscape = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
                 e.stopPropagation();
-                onCloseRef.current();
+                safeClose();
             }
         };
         document.addEventListener('keydown', handleEscape);
@@ -119,14 +125,14 @@ export default function RenameModal({ isOpen, onClose, onRename, currentName, it
 
     return (
         <div
-            onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+            onClick={(e) => { if (e.target === e.currentTarget) safeClose(); }}
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in">
             <div className="bg-dark-800 rounded-xl border border-dark-600 p-6 w-full max-w-md shadow-2xl">
                 <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-semibold text-white">
                         Rename {itemType === 'file' ? 'File' : 'Folder'}
                     </h2>
-                    <button onClick={onClose} className="text-dark-400 hover:text-white transition-colors">
+                    <button onClick={safeClose} className="text-dark-400 hover:text-white transition-colors">
                         <X className="w-5 h-5" />
                     </button>
                 </div>
@@ -144,14 +150,14 @@ export default function RenameModal({ isOpen, onClose, onRename, currentName, it
                     <div className="flex gap-3 mt-6">
                         <button
                             type="button"
-                            onClick={onClose}
+                            onClick={safeClose}
                             className="flex-1 px-4 py-2 bg-dark-700 hover:bg-dark-600 text-white rounded-lg transition-colors"
                         >
                             Cancel
                         </button>
                         <button
                             type="submit"
-                            disabled={!name.trim() || name === currentName || isPending}
+                            disabled={!name.trim() || name.trim() === currentName || isPending}
                             className="flex-1 px-4 py-2 bg-primary-600 hover:bg-primary-500 disabled:bg-dark-600 disabled:text-dark-400 text-white rounded-lg transition-colors"
                         >
                             {isPending ? 'Renaming...' : 'Rename'}

@@ -636,12 +636,13 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         try { el.focus({ preventScroll: true }); } catch { /* noop */ }
     }, []);
 
-    // Subtitle picker modal: while open, focus belongs to the modal. The
-    // moment it closes (backdrop, Close button, upload, attach) focus would
-    // otherwise drop to <body> with the same dead-hotkeys result — hand it
-    // back to the player on every close. No-op on first mount (no element).
+    // Subtitle picker modal: while open, focus belongs to the modal. Hand it
+    // back to the player only on the true→false transition — the mount run
+    // (false initially, no element yet) must not steal focus.
+    const prevPickerRef = useRef(showSubPicker);
     useEffect(() => {
-        if (!showSubPicker) focusPlayer();
+        if (prevPickerRef.current && !showSubPicker) focusPlayer();
+        prevPickerRef.current = showSubPicker;
     }, [showSubPicker, focusPlayer]);
 
     // Declare the attached external subtitle tracks on the element. This reloads

@@ -1,7 +1,7 @@
 /**
  * DeleteConfirmModal - confirmation dialog for deleting files/folders
  */
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { X, Trash2 } from 'lucide-react';
 import { useFocusReturn } from '../lib/useFocusReturn';
 
@@ -19,6 +19,25 @@ export default function DeleteConfirmModal({ type, name, count = 1, onConfirm, o
     // Return focus to the opener (Delete menu item) on close. Safe when the
     // deleted item's card is already gone — focus() on it just no-ops.
     useFocusReturn();
+
+    // Guarded close while the delete POST is in flight (same rationale as
+    // RenameModal's safeClose). Own Escape listener so FileBrowser's
+    // unguarded global handler can't bypass the guard.
+    const pendingRef = useRef(isPending);
+    pendingRef.current = isPending;
+    const onCloseRef = useRef(onClose);
+    onCloseRef.current = onClose;
+    const safeClose = () => { if (!pendingRef.current) onCloseRef.current(); };
+    useEffect(() => {
+        const handleEscape = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                e.stopPropagation();
+                safeClose();
+            }
+        };
+        document.addEventListener('keydown', handleEscape);
+        return () => document.removeEventListener('keydown', handleEscape);
+    }, []);
 
     const handleConfirm = async () => {
         if (inFlightRef.current) return;
@@ -38,7 +57,7 @@ export default function DeleteConfirmModal({ type, name, count = 1, onConfirm, o
 
     return (
         <div
-            onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+            onClick={(e) => { if (e.target === e.currentTarget) safeClose(); }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <div className="glass-card w-full max-w-sm p-6 animate-slide-up">
                 <div className="flex items-center justify-between mb-4">
@@ -46,7 +65,7 @@ export default function DeleteConfirmModal({ type, name, count = 1, onConfirm, o
                         <Trash2 className="w-5 h-5" />
                         {title}
                     </h2>
-                    <button onClick={onClose} className="p-1 hover:bg-dark-700 rounded">
+                    <button onClick={safeClose} className="p-1 hover:bg-dark-700 rounded">
                         <X className="w-5 h-5" />
                     </button>
                 </div>
@@ -60,7 +79,7 @@ export default function DeleteConfirmModal({ type, name, count = 1, onConfirm, o
 
                 <div className="flex justify-end gap-3">
                     <button
-                        onClick={onClose}
+                        onClick={safeClose}
                         className="px-4 py-2 text-dark-400 hover:text-white transition-colors"
                     >
                         Cancel

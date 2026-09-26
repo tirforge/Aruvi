@@ -141,16 +141,26 @@ export default function FileBrowser() {
         }
     }, [activeSection, refetchFiles, refetchFolders, refetchRecent, refetchCW]);
 
-    // Handle drag-drop file to folder
+    // Handle drag-drop file to folder (backend 400s on bad targets — toast it
+    // instead of an unhandled rejection).
     const handleFileDrop = useCallback(async (fileId: number, folderId: number) => {
-        await updateFileMutation.mutateAsync({ id: fileId, folder_id: folderId });
-    }, [updateFileMutation]);
+        try {
+            await updateFileMutation.mutateAsync({ id: fileId, folder_id: folderId });
+        } catch {
+            addToast('Cannot move file there', 'error');
+        }
+    }, [updateFileMutation, addToast]);
 
     // Handle drag-drop folder into folder (previously swallowed silently —
-    // FolderCard only routed `type:'file'` payloads anywhere).
+    // FolderCard only routed `type:'file'` payloads anywhere). Backend guards
+    // self/descendant moves with 400 — surface that instead of rejecting.
     const handleFolderDrop = useCallback(async (draggedId: number, targetId: number) => {
-        await moveFoldersMutation.mutateAsync({ ids: [draggedId], folderId: targetId });
-    }, [moveFoldersMutation]);
+        try {
+            await moveFoldersMutation.mutateAsync({ ids: [draggedId], folderId: targetId });
+        } catch {
+            addToast('Cannot move folder there', 'error');
+        }
+    }, [moveFoldersMutation, addToast]);
 
     // Handle file rename
     const handleRenameFile = useCallback(async (newName: string) => {
@@ -425,15 +435,13 @@ export default function FileBrowser() {
                 return;
             }
 
-            // Escape - exit fullscreen, or close modals / clear selection
+            // Escape - exit fullscreen, or close modals / clear selection.
+            // New/Move/Delete modals own their Escape (pending-guarded) and
+            // stop propagation; only RenameModal-less states fall through
+            // here. RenameModal owns its own Escape too — these branches are
+            // last-resort fallbacks if its listener ever misses.
             if (e.key === 'Escape') {
                 if (document.fullscreenElement) document.exitFullscreen();
-                else if (showNewFolder) setShowNewFolder(false);
-                else if (moveItems) setMoveItems(null);
-                else if (deleteConfirm) setDeleteConfirm(null);
-                // RenameModal handles its own Escape, but a global close-all
-                // keeps FileBrowser's state consistent if the modal's listener
-                // ever misses (e.g. focus trapped outside the document).
                 else if (renameFile) setRenameFile(null);
                 else if (renameFolder) setRenameFolder(null);
                 else clearSelection();

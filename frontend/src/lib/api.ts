@@ -195,6 +195,7 @@ if (isRefreshing) {
     // Mark the retry so a second 401 (e.g. authz denial) can't kick off
     // another refresh and rotate the refresh token in a loop.
     originalRequest._retry = true;
+    originalRequest.headers = originalRequest.headers || {};
     originalRequest.headers['Authorization'] = 'Bearer ' + token;
     return api(originalRequest);
   })
@@ -224,6 +225,7 @@ setStoredAccessToken(access_token);
 localStorage.setItem('refresh_token', refresh_token);
 
 api.defaults.headers.common['Authorization'] = 'Bearer ' + access_token;
+originalRequest.headers = originalRequest.headers || {};
 originalRequest.headers['Authorization'] = 'Bearer ' + access_token;
 
 processQueue(null, access_token);
@@ -242,6 +244,7 @@ const { access_token, refresh_token: rotatedToken } = data;
 setStoredAccessToken(access_token);
 localStorage.setItem('refresh_token', rotatedToken);
 api.defaults.headers.common['Authorization'] = 'Bearer ' + access_token;
+originalRequest.headers = originalRequest.headers || {};
 originalRequest.headers['Authorization'] = 'Bearer ' + access_token;
 processQueue(null, access_token);
 return api(originalRequest);
@@ -256,10 +259,13 @@ return api(originalRequest);
  const sentAuth = (originalRequest.headers?.['Authorization'] as string) || '';
  const latestAccess = localStorage.getItem('access_token');
  if (latestAccess && `Bearer ${latestAccess}` !== sentAuth) {
- originalRequest.headers = originalRequest.headers || {};
- originalRequest.headers['Authorization'] = `Bearer ${latestAccess}`;
- processQueue(null, latestAccess);
- return api(originalRequest);
+  originalRequest.headers = originalRequest.headers || {};
+  originalRequest.headers['Authorization'] = `Bearer ${latestAccess}`;
+  // Explicit: a second 401 on this retried request must not start another
+  // refresh (safe today only because _retry happens to be set upstream).
+  originalRequest._retry = true;
+  processQueue(null, latestAccess);
+  return api(originalRequest);
  }
 
  // Pure network failure (backend unreachable, timeout) says nothing about

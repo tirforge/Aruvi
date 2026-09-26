@@ -31,10 +31,16 @@ export default function GlobalContextMenu() {
     // (or duplicate revokes). The menu intentionally stays open for the
     // "✓ Copied!" feedback — so the buttons disable instead of closing.
     const [busyId, setBusyId] = useState<string | null>(null);
+    // Sync guard alongside the state above: state updates lag a render, so a
+    // fast double-click could pass the `busyId` check twice and mint
+    // duplicate links. The ref is checked synchronously (same fix class as
+    // GrabSearch's grabbingRef); the state still drives button disabling.
+    const busyRef = useRef(false);
     const runBusy = async (id: string, fn: () => Promise<void>) => {
-        if (busyId) return;
+        if (busyRef.current) return;
+        busyRef.current = true;
         setBusyId(id);
-        try { await fn(); } finally { setBusyId(null); }
+        try { await fn(); } finally { busyRef.current = false; setBusyId(null); }
     };
 
     // Close menu on escape; restore focus to the opener (card button) so
