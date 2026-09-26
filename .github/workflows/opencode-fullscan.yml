@@ -31,7 +31,6 @@ jobs:
           persist-credentials: false
 
       - uses: anomalyco/opencode/github@latest
-        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -68,7 +67,34 @@ jobs:
               CodeRabbit layer of the combo never runs. (CI, CodeQL,
               opencode-review, and Sonar all fire automatically on the
               new PR; only CodeRabbit needs the nudge.)
-            - If nothing worth fixing: do NOT open a PR. Just log a short
-              "clean" summary.
+            - Before anything else, write
+              `fullscan-${{ matrix.area }}-report.md` at repo root:
+              dirs scanned, file count, then either an explicit CLEAN
+              verdict (say what was checked) or the full finding list
+              (file:line for each). A run that publishes no verdict file
+              counts as FAILED, never as clean.
+            - If nothing worth fixing: do NOT open a PR. The report file
+              with the CLEAN verdict IS the delivery (published to the
+              step summary + artifacts by the workflow below).
             - If a fix PR for this area is already open, add to it instead
               of opening a duplicate.
+
+      - name: Publish verdict to step summary
+        if: always()
+        run: |
+          f="fullscan-${{ matrix.area }}-report.md"
+          if [ -f "$f" ]; then
+            cat "$f" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## fullscan ${{ matrix.area }}: NO REPORT" >> "$GITHUB_STEP_SUMMARY"
+            echo "The agent produced no verdict file (crashed or failed before finishing). Treat this run as FAILED, not clean." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - name: Upload verdict artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fullscan-${{ matrix.area }}-report
+          path: fullscan-${{ matrix.area }}-report.md
+          if-no-files-found: warn
