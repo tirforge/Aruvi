@@ -15,4 +15,4 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/dependency-review-action@v4
         with:
-          fail_on_severity: high
+          fail-on-severity: high
