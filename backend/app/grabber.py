@@ -203,7 +203,7 @@ def _collect_sessions() -> list[str]:
         if not sessions and s.telegram_bot_session_strings:
             sessions.extend(s.telegram_bot_session_strings)
     except Exception:
-        pass
+        _log.warning("grabber: failed reading configured session strings", exc_info=True)
     # 4. Env var fallback
     if not sessions:
         env = os.environ.get("TELEGRAM_BOT_SESSION_STRINGS", "")
@@ -515,7 +515,7 @@ async def _page_step(ivy: Client, msg, find_fn, timeout: float = 8.0) -> object 
                     if after and after != before:
                         return fresh
             except Exception:
-                pass
+                _log.debug("grabber: page poll read failed", exc_info=True)
             flood = _flood_seconds(e)
             if flood is not None:
                 # The bot is flood-limited right now — remember the wait so
@@ -995,7 +995,7 @@ async def _wait_for_file_auto_join(
                         found_force_sub = True
                         break
             except Exception:
-                pass
+                _log.debug("grabber: chat-history poll failed", exc_info=True)
             if file_msg:
                 return file_msg
             if pending_approval:
@@ -1102,7 +1102,7 @@ async def search_results(
                     break
                 for row_idx, row in enumerate(page_msg.reply_markup.inline_keyboard):
                     for col_idx, btn in enumerate(row):
-                        text = btn.text
+                        text = btn.text or ""
                         if _is_nav_button(text):
                             continue
 
@@ -1490,7 +1490,7 @@ async def grab_selected(
                     page_msg.reply_markup.inline_keyboard
                 ):
                     for col_idx, page_btn in enumerate(page_row):
-                        if _is_nav_button(page_btn.text):
+                        if _is_nav_button(page_btn.text or ""):
                             continue
                         if target_file_name:
                             if page_btn.text == target_file_name:

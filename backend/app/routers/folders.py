@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import defer
 
 from ..database import get_db
@@ -182,7 +183,14 @@ async def create_folder(
         parent_id=folder_data.parent_id,
     )
     db.add(folder)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Lost a create race — another request just created the same name.
+        await db.rollback()
+        raise HTTPException(
+            status_code=400, detail="Folder with this name already exists"
+        )
     await db.refresh(folder)
 
     return FolderResponse(
@@ -333,14 +341,20 @@ async def delete_folder(
 
             await db.execute(
                 update(File)
-                .where(File.folder_id.in_(all_folder_ids))
+                .where(
+                    File.folder_id.in_(all_folder_ids),
+                    File.user_id == current_user.id,
+                )
                 .values(folder_id=target_folder_id)
             )
     else:
         if all_folder_ids:
             file_query = (
                 select(File)
-                .where(File.folder_id.in_(all_folder_ids))
+                .where(
+                    File.folder_id.in_(all_folder_ids),
+                    File.user_id == current_user.id,
+                )
                 .options(defer(File.thumbnail_data))
             )
             file_result = await db.execute(file_query)
@@ -352,7 +366,12 @@ async def delete_folder(
             if storage_message_ids:
                 invalidate_message_cache_batch(storage_message_ids)
 
-            await db.execute(delete(File).where(File.folder_id.in_(all_folder_ids)))
+            await db.execute(
+                delete(File).where(
+                    File.folder_id.in_(all_folder_ids),
+                    File.user_id == current_user.id,
+                )
+            )
 
     # Delete all descendant folder rows explicitly — ORM cascade only fires
     # for loaded children, and SQLite FK cascade needs PRAGMA foreign_keys=ON
@@ -382,6 +401,8 @@ async def batch_delete_folders(
     current_user: User = Depends(get_current_user),
 ):
     """Delete multiple folders."""
+    if len(folder_ids) > 100:
+        raise HTTPException(status_code=400, detail="Too many folders (max 100)")
     # Fetch all folders
     result = await db.execute(
         select(Folder).where(
@@ -415,7 +436,10 @@ async def batch_delete_folders(
         # Get files to delete from Telegram
         file_query = (
             select(File)
-            .where(File.folder_id.in_(all_affected_folder_ids))
+            .where(
+                File.folder_id.in_(all_affected_folder_ids),
+                File.user_id == current_user.id,
+            )
             .options(defer(File.thumbnail_data))
         )
         file_result = await db.execute(file_query)
@@ -430,7 +454,10 @@ async def batch_delete_folders(
 
         # Delete files from DB
         await db.execute(
-            sqlalchemy_delete(File).where(File.folder_id.in_(all_affected_folder_ids))
+            sqlalchemy_delete(File).where(
+                File.folder_id.in_(all_affected_folder_ids),
+                File.user_id == current_user.id,
+            )
         )
 
     # Delete all affected folder rows explicitly (ORM cascade only fires for loaded children)
@@ -464,6 +491,9 @@ async def batch_move_folders(
     """Move multiple folders to another folder."""
     folder_ids = move_data.ids
     target_id = move_data.folder_id
+
+    if len(folder_ids) > 100:
+        raise HTTPException(status_code=400, detail="Too many folders (max 100)")
 
     if target_id == 0:
         target_id = None

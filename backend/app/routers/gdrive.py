@@ -118,7 +118,7 @@ async def _resolve_user(request: Request):
         if not user:
             return None
         token_version = payload.get("ver")
-        if token_version is not None and token_version < user.auth_version:
+        if token_version is not None and token_version != user.auth_version:
             return None
         return user
 

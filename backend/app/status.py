@@ -116,13 +116,18 @@ def get_cpu() -> float:
 
 
 def _parse_mem_env(val: str) -> int:
-    val = val.strip().upper()
-    for suffix in ["GIB", "GI", "GB", "G", "MIB", "MI", "MB", "M"]:
-        if val.endswith(suffix):
-            return int(
-                float(val[: -len(suffix)]) * (1024**3 if suffix[0] == "G" else 1024**2)
-            )
-    return int(val)
+    """Parse a MEMORY env value to bytes. Never raises — a malformed value
+    falls back to 16 GiB instead of 500-ing the public /api/status."""
+    try:
+        val = val.strip().upper()
+        for suffix in ["GIB", "GI", "GB", "G", "MIB", "MI", "MB", "M"]:
+            if val.endswith(suffix):
+                return int(
+                    float(val[: -len(suffix)]) * (1024**3 if suffix[0] == "G" else 1024**2)
+                )
+        return int(val)
+    except (ValueError, AttributeError):
+        return 16 * 1024**3
 
 
 def _cgroup_memory_max() -> int | None:
@@ -237,7 +242,11 @@ def _sum_proc_rss() -> int:
         return _proc_rss_cache[1]
     own_cgroup = _own_cgroup_path()
     total = 0
-    for entry in os.listdir("/proc"):
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return _proc_rss_cache[1]
+    for entry in entries:
         if not entry.isdigit():
             continue
         if own_cgroup is not None:
@@ -344,8 +353,9 @@ def get_net() -> dict:
                 pt, pr, pt_ = _prev_net
                 dt = now - pt
                 if dt > 0:
-                    rx_mbps = round((rx - pr) * 8 / dt / 1024 / 1024, 1)
-                    tx_mbps = round((tx - pt_) * 8 / dt / 1024 / 1024, 1)
+                    # Counter resets (reboot/wrap) yield negative deltas — clamp.
+                    rx_mbps = round(max(0.0, (rx - pr) * 8 / dt / 1024 / 1024), 1)
+                    tx_mbps = round(max(0.0, (tx - pt_) * 8 / dt / 1024 / 1024), 1)
             _prev_net = (now, rx, tx)
             return {"rx_mbps": rx_mbps, "tx_mbps": tx_mbps}
         except Exception:

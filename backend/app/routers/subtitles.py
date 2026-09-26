@@ -260,6 +260,13 @@ async def _os_download(sub_id: str, file_id: int | None) -> tuple[str, str]:
             status_code=502, detail="Failed to download subtitle from provider"
         )
 
+    # Provider-supplied body: cap it (legit subtitles are KBs) so a rogue
+    # response can't OOM the server or the JSON client.
+    if len(content) > 1_000_000:
+        raise HTTPException(
+            status_code=502, detail="Subtitle file too large from provider"
+        )
+
     if not content:
         raise HTTPException(
             status_code=502, detail="OpenSubtitles returned empty subtitle"
@@ -275,7 +282,9 @@ async def _os_download(sub_id: str, file_id: int | None) -> tuple[str, str]:
 @router.get("/search")
 async def search_subtitles(
     file_id: int = Query(...),
-    language: str = Query("en", description="IETF language tag, e.g. en, eng, ta"),
+    language: str = Query(
+        "en", max_length=32, description="IETF language tag, e.g. en, eng, ta"
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -372,10 +381,10 @@ async def search_subtitles(
 @router.get("/content")
 async def subtitle_content(
     file_id: int = Query(...),
-    provider: str = Query(...),
-    subtitle_id: str = Query(...),
+    provider: str = Query(..., max_length=64),
+    subtitle_id: str = Query(..., max_length=128),
     download_id: Optional[int] = Query(None),
-    language: str = Query("en"),
+    language: str = Query("en", max_length=32),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):

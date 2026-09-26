@@ -27,6 +27,9 @@ router = APIRouter()
 # token -> {"client": Client, "phone": str, "hash": str, "ts": float}
 _pending: dict = {}
 _TTL_SECONDS = 600
+# Each entry holds a live Pyrogram client — cap them so concurrent send-code
+# calls can't exhaust FDs/memory.
+_MAX_PENDING = 20
 
 
 def _cleanup_expired() -> None:
@@ -36,7 +39,11 @@ def _cleanup_expired() -> None:
         entry = _pending.pop(k, None)
         if entry:
             try:
-                asyncio.get_event_loop().create_task(entry["client"].disconnect())
+                asyncio.get_running_loop().create_task(
+                    entry["client"].disconnect()
+                )
+            except RuntimeError:
+                pass
             except Exception:
                 pass
 
@@ -79,6 +86,8 @@ class SignInIn(BaseModel):
 async def setup_send_code(request: Request, body: SendCodeIn):
     _check_key(body.setup_key)
     _cleanup_expired()
+    if len(_pending) >= _MAX_PENDING:
+        raise HTTPException(429, "Too many pending login attempts — try again later")
     from pyrogram import Client  # deferred: heavy import only when actually used
 
     token = uuid.uuid4().hex[:16]

@@ -102,7 +102,12 @@ def verify_token(token: str, token_type: str = "access") -> Optional[int]:
         return None
 
     sub = payload.get("sub")
-    return int(sub) if sub is not None else None
+    if sub is None:
+        return None
+    try:
+        return int(sub)
+    except (TypeError, ValueError):
+        return None
 
 
 async def get_current_user_opt(
@@ -124,7 +129,7 @@ async def get_current_user_opt(
             int(payload.get("sub")) if payload and payload.get("sub") else None
         )
         token_version = payload.get("ver") if payload else None
-    except Exception:
+    except (JWTError, ValueError, AttributeError, TypeError):
         return None
     if not telegram_id:
         return None
@@ -132,7 +137,7 @@ async def get_current_user_opt(
     user = result.scalar_one_or_none()
     if not user:
         return None
-    if token_version is not None and token_version < user.auth_version:
+    if token_version is not None and token_version != user.auth_version:
         return None
     return user
 
@@ -167,7 +172,7 @@ async def get_current_user(
             int(payload.get("sub")) if payload and payload.get("sub") else None
         )
         token_version = payload.get("ver") if payload else None
-    except Exception:
+    except (JWTError, ValueError, AttributeError, TypeError):
         telegram_id = None
         token_version = None
 
@@ -188,7 +193,7 @@ async def get_current_user(
         )
 
     # Check token version for global logout
-    if token_version is not None and token_version < user.auth_version:
+    if token_version is not None and token_version != user.auth_version:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session has been invalidated",

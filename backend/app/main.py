@@ -9,7 +9,11 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-_libc = ctypes.CDLL("libc.so.6")
+try:
+    _libc = ctypes.CDLL("libc.so.6")
+except OSError:
+    # musl/Alpine/macOS have no glibc — malloc_trim is best-effort only.
+    _libc = None
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -111,7 +115,7 @@ async def _cleanup_expired_codes():
         except asyncio.CancelledError:
             raise
         except Exception:
-            pass
+            logger.warning("cleanup_expired_codes failed", exc_info=True)
 
 
 async def _oom_guard_loop():
@@ -119,7 +123,8 @@ async def _oom_guard_loop():
 
     def _gc_and_trim():
         gc.collect()
-        _libc.malloc_trim(0)
+        if _libc is not None:
+            _libc.malloc_trim(0)
 
     while True:
         try:
@@ -131,7 +136,7 @@ async def _oom_guard_loop():
         except asyncio.CancelledError:
             raise
         except Exception:
-            pass
+            logger.warning("oom_guard_loop iteration failed", exc_info=True)
 
 
 async def _disk_cache_sweep_loop():
@@ -146,7 +151,7 @@ async def _disk_cache_sweep_loop():
         except asyncio.CancelledError:
             raise
         except Exception:
-            pass
+            logger.warning("disk_cache_sweep_loop iteration failed", exc_info=True)
 
 
 app = FastAPI(
@@ -375,6 +380,8 @@ async def api_clear_logs(request: Request):
 
 @app.get("/status", include_in_schema=False)
 async def status_page():
+    if not os.path.isfile("app/static/status.html"):
+        return JSONResponse(status_code=404, content={"detail": "Not found"})
     return FileResponse("app/static/status.html")
 
 
@@ -393,6 +400,8 @@ async def index():
 
 @app.get("/download", include_in_schema=False)
 async def download_page():
+    if not os.path.isfile("app/static/download.html"):
+        return JSONResponse(status_code=404, content={"detail": "Not found"})
     return FileResponse("app/static/download.html", headers=NO_CACHE_HEADERS)
 
 
@@ -402,9 +411,12 @@ async def serve_spa(request: Request, full_path: str):
     if full_path == "api" or full_path.startswith("api/") or ".." in full_path:
         raise HTTPException(status_code=404, detail="Not found")
 
-    # Stats + precompressed lookups off the event loop (slow disks under
-    # load would stall active streams).
+    # Containment check: normalized + symlink-resolved path must stay under
+    # app/static (blocks encoded traversal and symlink escapes).
+    static_root = os.path.realpath("app/static")
     static_file_path = f"app/static/{full_path}"
+    if os.path.commonpath([static_root, os.path.realpath(static_file_path)]) != static_root:
+        raise HTTPException(status_code=404, detail="Not found")
     import mimetypes
 
     def _resolve():
@@ -447,5 +459,5 @@ if __name__ == "__main__":
         "app.main:app",
         host=settings.server_host,
         port=settings.server_port,
-        reload=True,
+        reload=False,
     )

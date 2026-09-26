@@ -94,7 +94,7 @@ async def refresh_token(
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
 
-    if token_version is not None and token_version < user.auth_version:
+    if token_version is not None and token_version != user.auth_version:
         raise HTTPException(
             status_code=401, detail="Refresh token has been invalidated"
         )
@@ -351,9 +351,10 @@ async def _verify_login_code_once(
     )
 
 
-# Keep this for backward compatibility or direct code login if needed,
-# but verify-code is the main one for TV flow now.
+# Legacy endpoint - use verify-code instead. Rate-limited like verify-code:
+# the inner verify_login_code decorator is not enforced on direct delegation.
 @router.post("/code", response_model=AuthResponse)
+@limiter.limit("10/minute")
 async def login_with_code(
     request: Request,
     code_request: LoginCodeRequest,

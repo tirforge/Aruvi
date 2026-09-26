@@ -14,7 +14,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-_libc = ctypes.CDLL("libc.so.6")
+try:
+    _libc = ctypes.CDLL("libc.so.6")
+except OSError:
+    # musl/Alpine/macOS have no glibc — malloc_trim is best-effort only.
+    _libc = None
 _log = logging.getLogger("run")
 
 uvs.Server.capture_signals = lambda self: contextlib.nullcontext()
@@ -35,7 +39,8 @@ async def _periodic_housekeeping():
 
     def _gc_and_trim():
         gc.collect()
-        _libc.malloc_trim(0)
+        if _libc is not None:
+            _libc.malloc_trim(0)
 
     while True:
         await asyncio.sleep(60)
@@ -88,4 +93,6 @@ try:
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 except ImportError:
     pass
-asyncio.run(run())
+
+if __name__ == "__main__":
+    asyncio.run(run())

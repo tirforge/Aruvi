@@ -57,7 +57,8 @@ class PatchedClient(PyroClient):
             msg = await self.get_messages(chat_id=chat_id, message_ids=message_id)
             if msg.empty:  # type: ignore
                 raise ValueError("message id is invalid")
-            if not msg.from_user.is_self:  # type: ignore
+            # Channel posts have no from_user — treat as unverifiable.
+            if not getattr(getattr(msg, "from_user", None), "is_self", False):  # type: ignore
                 raise ValueError("cannot use self message")
             # if not await self.check_cbd(msg.reply_markup):  # type: ignore
             #     raise TypeError("message type invalid [no callback button]")
@@ -246,7 +247,13 @@ async def resolve_listener(
         if not await entry["filters"](client, update):
             update.continue_propagation()
             return
-    entry["future"].set_result(update)  # type: ignore
+    try:
+        entry["future"].set_result(update)  # type: ignore
+    except asyncio.InvalidStateError:
+        # A concurrent resolver beat us to it — drop the stale entry.
+        client._forget_listener(key, entry)
+        update.continue_propagation()
+        return
     update.stop_propagation()
 
 

@@ -49,6 +49,19 @@ def _log_exceptions(coro):
         except Exception:
             _log.exception("Unhandled exception in %s", coro.__name__)
             traceback.print_exc()
+            # Callback handlers parse untrusted callback_data (e.g. int ids);
+            # without an answer the user is left with a hanging spinner.
+            for arg in args:
+                answer = getattr(arg, "answer", None)
+                if callable(answer):
+                    try:
+                        await answer(
+                            "Something went wrong, please try again.",
+                            show_alert=True,
+                        )
+                    except Exception:
+                        pass
+                    break
 
     return wrapper
 

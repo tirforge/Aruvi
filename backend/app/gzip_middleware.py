@@ -48,7 +48,13 @@ class CompressibleGZipMiddleware:
             if k.lower() == b"accept-encoding":
                 accept = v
                 break
-        if b"gzip" not in accept:
+        # Tokenized, case-insensitive match: a substring test would accept
+        # "x-gzip" (a different coding) and miss "GZip".
+        tokens = {
+            t.split(";")[0].strip()
+            for t in bytes(accept).decode("latin-1").lower().split(",")
+        }
+        if "gzip" not in tokens:
             await self.app(scope, receive, send)
             return
 

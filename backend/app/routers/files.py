@@ -211,13 +211,15 @@ async def update_file(
 
     await db.commit()
 
-    # Re-fetch with relationships
+    # Re-fetch with relationships (may be gone if deleted concurrently)
     result = await db.execute(
         select(File)
-        .where(File.id == file_id)
+        .where(File.id == file_id, File.user_id == current_user.id)
         .options(selectinload(File.watch_progress))
     )
-    file = result.scalar_one()
+    file = result.scalar_one_or_none()
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
 
     return FileResponse(**add_urls_to_file(file))
 
@@ -280,6 +282,8 @@ async def batch_delete_files(
     current_user: User = Depends(get_current_user),
 ):
     """Delete multiple files."""
+    if len(file_ids) > 100:
+        raise HTTPException(status_code=400, detail="Too many files (max 100)")
     # Fetch all files
     result = await db.execute(
         select(File)
@@ -438,13 +442,15 @@ async def share_file(
 
     await db.commit()
 
-    # Re-fetch with relationships
+    # Re-fetch with relationships (may be gone if deleted concurrently)
     result = await db.execute(
         select(File)
-        .where(File.id == file_id)
+        .where(File.id == file_id, File.user_id == current_user.id)
         .options(selectinload(File.watch_progress))
     )
-    file = result.scalar_one()
+    file = result.scalar_one_or_none()
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
 
     return FileResponse(**add_urls_to_file(file))
 
@@ -470,13 +476,15 @@ async def revoke_share(
 
     await db.commit()
 
-    # Re-fetch with relationships
+    # Re-fetch with relationships (may be gone if deleted concurrently)
     result = await db.execute(
         select(File)
-        .where(File.id == file_id)
+        .where(File.id == file_id, File.user_id == current_user.id)
         .options(selectinload(File.watch_progress))
     )
-    file = result.scalar_one()
+    file = result.scalar_one_or_none()
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
 
     return FileResponse(**add_urls_to_file(file))
 
@@ -490,6 +498,9 @@ async def batch_move_files(
     """Move multiple files to a folder."""
     file_ids = move_data.ids
     folder_id = move_data.folder_id
+
+    if len(file_ids) > 100:
+        raise HTTPException(status_code=400, detail="Too many files (max 100)")
 
     if folder_id == 0:
         folder_id = None

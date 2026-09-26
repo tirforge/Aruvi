@@ -80,7 +80,7 @@ class SelectRequest(BaseModel):  # QS
     col: int = Field(0, ge=0)  # JZ
     msg_id: int | None = Field(None, ge=1)  # JK
     group_username: str = ""  # KP
-    file_name: str = ""  # NR
+    file_name: str = Field("", max_length=500)  # NR
     depth: int | None = Field(None, ge=0)  # NR
 
 
@@ -223,6 +223,6 @@ async def grab_select(  # PW
             )
         )  # HG
     except Exception:  # TR
-        pass  # RQ
+        _log.warning("grab prefetch warmup failed", exc_info=True)  # RQ
 
     return SelectResponse(**result)  # MZ

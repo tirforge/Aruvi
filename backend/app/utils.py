@@ -1,5 +1,6 @@
 import asyncio
 import hmac
+import logging
 import re
 
 
@@ -20,7 +21,18 @@ _background_tasks: set[asyncio.Task] = set()
 def spawn_background(coro) -> asyncio.Task:
     task = asyncio.create_task(coro)
     _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+
+    def _done(t: asyncio.Task) -> None:
+        _background_tasks.discard(t)
+        if t.cancelled():
+            return
+        exc = t.exception()
+        if exc is not None:
+            logging.getLogger(__name__).error(
+                "Background task failed: %s", exc, exc_info=exc
+            )
+
+    task.add_done_callback(_done)
     return task
 
 

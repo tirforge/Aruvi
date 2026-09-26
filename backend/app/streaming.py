@@ -15,7 +15,11 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import AsyncGenerator
 from contextlib import asynccontextmanager
 
-_libc = ctypes.CDLL("libc.so.6")
+try:
+    _libc = ctypes.CDLL("libc.so.6")
+except OSError:
+    # musl/Alpine/macOS have no glibc — malloc_trim is best-effort only.
+    _libc = None
 
 
 class CappedSemaphore(asyncio.Semaphore):
@@ -422,7 +426,7 @@ def _memory_pressure() -> bool:
                 with open(p) as f:
                     cur = int(f.read().strip())
                     break
-            except OSError:
+            except (OSError, ValueError):
                 continue
     if cur <= 0:
         return False
@@ -433,11 +437,12 @@ def _memory_pressure() -> bool:
     ):
         try:
             with open(p) as f:
+                # cgroup v2 reports "max" for no limit — not a number.
                 v = int(f.read().strip())
                 if 0 < v < 10**18:
                     mx = v
                     break
-        except OSError:
+        except (OSError, ValueError):
             continue
     if mx is None:
         return False
@@ -1945,7 +1950,8 @@ async def parallel_stream_generator(
             # growth of _prefetch_size across distinct movies streamed this boot.
             _prefetch_size.pop((chat_id, message_id), None)
         gced = gc.collect()
-        _libc.malloc_trim(0)
+        if _libc is not None:
+            _libc.malloc_trim(0)
         if gced > 10000:
             logger.info("Stream cleanup: gc %d objs, malloc_trim", gced)
         # Keep cache alive for CACHE_TTL (30min) — resume after network drop
