@@ -16,6 +16,13 @@ const MIME_BY_EXT: Record<string, string> = {
   mp4: 'video/mp4',
 };
 
+// Backend stream URLs are often root-relative — expand to an absolute URL
+// before handing them to the clipboard or an external (VLC) handler.
+function toAbsoluteUrl(url: string): string {
+  if (/^https?:\/\//i.test(url)) return url;
+  return `${window.location.protocol}//${window.location.host}${url.startsWith('/') ? '' : '/'}${url}`;
+}
+
 export default function GrabSearch() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<GrabSearchResult[]>([]);
@@ -127,7 +134,9 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
   const handleCopyUrl = useCallback(async () => {
     if (!grabbed) return;
     try {
-      await navigator.clipboard.writeText(grabbed.stream_url);
+      // stream_url can be root-relative ("/api/...") — absolutize it so the
+      // pasted URL actually works outside this tab.
+      await navigator.clipboard.writeText(toAbsoluteUrl(grabbed.stream_url));
       setCopied(true);
       if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
       copyTimerRef.current = window.setTimeout(() => setCopied(false), 2000);
@@ -163,7 +172,7 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
   }, [grabbed, setPreviewFile]);
 
   const getVlcUrl = (url: string) => {
-    return 'vlc://' + url;
+    return 'vlc://' + toAbsoluteUrl(url);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

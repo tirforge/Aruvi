@@ -26,6 +26,14 @@ export default function GlobalContextMenu() {
     const selectedFolders = folders?.filter(f => selectedFolderIds.has(f.id)) || [];
     const menuRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
+    // Timer behind the "✓ Copied!" feedback: cleared on re-copy (so a fast
+    // second copy doesn't lose its feedback early) and on unmount.
+    const copiedTimerRef = useRef<number | null>(null);
+    useEffect(() => {
+        return () => {
+            if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current);
+        };
+    }, []);
     // In-flight guard for the async share/link actions. Without it the menu
     // stays open during the POST and rapid clicks mint duplicate share links
     // (or duplicate revokes). The menu intentionally stays open for the
@@ -81,7 +89,9 @@ export default function GlobalContextMenu() {
         let posY = y;
 
         if (posX + menuWidth > window.innerWidth - padding) {
-            posX = window.innerWidth - menuWidth - padding;
+            // Clamp at the left edge too: on very narrow screens the shifted
+            // position would otherwise go negative (menu cut off on the left).
+            posX = Math.max(padding, window.innerWidth - menuWidth - padding);
         }
         if (posY > window.innerHeight - 300) {
             posY = Math.max(padding, window.innerHeight - 300);
@@ -101,7 +111,11 @@ export default function GlobalContextMenu() {
         try {
             await navigator.clipboard.writeText(text);
             setCopiedId(id);
-            setTimeout(() => setCopiedId(null), 2000);
+            if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current);
+            copiedTimerRef.current = window.setTimeout(() => {
+                setCopiedId(null);
+                copiedTimerRef.current = null;
+            }, 2000);
         } catch (err) {
             console.error('Failed to copy:', err);
         }

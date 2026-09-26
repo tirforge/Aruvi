@@ -257,12 +257,13 @@ export default function FileBrowser() {
                 }
                 setClipboard(null);
             } else if (clipboard.mode === 'copy') {
-                alert("Copying files is not yet supported. Only Move (Cut) is supported.");
+                addToast('Copying files is not yet supported. Only Move (Cut) is supported.', 'info');
             }
         } catch (error) {
             console.error('Paste failed:', error);
+            addToast('Paste failed', 'error');
         }
-    }, [clipboard, currentFolderId, moveFilesMutation, moveFoldersMutation, setClipboard]);
+    }, [clipboard, currentFolderId, moveFilesMutation, moveFoldersMutation, setClipboard, addToast]);
 
 
     // Selection Box Logic
@@ -447,8 +448,15 @@ export default function FileBrowser() {
                 else clearSelection();
             }
 
+            // Any modal open: its own buttons/inputs own the keyboard from
+            // here on (Delete/F2/Ctrl+C must not act on the grid behind it).
+            if (moveItems || deleteConfirm || renameFile || renameFolder || showNewFolder) return;
+
+            // Case-insensitive: Ctrl+Shift+A/C/X/V report an uppercase key.
+            const key = e.key.toLowerCase();
+
             // Ctrl+A - select all
-            if (e.ctrlKey && e.key === 'a' && displayFiles) {
+            if (e.ctrlKey && key === 'a' && displayFiles) {
                 e.preventDefault();
                 const allFileIds = displayFiles.map(f => f.id);
                 const allFolderIds = showFolders ? folders?.map(f => f.id) || [] : [];
@@ -477,13 +485,15 @@ export default function FileBrowser() {
                 }
             }
 
-            // Backspace - go to parent folder
+            // Backspace - go to parent folder (preventDefault: some browsers
+            // treat Backspace as "back" navigation).
             if (e.key === 'Backspace' && breadcrumbs.length > 1) {
+                e.preventDefault();
                 navigateToBreadcrumb(breadcrumbs.length - 2);
             }
 
             // Ctrl+C - Copy
-            if (e.ctrlKey && e.key === 'c' && (selectedFileIds.size > 0 || selectedFolderIds.size > 0)) {
+            if (e.ctrlKey && key === 'c' && (selectedFileIds.size > 0 || selectedFolderIds.size > 0)) {
                 e.preventDefault();
                 const selectedFiles = displayFiles?.filter(f => selectedFileIds.has(f.id)) || [];
                 const selectedFolders = folders?.filter(f => selectedFolderIds.has(f.id)) || [];
@@ -491,7 +501,7 @@ export default function FileBrowser() {
             }
 
             // Ctrl+X - Cut
-            if (e.ctrlKey && e.key === 'x' && (selectedFileIds.size > 0 || selectedFolderIds.size > 0)) {
+            if (e.ctrlKey && key === 'x' && (selectedFileIds.size > 0 || selectedFolderIds.size > 0)) {
                 e.preventDefault();
                 const selectedFiles = displayFiles?.filter(f => selectedFileIds.has(f.id)) || [];
                 const selectedFolders = folders?.filter(f => selectedFolderIds.has(f.id)) || [];
@@ -499,7 +509,7 @@ export default function FileBrowser() {
             }
 
             // Ctrl+V - Paste
-            if (e.ctrlKey && e.key === 'v' && clipboard && (clipboard.files.length > 0 || clipboard.folders.length > 0)) {
+            if (e.ctrlKey && key === 'v' && clipboard && (clipboard.files.length > 0 || clipboard.folders.length > 0)) {
                 e.preventDefault();
                 handlePaste();
             }
@@ -508,11 +518,12 @@ export default function FileBrowser() {
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [
-        previewFile, showNewFolder, moveItems, deleteConfirm, 
-        selectedFileIds, selectedFolderIds, displayFiles, breadcrumbs, clipboard, 
+        previewFile, showNewFolder, moveItems, deleteConfirm,
+        renameFile, renameFolder,
+        selectedFileIds, selectedFolderIds, displayFiles, breadcrumbs, clipboard,
         currentFolderId, handlePaste, handleRefresh,
-        setPreviewFile, setShowNewFolder, setMoveItems, setDeleteConfirm, 
-        clearSelection, selectAll, setRenameFile, navigateToBreadcrumb, setClipboard, folders, showFolders
+        setPreviewFile, setShowNewFolder, setMoveItems, setDeleteConfirm,
+        clearSelection, selectAll, setRenameFile, setRenameFolder, navigateToBreadcrumb, setClipboard, folders, showFolders
     ]);
 
     // Keep visibleFiles in sync so store selection mutators can derive the

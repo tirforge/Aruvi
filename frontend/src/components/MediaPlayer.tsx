@@ -168,11 +168,22 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         if (!file) return;
         // MicroDVD (.sub) is not supported — the SRT→VTT converter would mangle it
         if (file.name.toLowerCase().endsWith('.sub')) return;
+        // Cap uploads: subtitle files are text and tiny — anything bigger is
+        // a wrong pick that would become a giant in-memory blob URL.
+        const MAX_SUBTITLE_BYTES = 5 * 1024 * 1024;
+        if (file.size > MAX_SUBTITLE_BYTES) {
+            setInternetError('That subtitle file is too large (max 5MB).');
+            return;
+        }
         const reader = new FileReader();
+        reader.onerror = () => {
+            setInternetError('Could not read that subtitle file.');
+        };
         reader.onload = () => {
             let text = reader.result as string;
-            // Convert SRT to VTT if needed
-            if (file.name.endsWith('.srt')) {
+            // Convert SRT to VTT if needed (case-insensitive: ".SRT" from
+            // Windows cameras/tools skipped conversion and failed to render)
+            if (file.name.toLowerCase().endsWith('.srt')) {
                 text = srtToVtt(text);
             }
             const blob = new Blob([text], { type: 'text/vtt' });
@@ -262,9 +273,12 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
 
     const getAbsoluteUrl = (url: string) => {
         if (!url) return '';
-        if (url.startsWith('http')) return url;
-        return `${window.location.origin}${url}`;
+        if (url.startsWith('http://') || url.startsWith('https://')) return url;
+        return `${window.location.origin}${url.startsWith('/') ? '' : '/'}${url}`;
     };
+
+    const withToken = (base: string, token: string | null) =>
+        `${base}${base.includes('?') ? '&' : '?'}token=${encodeURIComponent(token ?? '')}`;
 
     // Capture the authorized stream URL once per file so a token refresh
     // doesn't change the src and restart playback. Appends the access token
@@ -274,8 +288,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
     const authorizedStreamUrl = useMemo(() => {
         const token = localStorage.getItem('access_token');
         const base = getAbsoluteUrl(file.stream_url || '');
-        const sep = base.includes('?') ? '&' : '?';
-        return `${base}${sep}token=${token}`;
+        return withToken(base, token);
     }, [file.id, file.stream_url]);
     // Still images don't risk restarting playback, so use the reactive token:
     // if it rotates mid-viewing, the <img> re-renders with a fresh token instead
@@ -284,11 +297,18 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
     const imageUrl = useMemo(() => {
         if (!isImage) return authorizedStreamUrl;
         const base = getAbsoluteUrl(file.stream_url || '');
-        const sep = base.includes('?') ? '&' : '?';
-        return `${base}${sep}token=${reactiveToken}`;
+        return withToken(base, reactiveToken);
     }, [file.stream_url, file.id, isImage, reactiveToken, authorizedStreamUrl]);
-    const externalUrl = getAbsoluteUrl((extendedFile || file).public_stream_url || '') || authorizedStreamUrl;
-    const vlcUrl = `vlc://${externalUrl}`;
+    const publicUrl = getAbsoluteUrl((extendedFile || file).public_stream_url || '');
+
+    // Short-lived file-bound URL for Copy/VLC/Download handoffs. The account
+    // JWT must never leave the app in a clipboard string, a vlc:// link, or
+    // a new tab's address bar (all three end up in logs and chat history).
+    const mintFileUrl = useCallback(async (): Promise<string> => {
+        if (publicUrl) return publicUrl;
+        const token = await getFileDownloadToken(file.id);
+        return `${window.location.protocol}//${window.location.host}/api/stream/dl?id=${file.id}&token=${encodeURIComponent(token)}`;
+    }, [publicUrl, file.id]);
 
     // If the access token rotates mid-playback (refresh interceptor), the
     // frozen authorizedStreamUrl would 401 on the next request with no way to
@@ -309,9 +329,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         // Build the URL from the CURRENT token — authorizedStreamUrl is
         // deliberately frozen at mount (stable src); re-sourcing with it
         // would replay the stale token the rotation just invalidated.
-        const base = getAbsoluteUrl(file.stream_url || '');
-        const sep = base.includes('?') ? '&' : '?';
-        const freshUrl = `${base}${sep}token=${reactiveToken}`;
+        const freshUrl = withToken(getAbsoluteUrl(file.stream_url || ''), reactiveToken);
         el.source({
             video: { src: freshUrl, type: 'video/mp4' },
         });
@@ -331,19 +349,36 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         // Open the target tab synchronously (still inside the click gesture) so
         // browsers don't block it as a popup, then point it at the download page
         // once the token arrives. Falls back to same-tab navigation when a popup
-        // was blocked (win === null).
-        const win = window.open('', '_blank');
+        // was blocked (win === null). `noopener` severs the opener link so the
+        // download page can never drive this tab (reverse tabnabbing).
+        const win = window.open('', '_blank', 'noopener,noreferrer');
+        if (win) { try { win.opener = null; } catch { /* noop */ } }
         try {
-            const token = await getFileDownloadToken(file.id);
-            const dlUrl = `${window.location.protocol}//${window.location.host}/api/stream/dl?id=${file.id}&token=${encodeURIComponent(token)}`;
+            const dlUrl = await mintFileUrl();
             if (win) win.location.href = dlUrl;
             else window.location.href = dlUrl;
         } catch (err) {
-            console.warn('Failed to get download token, falling back to stream URL:', err);
-            if (win) win.location.href = externalUrl;
-            else window.location.href = externalUrl;
+            console.warn('Failed to get download token:', err);
+            if (win) win.close();
+            setError('Could not start the download. Check your connection and try again.');
         }
     };
+
+    const handleCopyExternalUrl = useCallback(async () => {
+        try {
+            await navigator.clipboard.writeText(await mintFileUrl());
+        } catch (err) {
+            console.warn('Failed to copy stream URL:', err);
+        }
+    }, [mintFileUrl]);
+
+    const handleOpenVlc = useCallback(async () => {
+        try {
+            window.location.href = `vlc://${await mintFileUrl()}`;
+        } catch (err) {
+            console.warn('Failed to open in VLC:', err);
+        }
+    }, [mintFileUrl]);
 
     const resumeStart = Math.floor(extendedFile?.last_pos ?? 0);
     // Stable snapshot of the resume position: the mount effect below must read
@@ -657,8 +692,10 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         if (!el || subtitleTracks.length === 0) return;
         const prevTime = el.currentTime || 0;
         const activeIdxRef = activeSubKeyRef.current === null ? -1 : subtitleTracks.findIndex((t) => t.key === activeSubKeyRef.current);
+        // Fresh token, not the frozen authorizedStreamUrl: a rotation between
+        // mount and attach would otherwise re-source with a dead token.
         el.source({
-            video: { src: authorizedStreamUrl, type: 'video/mp4' },
+            video: { src: withToken(getAbsoluteUrl(file.stream_url || ''), reactiveToken), type: 'video/mp4' },
             subtitles: subtitleTracks.map((t, i) => ({
                 src: t.url,
                 lang: `s${i}`,
@@ -748,16 +785,19 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
                         <p className="text-dark-300 mb-6">{error}</p>
 
                         <div className="flex flex-col gap-3">
-                            <a
-                                href={vlcUrl}
+                            {/* VLC/Copy mint a short-lived file-bound token (see
+                                mintFileUrl) — never the account JWT. */}
+                            <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); void handleOpenVlc(); }}
                                 className="btn-primary flex items-center justify-center gap-2"
                             >
                                 <ExternalLink className="w-4 h-4" />
                                 Open in VLC
-                            </a>
+                            </button>
                             <div className="flex gap-3">
                                 <Button
-                                    onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(externalUrl); }}
+                                    onClick={(e) => { e.stopPropagation(); void handleCopyExternalUrl(); }}
                                     className="flex-1 btn-secondary flex items-center justify-center gap-2"
                                 >
                                     <Copy className="w-4 h-4" />
@@ -1029,7 +1069,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
 // Helper button component for cleaner code
 function Button({ onClick, className, children }: { onClick?: (e: any) => void, className?: string, children: React.ReactNode }) {
     return (
-        <button onClick={onClick} className={className}>
+        <button type="button" onClick={onClick} className={className}>
             {children}
         </button>
     );

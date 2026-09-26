@@ -8,6 +8,13 @@ import MediaPlayer from './components/MediaPlayer';
 import { useAppStore } from './lib/store';
 import logo from './assets/logo.png';
 
+function persistAccessToken(token: string) {
+    localStorage.setItem('access_token', token);
+    // useAccessToken subscribers cache the token at render time — without
+    // this event they keep the stale value until a full page reload.
+    window.dispatchEvent(new CustomEvent('access_token_changed'));
+}
+
 function AuthCallback() {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
@@ -18,7 +25,7 @@ const [saved, setSaved] = useState(false);
     useEffect(() => {
         if (token) {
             try {
-                localStorage.setItem('access_token', token);
+                persistAccessToken(token);
                 const check = localStorage.getItem('access_token');
                 if (check === token) {
 setSaved(true);
@@ -47,8 +54,11 @@ navigate('/', { replace: true });
                         <p className="text-dark-400 text-sm mb-2">Token received (click to copy):</p>
                         <button
                             onClick={() => {
-                                navigator.clipboard.writeText(token);
-                                setStatus('Token copied! Open browser DevTools console and run:\nlocalStorage.setItem("access_token", "paste-token-here")');
+                                navigator.clipboard.writeText(token).then(() => {
+                                    setStatus('Token copied! Open browser DevTools console and run:\nlocalStorage.setItem("access_token", "paste-token-here")');
+                                }).catch(() => {
+                                    setStatus('Copy failed (clipboard permission denied) — long-press the token text to copy it manually.');
+                                });
                             }}
                             className="text-xs text-primary-400 break-all text-left hover:text-primary-300"
                         >
@@ -58,7 +68,7 @@ navigate('/', { replace: true });
                             <a
                                 href="/"
                                 className="inline-block px-4 py-2 bg-primary-600 hover:bg-primary-700 rounded text-white text-sm"
-                                onClick={() => localStorage.setItem('access_token', token)}
+                                onClick={() => persistAccessToken(token)}
                             >
                                 Try Manual Login →
                             </a>
@@ -69,12 +79,6 @@ navigate('/', { replace: true });
         </div>
     );
 }
-
-// Add Key icon to imports if not already imported (it's not, need to check imports)
-// Wait, I can't easily add imports here without multiple replace.
-// I'll stick to simple UI for now or check imports first.
-// App.tsx imports: Routes, Route, Navigate, useSearchParams, useNavigate (react-router-dom); useEffect, useState (react); useCurrentUser (./lib/api); FileBrowser
-// It does NOT import lucide-react icons. I'll use text or existing SVG.
 
 function LoginPage() {
     const { mutate: loginByCode, isPending: isVerifying } = useLoginWithCode();
@@ -139,10 +143,14 @@ function LoginPage() {
         let timer: any;
         // Poll the generated-code snapshot, NOT the textbox state — typing
         // must never disturb the long-poll loop (see pollCodeRef).
-        const pollCode = pollCodeRef.current;
-        if (isPolling && pollCode) {
+        // The ref is read fresh on every iteration (not captured once): a
+        // Resend that lands while a long-poll is in flight takes effect on
+        // the next beat instead of being ignored until the old code expires.
+        if (isPolling && pollCodeRef.current) {
             const poll = () => {
                 if (cancelled) return;
+                const pollCode = pollCodeRef.current;
+                if (!pollCode) return;
                 if (expiresAt > 0 && Date.now() >= expiresAt) {
                     setCodeExpired(true);
                     setIsPolling(false);
@@ -348,11 +356,13 @@ function BotLink({ code }: { code?: string }) {
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-    const { isLoading, error, refetch } = useCurrentUser();
     // Reactive token: re-renders when another tab rotates/clears it. A bare
     // localStorage.getItem() here never re-rendered, so a logged-out tab kept
     // showing the app on a dead token until hard reload.
     const token = useAccessToken();
+    // Don't fire /auth/me with no token: it 401s straight into the refresh
+    // interceptor (which then hard-redirects to /login mid-render).
+    const { isLoading, error, refetch } = useCurrentUser(!!token);
 
     if (!token) {
         return <Navigate to="/login" replace />;

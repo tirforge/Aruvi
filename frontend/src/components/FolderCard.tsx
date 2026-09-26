@@ -121,7 +121,9 @@ function FolderCardImpl({ folder, viewMode, selected, onSelect, onOpen, onFileDr
                     <FolderIcon className={`w-6 h-6 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400 group-hover:text-primary-300'}`} />
                     
                     {/* Selection indicator for list view */}
-                    <div 
+                    <button
+                        type="button"
+                        aria-label={selected ? 'Deselect folder' : 'Select folder'}
                         onClick={handleSelectClick}
                         className={`absolute -top-1 -left-1 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all
                             ${selected 
@@ -129,7 +131,7 @@ function FolderCardImpl({ folder, viewMode, selected, onSelect, onOpen, onFileDr
                                 : 'bg-dark-800 border-white/10 opacity-0 group-hover:opacity-100 hover:border-primary-500/50'}`}
                     >
                         <div className={`w-1.5 h-1.5 rounded-full bg-white transition-transform ${selected ? 'scale-100' : 'scale-0'}`} />
-                    </div>
+                    </button>
                 </div>
 
                 <div className="flex-1 min-w-0">
@@ -185,7 +187,9 @@ function FolderCardImpl({ folder, viewMode, selected, onSelect, onOpen, onFileDr
                     <FolderIcon className={`w-5 h-5 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400'}`} />
                     
                     {/* Selection indicator for grid view */}
-                    <div 
+                    <button
+                        type="button"
+                        aria-label={selected ? 'Deselect folder' : 'Select folder'}
                         onClick={handleSelectClick}
                         className={`absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all z-10
                             ${selected 
@@ -193,7 +197,7 @@ function FolderCardImpl({ folder, viewMode, selected, onSelect, onOpen, onFileDr
                                 : 'bg-dark-800 border-white/10 opacity-0 group-hover:opacity-100 hover:border-primary-500/50'}`}
                     >
                          <div className={`w-1.5 h-1.5 rounded-full bg-white transition-transform ${selected ? 'scale-100' : 'scale-0'}`} />
-                    </div>
+                    </button>
                 </div>
                 
                 <button

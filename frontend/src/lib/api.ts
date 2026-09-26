@@ -14,16 +14,21 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 // directly. `useAccessToken` subscribes to both the in-tab custom event (fired
 // by the refresh interceptor) and the `storage` event (another tab refreshed),
 // so any component that builds a tokenized URL re-renders with the fresh token.
+export function subscribeToTokenChange(onStoreChange: () => void): () => void {
+    window.addEventListener('storage', onStoreChange);
+    window.addEventListener('access_token_changed', onStoreChange);
+    return () => {
+        window.removeEventListener('storage', onStoreChange);
+        window.removeEventListener('access_token_changed', onStoreChange);
+    };
+}
+
+// Stable subscribe fn (module scope): an inline closure re-subscribed on
+// every render, churning add/removeEventListener across the whole app on
+// each store write.
 export function useAccessToken(): string {
     return useSyncExternalStore(
-        (onStoreChange) => {
-            window.addEventListener('storage', onStoreChange);
-            window.addEventListener('access_token_changed', onStoreChange);
-            return () => {
-                window.removeEventListener('storage', onStoreChange);
-                window.removeEventListener('access_token_changed', onStoreChange);
-            };
-        },
+        subscribeToTokenChange,
         () => localStorage.getItem('access_token') || '',
     );
 }
@@ -128,7 +133,9 @@ export type CodeVerificationResponse = AuthResponse | PendingCodeResponse;
 
 // API client — use runtime config (set by index.html) or fallback to /api.
 // Exported so thumbnail/image URL builders share the same origin logic.
-export const API_BASE = (window as any).__BACKEND_URL__ || '';
+// Trailing slashes are stripped: a configured URL like "https://host/"
+// would otherwise produce a double-slash base ("https://host//api").
+export const API_BASE = ((window as any).__BACKEND_URL__ || '').replace(/\/+$/, '');
 export const api = axios.create({
 baseURL: API_BASE + '/api',
 });
@@ -296,9 +303,10 @@ return Promise.reject(error);
 
 // ============== Auth Hooks ==============
 
-export const useCurrentUser = () => {
+export const useCurrentUser = (enabled = true) => {
 return useQuery({
 queryKey: ['currentUser'],
+enabled,
 queryFn: async () => {
 const { data } = await api.get<User>('/auth/me');
 return data;
@@ -462,18 +470,6 @@ onSuccess: () => {
 queryClient.invalidateQueries({ queryKey: ['files'] });
 queryClient.invalidateQueries({ queryKey: ['folders'] });
 queryClient.invalidateQueries({ queryKey: ['folderTree'] });
-},
-});
-};
-
-export const useDeleteFile = () => {
-const queryClient = useQueryClient();
-return useMutation({
-mutationFn: async (id: number) => {
-await api.delete(`/files/${id}`);
-},
-onSuccess: () => {
-queryClient.invalidateQueries({ queryKey: ['files'] });
 },
 });
 };
@@ -802,14 +798,4 @@ if (hours > 0) {
 return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 return `${minutes}:${secs.toString().padStart(2, '0')}`;
-};
-
-export const getFileIcon = (fileType: string): string => {
-switch (fileType) {
-case 'video': return '🎬';
-case 'audio': return '🎵';
-case 'image': return '🖼️';
-case 'document': return '📄';
-default: return '📎';
-}
 };

@@ -6,10 +6,12 @@
  * small on the wire. Dependency-free (node zlib).
  */
 import { gzipSync } from 'node:zlib';
-import { readdirSync, statSync, readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join, extname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const OUT_DIR = new URL('../../backend/app/static/', import.meta.url).pathname;
+// fileURLToPath (not .pathname): paths with spaces/unicode stay intact.
+const OUT_DIR = fileURLToPath(new URL('../../backend/app/static/', import.meta.url));
 
 const COMPRESSIBLE = new Set(['.js', '.css', '.html', '.svg', '.json', '.webmanifest', '.ico', '.txt']);
 
@@ -24,6 +26,9 @@ function walk(dir) {
 }
 
 let count = 0, savedBefore = 0, savedAfter = 0;
+if (!existsSync(OUT_DIR)) {
+  console.log('gzip-assets: output dir missing, skipping');
+} else {
 for (const file of walk(OUT_DIR)) {
   if (!COMPRESSIBLE.has(extname(file))) continue;
   const data = readFileSync(file);
@@ -34,6 +39,7 @@ for (const file of walk(OUT_DIR)) {
   count++;
   savedBefore += data.length;
   savedAfter += gz.length;
+}
 }
 console.log(
   `gzip-assets: ${count} file(s), ${(savedBefore / 1048576).toFixed(2)} MB -> ${(savedAfter / 1048576).toFixed(2)} MB on the wire`
