@@ -15,7 +15,7 @@ function Sidebar({ isOpen, onClose }: SidebarProps) {
     const activeSection = useAppStore((s) => s.activeSection);
     const setActiveSection = useAppStore((s) => s.setActiveSection);
     const setShowAdminPanel = useAppStore((s) => s.setShowAdminPanel);
-    const { data: storage } = useStorageStats();
+    const { data: storage, isError: storageError } = useStorageStats();
     const { data: user } = useCurrentUser();
     const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
     const [showLogoutAllConfirm, setShowLogoutAllConfirm] = useState(false);
@@ -114,6 +114,8 @@ function Sidebar({ isOpen, onClose }: SidebarProps) {
                                 Unlimited Storage <Zap className="w-3 h-3 inline-block text-primary-400" />
                             </div>
                         </>
+                    ) : storageError ? (
+                        <div className="text-xs text-dark-500">Storage unavailable</div>
                     ) : (
                         <div className="h-4 w-20 bg-dark-700 rounded animate-pulse" />
                     )}

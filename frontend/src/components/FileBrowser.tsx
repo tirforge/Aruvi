@@ -82,8 +82,8 @@ export default function FileBrowser() {
     const { data: filesList, isLoading: filesLoading, isError: filesError, refetch: refetchFiles } = useFiles(currentFolderId, fileTypeFilter || undefined, searchQuery || undefined, page, filesSectionActive);
     // Only fetch these when their section is active — otherwise every browse
     // view pays for two extra authorized requests (and refetches on focus).
-    const { data: recentFiles, isLoading: recentLoading, refetch: refetchRecent } = useRecentFiles(50, activeSection === 'recent');
-    const { data: cwFiles, isLoading: cwLoading, refetch: refetchCW } = useContinueWatching(50, activeSection === 'continue_watching');
+    const { data: recentFiles, isLoading: recentLoading, isError: recentError, refetch: refetchRecent } = useRecentFiles(50, activeSection === 'recent');
+    const { data: cwFiles, isLoading: cwLoading, isError: cwError, refetch: refetchCW } = useContinueWatching(50, activeSection === 'continue_watching');
     
 
 
@@ -101,6 +101,16 @@ export default function FileBrowser() {
         displayFiles = allFiles;
         isLoading = filesLoading;
     }
+
+    // A failed fetch must not masquerade as an empty library: without this
+    // the error path fell through to "No files found" with no retry.
+    const sectionError = activeSection === 'files'
+        ? filesError
+        : activeSection === 'recent'
+            ? recentError
+            : activeSection === 'continue_watching'
+                ? cwError
+                : false;
 
     // Folders only show in 'files' mode
     const { data: folders, isLoading: foldersLoading, refetch: refetchFolders } = useFolders(currentFolderId, filesSectionActive);
@@ -261,8 +271,9 @@ export default function FileBrowser() {
             }
         } catch (error) {
             console.error('Paste failed:', error);
+            addToast('Failed to move items', 'error');
         }
-    }, [clipboard, currentFolderId, moveFilesMutation, moveFoldersMutation, setClipboard]);
+    }, [clipboard, currentFolderId, moveFilesMutation, moveFoldersMutation, setClipboard, addToast]);
 
 
     // Selection Box Logic
@@ -425,8 +436,8 @@ export default function FileBrowser() {
     // Keyboard shortcuts
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            // Ignore if input/textarea is focused or player is open
-            if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || previewFile) return;
+            // Ignore if input/textarea/select/contenteditable is focused or player is open
+            if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement || (e.target as HTMLElement)?.isContentEditable || previewFile) return;
 
             // Ctrl+Shift+N - New Folder
             if (e.ctrlKey && e.shiftKey && (e.key === 'N' || e.key === 'n')) {
@@ -752,6 +763,23 @@ export default function FileBrowser() {
                 >
                     {activeSection === 'grab' ? (
 <GrabSearch />
+                    ) : sectionError && !displayFiles?.length ? (
+                        <div className="h-full flex flex-col items-center justify-center text-center pb-20 animate-fade-in">
+                            <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-red-600/15 via-dark-800/60 to-dark-800/40 flex items-center justify-center border border-red-500/15 shadow-glow mb-6">
+                                <RefreshCw className="w-10 h-10 text-red-400" />
+                            </div>
+                            <h3 className="text-xl font-bold text-white mb-2">Couldn't load files</h3>
+                            <p className="text-dark-400 max-w-xs mb-6">
+                                Check your connection and try again
+                            </p>
+                            <button
+                                onClick={handleRefresh}
+                                className="btn-primary py-2 px-5 text-sm flex items-center gap-2"
+                            >
+                                <RefreshCw className="w-4 h-4" />
+                                Retry
+                            </button>
+                        </div>
                     ) : isLoading && !displayFiles?.length ? (
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 animate-fade-in">
                             {[...Array(10)].map((_, i) => (

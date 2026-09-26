@@ -220,9 +220,13 @@ export default function GlobalContextMenu() {
                                             (async () => {
                                                 try {
                                                     const baseUrl = `${window.location.protocol}//${window.location.host}`;
+                                                    // Grabbed files already carry a `?token=` download
+                                                    // link in stream_url — pick the separator so both
+                                                    // tokens don't merge into one malformed value.
+                                                    const sep = f.stream_url.includes('?') ? '&' : '?';
                                                     const url = f.public_stream_url
                                                         ? `${baseUrl}${f.public_stream_url}`
-                                                        : `${baseUrl}${f.stream_url}?token=${await getFileDownloadToken(f.id)}`;
+                                                        : `${baseUrl}${f.stream_url}${sep}token=${encodeURIComponent(await getFileDownloadToken(f.id))}`;
                                                     window.open(`vlc://${url}`, '_blank');
                                                 } catch (err) {
                                                     console.error('Failed to mint stream token:', err);
@@ -239,9 +243,10 @@ export default function GlobalContextMenu() {
                                             (async () => {
                                                 try {
                                                     const baseUrl = `${window.location.protocol}//${window.location.host}`;
+                                                    const sep = f.stream_url.includes('?') ? '&' : '?';
                                                     const url = f.public_stream_url
                                                         ? `${baseUrl}${f.public_stream_url}`
-                                                        : `${baseUrl}${f.stream_url}?token=${await getFileDownloadToken(f.id)}`;
+                                                        : `${baseUrl}${f.stream_url}${sep}token=${encodeURIComponent(await getFileDownloadToken(f.id))}`;
                                                     await navigator.clipboard.writeText(url);
                                                 } catch (err) {
                                                     console.error('Failed to mint stream token:', err);

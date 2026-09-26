@@ -126,8 +126,8 @@ function UserRow({ user, onToggleAdmin, onDelete, togglePending, deletePending }
 }
 
 export default function AdminPanel({ onBack }: { onBack: () => void }) {
-    const { data: stats, isLoading: statsLoading } = useAdminStats();
-    const { data: users, isLoading: usersLoading } = useAdminUsers();
+    const { data: stats, isLoading: statsLoading, isError: statsError } = useAdminStats();
+    const { data: users, isLoading: usersLoading, isError: usersError } = useAdminUsers();
     const toggleAdmin = useToggleAdmin();
     const deleteUser = useDeleteUser();
     const addToast = useAppStore((s) => s.addToast);
@@ -182,6 +182,8 @@ export default function AdminPanel({ onBack }: { onBack: () => void }) {
                         <StatCard icon={HardDrive} label="Storage Used" value={formatFileSize(stats.total_storage_bytes)} />
                         <StatCard icon={Activity} label="Active Today" value={String(stats.active_today)} sub="Last 24 hours" />
                     </div>
+                ) : statsError ? (
+                    <p className="text-red-400 text-sm mb-8">Failed to load stats — check your connection and reopen the panel.</p>
                 ) : null}
 
                 {/* Users */}
@@ -212,6 +214,8 @@ export default function AdminPanel({ onBack }: { onBack: () => void }) {
                                 />
                             ))}
                         </div>
+                    ) : usersError ? (
+                        <p className="text-red-400 text-center py-8">Failed to load users — check your connection and reopen the panel.</p>
                     ) : (
                         <p className="text-dark-400 text-center py-8">No users found</p>
                     )}

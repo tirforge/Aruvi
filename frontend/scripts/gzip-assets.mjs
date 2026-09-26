@@ -6,7 +6,7 @@
  * small on the wire. Dependency-free (node zlib).
  */
 import { gzipSync } from 'node:zlib';
-import { readdirSync, statSync, readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, statSync, readFileSync, writeFileSync, unlinkSync, existsSync } from 'node:fs';
 import { join, extname } from 'node:path';
 
 const OUT_DIR = new URL('../../backend/app/static/', import.meta.url).pathname;
@@ -15,21 +15,46 @@ const COMPRESSIBLE = new Set(['.js', '.css', '.html', '.svg', '.json', '.webmani
 
 function walk(dir) {
   let out = [];
-  for (const entry of readdirSync(dir)) {
+  let entries;
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    // Out dir missing (e.g. build wrote elsewhere) — nothing to compress.
+    return out;
+  }
+  for (const entry of entries) {
     const full = join(dir, entry);
-    if (statSync(full).isDirectory()) out = out.concat(walk(full));
+    let st;
+    try {
+      st = statSync(full);
+    } catch {
+      // Dangling symlink or unreadable entry — skip instead of crashing postbuild.
+      continue;
+    }
+    if (st.isDirectory()) out = out.concat(walk(full));
     else out.push(full);
   }
   return out;
+}
+
+// The backend prefers a stale `file.gz` over the fresh `file` when both
+// exist — so whenever a file is skipped (too small, incompressible), any
+// leftover `.gz` from an earlier build must go or clients get stale bytes.
+function dropStaleGz(file) {
+  try {
+    if (existsSync(file + '.gz')) unlinkSync(file + '.gz');
+  } catch {
+    // Best effort: a leftover .gz is harmless next run, a crash is not.
+  }
 }
 
 let count = 0, savedBefore = 0, savedAfter = 0;
 for (const file of walk(OUT_DIR)) {
   if (!COMPRESSIBLE.has(extname(file))) continue;
   const data = readFileSync(file);
-  if (data.length < 1024) continue; // not worth it, matches backend minimum_size
+  if (data.length < 1024) { dropStaleGz(file); continue; } // not worth it, matches backend minimum_size
   const gz = gzipSync(data, { level: 9 });
-  if (gz.length >= data.length) continue;
+  if (gz.length >= data.length) { dropStaleGz(file); continue; }
   writeFileSync(file + '.gz', gz);
   count++;
   savedBefore += data.length;
