@@ -54,14 +54,14 @@ async def _fetch_continue_watching_payload(user_id: int, limit: int) -> list:
     """Continue-watching payload on its own session (safe for gather)."""
     async with async_session() as session:
         files = await fetch_continue_watching_files(session, user_id, limit)
-        return [add_urls_to_file(f) for f in files]
+        return [add_urls_to_file(f, user_id) for f in files]
 
 
 async def _fetch_recent_payload(user_id: int, limit: int) -> list:
     """Recent-files payload on its own session (safe for gather)."""
     async with async_session() as session:
         files = await fetch_recent_files(session, user_id, limit)
-        return [add_urls_to_file(f) for f in files]
+        return [add_urls_to_file(f, user_id) for f in files]
 
 
 @router.get("/browse")
@@ -129,7 +129,7 @@ async def tv_continue_watching(
 ):
     """Get continue watching list for TV."""
     files = await fetch_continue_watching_files(db, current_user.id, limit)
-    return [add_urls_to_file(f) for f in files]
+    return [add_urls_to_file(f, current_user.id) for f in files]
 
 
 @router.get("/recent")
@@ -140,12 +140,12 @@ async def tv_recent_files(
 ):
     """Get recently added files for TV."""
     files = await fetch_recent_files(db, current_user.id, limit)
-    return [add_urls_to_file(f) for f in files]
+    return [add_urls_to_file(f, current_user.id) for f in files]
 
 
 @router.get("/search")
 async def tv_search(
-    q: str = Query(..., min_length=1),
+    q: str = Query(..., min_length=2, max_length=200),
     limit: int = Query(30, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -179,7 +179,7 @@ async def tv_search(
     folders = folders_result.scalars().all()
 
     return {
-        "files": [add_urls_to_file(f) for f in files],
+        "files": [add_urls_to_file(f, current_user.id) for f in files],
         "folders": [
             {"id": f.id, "name": f.name, "parent_id": f.parent_id} for f in folders
         ],
@@ -290,7 +290,7 @@ async def tv_folder_detail(
             }
             for sf in subfolders
         ],
-        "files": [add_urls_to_file(f) for f in files],
+        "files": [add_urls_to_file(f, current_user.id) for f in files],
         "total_files": total_files,
         "limit": limit,
         "offset": offset,

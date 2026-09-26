@@ -100,7 +100,7 @@ async def list_files(
     files = result.scalars().all()
 
     return FileListResponse(
-        files=[FileResponse(**add_urls_to_file(f)) for f in files],
+        files=[FileResponse(**add_urls_to_file(f, current_user.id)) for f in files],
         total=total,
         page=page,
         per_page=per_page,
@@ -117,7 +117,7 @@ async def get_recent_files(
     files = await fetch_recent_files(db, current_user.id, limit)
 
     return FileListResponse(
-        files=[FileResponse(**add_urls_to_file(f)) for f in files],
+        files=[FileResponse(**add_urls_to_file(f, current_user.id)) for f in files],
         total=len(files),
         page=1,
         per_page=limit,
@@ -134,7 +134,7 @@ async def get_continue_watching(
     files = await fetch_continue_watching_files(db, current_user.id, limit)
 
     return FileListResponse(
-        files=[FileResponse(**add_urls_to_file(f)) for f in files],
+        files=[FileResponse(**add_urls_to_file(f, current_user.id)) for f in files],
         total=len(files),
         page=1,
         per_page=limit,
@@ -174,7 +174,7 @@ async def get_file(
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
 
-    return FileResponse(**add_urls_to_file(file))
+    return FileResponse(**add_urls_to_file(file, current_user.id))
 
 
 @router.patch("/{file_id}", response_model=FileResponse)
@@ -214,12 +214,12 @@ async def update_file(
     # Re-fetch with relationships
     result = await db.execute(
         select(File)
-        .where(File.id == file_id)
+        .where(File.id == file_id, File.user_id == current_user.id)
         .options(selectinload(File.watch_progress))
     )
     file = result.scalar_one()
 
-    return FileResponse(**add_urls_to_file(file))
+    return FileResponse(**add_urls_to_file(file, current_user.id))
 
 
 @router.post("/{file_id}/download-token")
@@ -280,6 +280,8 @@ async def batch_delete_files(
     current_user: User = Depends(get_current_user),
 ):
     """Delete multiple files."""
+    if len(file_ids) > 500:
+        raise HTTPException(status_code=413, detail="Too many files (max 500)")
     # Fetch all files
     result = await db.execute(
         select(File)
@@ -441,12 +443,12 @@ async def share_file(
     # Re-fetch with relationships
     result = await db.execute(
         select(File)
-        .where(File.id == file_id)
+        .where(File.id == file_id, File.user_id == current_user.id)
         .options(selectinload(File.watch_progress))
     )
     file = result.scalar_one()
 
-    return FileResponse(**add_urls_to_file(file))
+    return FileResponse(**add_urls_to_file(file, current_user.id))
 
 
 @router.delete("/{file_id}/share", response_model=FileResponse)
@@ -473,12 +475,12 @@ async def revoke_share(
     # Re-fetch with relationships
     result = await db.execute(
         select(File)
-        .where(File.id == file_id)
+        .where(File.id == file_id, File.user_id == current_user.id)
         .options(selectinload(File.watch_progress))
     )
     file = result.scalar_one()
 
-    return FileResponse(**add_urls_to_file(file))
+    return FileResponse(**add_urls_to_file(file, current_user.id))
 
 
 @router.post("/batch-move")

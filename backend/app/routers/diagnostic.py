@@ -55,7 +55,7 @@ def _get_file_attrs(message) -> tuple[int, str, str] | None:
 @router.get("/bandwidth")
 async def diag_bandwidth(
     request: Request,
-    mb: int = Query(10, ge=1, le=2000, description="Data size in MB"),
+    mb: int = Query(10, ge=1, le=100, description="Data size in MB"),
     chunk: int = Query(65536, ge=4096, le=1048576, description="Chunk size in bytes"),
 ):
     _check_auth(request)
@@ -217,7 +217,7 @@ async def _diag_media_response(
 @router.get("/stream")
 async def diag_stream(
     request: Request,
-    msg: int = Query(..., description="Message ID in the chat"),
+    msg: int = Query(..., ge=1, description="Message ID in the chat"),
     chat: int = Query(None, description="Chat ID (defaults to storage channel)"),
 ):
     return await _diag_media_response(request, msg, chat)
@@ -226,7 +226,7 @@ async def diag_stream(
 @router.head("/stream")
 async def diag_stream_head(
     request: Request,
-    msg: int = Query(..., description="Message ID in the chat"),
+    msg: int = Query(..., ge=1, description="Message ID in the chat"),
     chat: int = Query(None, description="Chat ID (defaults to storage channel)"),
 ):
     return await _diag_media_response(request, msg, chat, head=True)

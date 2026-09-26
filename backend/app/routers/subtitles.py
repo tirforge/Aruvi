@@ -187,7 +187,7 @@ async def _os_search(
         params["episode_number"] = episode
 
     try:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
             r = await client.get(
                 f"{_OS_URL}/subtitles", headers=_os_headers(), params=params
             )
@@ -232,7 +232,7 @@ async def _os_download(sub_id: str, file_id: int | None) -> tuple[str, str]:
             status_code=404, detail="Subtitle has no downloadable file entry"
         )
     try:
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
             r = await client.post(
                 f"{_OS_URL}/download",
                 headers=_os_headers(),
@@ -251,7 +251,15 @@ async def _os_download(sub_id: str, file_id: int | None) -> tuple[str, str]:
                 raise HTTPException(
                     status_code=502, detail="OpenSubtitles returned no download link"
                 )
-            content = (await client.get(link, headers=_os_headers())).content
+            # Never forward our Api-Key to the (possibly third-party) download
+            # host — the link itself is already authorized.
+            dl_resp = await client.get(link)
+            dl_resp.raise_for_status()
+            content = dl_resp.content
+            if len(content) > 1_000_000:
+                raise HTTPException(
+                    status_code=502, detail="Subtitle file too large"
+                )
     except HTTPException:
         raise
     except Exception as exc:
@@ -400,6 +408,10 @@ async def subtitle_content(
             "text": text,
         }
 
+    allowed = set(_subliminal_providers()) | ({"opensubtitlescom"} if _os_enabled() else set())
+    if provider not in allowed:
+        raise HTTPException(status_code=400, detail="Unknown subtitle provider")
+
     _ensure_region()
     try:
         langs = {Language.fromietf(language)}
@@ -440,10 +452,14 @@ async def subtitle_content(
         )
 
     content = target.content or b""
+    if len(content) > 1_000_000:
+        raise HTTPException(status_code=502, detail="Subtitle file too large")
     try:
         text = target.text
     except Exception:
         text = content.decode("utf-8", errors="replace")
+    if len(text) > 1_000_000:
+        raise HTTPException(status_code=502, detail="Subtitle file too large")
 
     fmt = (getattr(target, "format", None) or "srt").lower()
     if fmt not in ("srt", "webvtt"):

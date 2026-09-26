@@ -9,7 +9,11 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-_libc = ctypes.CDLL("libc.so.6")
+_libc = None
+try:
+    _libc = ctypes.CDLL("libc.so.6")
+except OSError:
+    _libc = None
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -76,13 +80,9 @@ async def lifespan(app: FastAPI):
     cleanup_task.cancel()
     startup_task.cancel()
     disk_sweep_task.cancel()
-    try:
-        await oom_task
-        await cleanup_task
-        await startup_task
-        await disk_sweep_task
-    except asyncio.CancelledError:
-        pass
+    await asyncio.gather(
+        oom_task, cleanup_task, startup_task, disk_sweep_task, return_exceptions=True
+    )
 
     logger.info("Shutting down...")
     await stop_telegram_client()
@@ -119,7 +119,11 @@ async def _oom_guard_loop():
 
     def _gc_and_trim():
         gc.collect()
-        _libc.malloc_trim(0)
+        if _libc is not None:
+            try:
+                _libc.malloc_trim(0)
+            except Exception:
+                pass
 
     while True:
         try:
@@ -399,12 +403,23 @@ async def download_page():
 @app.get("/{full_path:path}")
 async def serve_spa(request: Request, full_path: str):
     """Serve the React SPA for any non-API routes."""
-    if full_path == "api" or full_path.startswith("api/") or ".." in full_path:
+    from pathlib import Path as _Path
+
+    if full_path == "api" or full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="Not found")
+    try:
+        static_root = _Path("app/static").resolve()
+        candidate = (static_root / full_path).resolve()
+        if full_path and not str(candidate).startswith(str(static_root)):
+            raise HTTPException(status_code=404, detail="Not found")
+    except HTTPException:
+        raise
+    except Exception:
         raise HTTPException(status_code=404, detail="Not found")
 
     # Stats + precompressed lookups off the event loop (slow disks under
     # load would stall active streams).
-    static_file_path = f"app/static/{full_path}"
+    static_file_path = str(candidate) if full_path else "app/static/index.html"
     import mimetypes
 
     def _resolve():

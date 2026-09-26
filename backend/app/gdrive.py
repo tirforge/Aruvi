@@ -283,12 +283,20 @@ async def upload_streaming(
 
     # ── Phase 1: Download full file to NVMe temp (pipelined byte-accurate) ──
     GDRIVE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = GDRIVE_UPLOAD_DIR / f"{msg.id}_{int(time.time())}.tmp"
+    tmp = GDRIVE_UPLOAD_DIR / f"{msg.id}_{int(time.time())}_{secrets.token_hex(8)}.tmp"
 
+    fd = None
     try:
-        # Pre-allocate temp file
-        with open(tmp, "wb") as f:
-            f.truncate(total)
+        # Create exclusively (O_EXCL|O_NOFOLLOW, 0600) then pre-allocate —
+        # a predictable tmp name + world-readable mode + symlink follow
+        # would let a local attacker pre-create/capture the file.
+        fd = os.open(
+            tmp, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
+        )
+        try:
+            os.ftruncate(fd, total)
+        except OSError:
+            pass
 
         downloaded = 0
         last_ts = 0
@@ -298,7 +306,9 @@ async def upload_streaming(
         # (and the whole service) for the duration of the task-gather. Page
         # cache + one final fsync below gives the same durability without the
         # per-chunk stall.
-        fd = os.open(tmp, os.O_RDWR | os.O_CREAT, 0o644)
+        fd = os.open(
+            tmp, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
+        )
 
         # Split file into 1MB slots — each slot is one _byte_accurate_file_stream call
         SLOT_SIZE = 1024 * 1024
@@ -419,7 +429,9 @@ async def upload_streaming(
                 content=metadata,
             )
             session_resp.raise_for_status()
-            upload_url = session_resp.headers["Location"]
+            upload_url = session_resp.headers.get("Location")
+            if not upload_url:
+                raise RuntimeError("Drive resumable session missing Location header")
 
             uploaded = 0
             last_report = 0

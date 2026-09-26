@@ -86,7 +86,7 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
         if "," in range_header:
             return None
         # Suffix range: bytes=-500 (last N bytes)
-        suffix_match = re.match(r"bytes=-(\d+)", range_header)
+        suffix_match = re.match(r"bytes=-(\d+)\s*$", range_header.strip())
         if suffix_match:
             suffix_len = int(suffix_match.group(1))
             if file_size == 0:
@@ -94,9 +94,9 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
             start = max(0, file_size - suffix_len)
             return start, file_size - 1
 
-        match = re.match(r"bytes=(\d+)-(\d*)", range_header)
+        match = re.match(r"bytes=(\d+)-(\d*)\s*$", range_header.strip())
         if not match:
-            return 0, file_size - 1
+            return None
 
         start = int(match.group(1))
         end = int(match.group(2)) if match.group(2) else file_size - 1
@@ -379,7 +379,7 @@ async def stream_file(
         return Response(status_code=200, content=b"", headers=headers)
 
     # Validate range
-    if (until_bytes > file_size) or (from_bytes < 0) or (from_bytes > until_bytes):
+    if (until_bytes >= file_size) or (from_bytes < 0) or (from_bytes > until_bytes):
         return Response(
             status_code=416,
             content="416: Range not satisfiable",
@@ -644,7 +644,7 @@ async def stream_public_file(
         }
         return Response(status_code=200, content=b"", headers=headers)
 
-    if (until_bytes > file_size) or (from_bytes < 0) or (from_bytes > until_bytes):
+    if (until_bytes >= file_size) or (from_bytes < 0) or (from_bytes > until_bytes):
         return Response(
             status_code=416,
             content="416: Range not satisfiable",

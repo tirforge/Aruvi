@@ -1,13 +1,16 @@
 import asyncio
 import hmac
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 
 def bearer_token_matches(auth_header: str, expected: str) -> bool:
     """Constant-time check that a Authorization header equals 'Bearer <expected>'.
     Debug/diag endpoints guard powerful operations, so the comparison must not
     leak timing information about the secret."""
-    if not expected:
+    if not auth_header or not expected:
         return False
     return hmac.compare_digest(auth_header.encode(), f"Bearer {expected}".encode())
 
@@ -20,7 +23,17 @@ _background_tasks: set[asyncio.Task] = set()
 def spawn_background(coro) -> asyncio.Task:
     task = asyncio.create_task(coro)
     _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+
+    def _log_if_failed(t: asyncio.Task) -> None:
+        _background_tasks.discard(t)
+        try:
+            exc = t.exception()
+        except asyncio.CancelledError:
+            return
+        if exc is not None:
+            logger.warning("background task failed: %s", exc, exc_info=exc)
+
+    task.add_done_callback(_log_if_failed)
     return task
 
 

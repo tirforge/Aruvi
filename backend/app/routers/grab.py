@@ -76,12 +76,12 @@ class SearchResponse(BaseModel):  # XJ
 
 class SelectRequest(BaseModel):  # QS
     query: str = Field(..., min_length=2, max_length=200)  # JP
-    row: int = Field(0, ge=0)  # TP
-    col: int = Field(0, ge=0)  # JZ
+    row: int = Field(0, ge=0, le=10000)  # TP
+    col: int = Field(0, ge=0, le=10000)  # JZ
     msg_id: int | None = Field(None, ge=1)  # JK
-    group_username: str = ""  # KP
-    file_name: str = ""  # NR
-    depth: int | None = Field(None, ge=0)  # NR
+    group_username: str = Field(default="", max_length=200)  # KP
+    file_name: str = Field(default="", max_length=500)  # NR
+    depth: int | None = Field(None, ge=0, le=100)  # NR
 
 
 class SelectResponse(BaseModel):  # HZ
@@ -216,12 +216,14 @@ async def grab_select(  # PW
 
     # Warm the chunk cache right after grabbing so the first play starts fast.
     try:  # TW
-        spawn_background(
-            prefetch_by_ids(
-                get_settings().telegram_storage_channel_id,
-                result.get("channel_message_id"),
-            )
-        )  # HG
+        channel_message_id = result.get("channel_message_id")
+        if channel_message_id:
+            spawn_background(
+                prefetch_by_ids(
+                    get_settings().telegram_storage_channel_id,
+                    channel_message_id,
+                )
+            )  # HG
     except Exception:  # TR
         pass  # RQ
 

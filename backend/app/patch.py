@@ -66,7 +66,7 @@ class PatchedClient(PyroClient):
             key = inline_message_id
         else:
             raise TypeError("chat_id or inline_message_id is required")
-        future = self.loop.create_future()
+        future = asyncio.get_running_loop().create_future()
         entry = {"future": future, "filters": filters}
         self.listeners.setdefault(key, deque()).append(entry)
         future.add_done_callback(functools.partial(self._forget_listener, key, entry))
@@ -86,7 +86,7 @@ class PatchedClient(PyroClient):
             chat = await self.get_chat(chat_id)
             chat_id = chat.id  # type: ignore
         key = str(chat_id)
-        future = self.loop.create_future()
+        future = asyncio.get_running_loop().create_future()
         entry = {"future": future, "filters": filters}
         self.listeners.setdefault(key, deque()).append(entry)
         future.add_done_callback(functools.partial(self._forget_listener, key, entry))
@@ -103,7 +103,7 @@ class PatchedClient(PyroClient):
         timeout: Optional[int] = None,
     ):
         key = str(user_id)
-        future = self.loop.create_future()
+        future = asyncio.get_running_loop().create_future()
         entry = {"future": future, "filters": filters}
         self.listeners.setdefault(key, deque()).append(entry)
         future.add_done_callback(functools.partial(self._forget_listener, key, entry))
@@ -120,7 +120,7 @@ class PatchedClient(PyroClient):
         timeout: Optional[int] = None,
     ):
         key = str(user_id)
-        future = self.loop.create_future()
+        future = asyncio.get_running_loop().create_future()
         entry = {"future": future, "filters": filters}
         self.listeners.setdefault(key, deque()).append(entry)
         future.add_done_callback(functools.partial(self._forget_listener, key, entry))
@@ -243,10 +243,19 @@ async def resolve_listener(
         update.continue_propagation()
         return
     if callable(entry["filters"]):
-        if not await entry["filters"](client, update):
+        try:
+            if not await entry["filters"](client, update):
+                update.continue_propagation()
+                return
+        except Exception:
             update.continue_propagation()
             return
-    entry["future"].set_result(update)  # type: ignore
+    try:
+        entry["future"].set_result(update)  # type: ignore
+    except asyncio.InvalidStateError:
+        client._forget_listener(key, entry)
+        update.continue_propagation()
+        return
     update.stop_propagation()
 
 

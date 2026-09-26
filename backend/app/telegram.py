@@ -641,9 +641,12 @@ async def get_message_from_channel(message_id: int) -> Message:
         ts, msg = _msg_cache[key]
         if now - ts < MSG_CACHE_TTL:
             return msg
-    msg = await tg_client.get_messages(
-        settings.telegram_storage_channel_id,
-        message_id,
+    msg = await asyncio.wait_for(
+        tg_client.get_messages(
+            settings.telegram_storage_channel_id,
+            message_id,
+        ),
+        timeout=15,
     )
     # Don't cache empty/missing messages — a transient fetch failure would
     # otherwise pin a useless (or wrong) result for the full TTL hour.

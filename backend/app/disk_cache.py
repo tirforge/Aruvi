@@ -30,8 +30,8 @@ def _parse_key(dir_name: str) -> tuple[int, int] | None:
     """Parse '{chat_id}_{message_id}' from a movie dir name. chat_id may be
     negative, so split on the LAST underscore."""
     try:
-        mid, cid = dir_name.rsplit("_", 1)
-        return int(mid), int(cid)
+        chat_s, msg_s = dir_name.rsplit("_", 1)
+        return int(chat_s), int(msg_s)
     except (ValueError, AttributeError):
         return None
 
@@ -63,12 +63,16 @@ class DiskChunkCache:
             return frozenset()
         d = self._movie_dir(chat_id, message_id)
         try:
-            return frozenset(
-                int(entry.name[:-4])
-                for entry in os.scandir(d)
-                if entry.is_file() and entry.name.endswith(".bin")
-            )
-        except (OSError, ValueError):
+            out: set[int] = set()
+            for entry in os.scandir(d):
+                if not entry.is_file() or not entry.name.endswith(".bin"):
+                    continue
+                try:
+                    out.add(int(entry.name[:-4]))
+                except ValueError:
+                    continue
+            return frozenset(out)
+        except OSError:
             return frozenset()
 
     def touch(self, chat_id: int, message_id: int):
@@ -182,7 +186,11 @@ class DiskChunkCache:
         now = time.time()
         total = 0
         entries: list[tuple[float, Path, int]] = []
-        for d in self.cache_dir.iterdir():
+        try:
+            top_iter = list(self.cache_dir.iterdir())
+        except OSError:
+            return 0
+        for d in top_iter:
             if not d.is_dir():
                 continue
             key = _parse_key(d.name)
@@ -241,7 +249,11 @@ class DiskChunkCache:
         # Recompute totals now that per-video caps may have shrunk dirs.
         entries = []
         total = 0
-        for d in self.cache_dir.iterdir():
+        try:
+            bottom_iter = list(self.cache_dir.iterdir())
+        except OSError:
+            return 0
+        for d in bottom_iter:
             if not d.is_dir():
                 continue
             key = _parse_key(d.name)
@@ -272,7 +284,11 @@ class DiskChunkCache:
 
     @staticmethod
     def _remove_dir(d: Path):
-        for f in d.iterdir():
+        try:
+            children = list(d.iterdir())
+        except OSError:
+            return
+        for f in children:
             try:
                 f.unlink()
             except OSError:

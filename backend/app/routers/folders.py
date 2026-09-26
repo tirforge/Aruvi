@@ -382,6 +382,8 @@ async def batch_delete_folders(
     current_user: User = Depends(get_current_user),
 ):
     """Delete multiple folders."""
+    if len(folder_ids) > 500:
+        raise HTTPException(status_code=413, detail="Too many folders (max 500)")
     # Fetch all folders
     result = await db.execute(
         select(Folder).where(
@@ -412,10 +414,14 @@ async def batch_delete_folders(
     all_affected_folder_ids = folder_result.scalars().all()
 
     if all_affected_folder_ids:
-        # Get files to delete from Telegram
+        # Get files to delete from Telegram (scoped to owner as defense-in-depth;
+        # all_affected_folder_ids already derives from user-owned folders).
         file_query = (
             select(File)
-            .where(File.folder_id.in_(all_affected_folder_ids))
+            .where(
+                File.folder_id.in_(all_affected_folder_ids),
+                File.user_id == current_user.id,
+            )
             .options(defer(File.thumbnail_data))
         )
         file_result = await db.execute(file_query)
@@ -430,13 +436,19 @@ async def batch_delete_folders(
 
         # Delete files from DB
         await db.execute(
-            sqlalchemy_delete(File).where(File.folder_id.in_(all_affected_folder_ids))
+            sqlalchemy_delete(File).where(
+                File.folder_id.in_(all_affected_folder_ids),
+                File.user_id == current_user.id,
+            )
         )
 
     # Delete all affected folder rows explicitly (ORM cascade only fires for loaded children)
     if all_affected_folder_ids:
         await db.execute(
-            sqlalchemy_delete(Folder).where(Folder.id.in_(all_affected_folder_ids))
+            sqlalchemy_delete(Folder).where(
+                Folder.id.in_(all_affected_folder_ids),
+                Folder.user_id == current_user.id,
+            )
         )
 
     await db.commit()

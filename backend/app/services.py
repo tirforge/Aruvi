@@ -17,12 +17,19 @@ def escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def add_urls_to_file(file: File) -> dict:
+def add_urls_to_file(file: File, user_id: int | None = None) -> dict:
     """Add stream and thumbnail URLs to file response."""
     # Recompute the effective type from mime/extension so pre-migration rows
     # (e.g. .mkv stored as "document") render correctly even before the
     # startup DB reclassification catches up.
     effective_type = classify_file_type(file.file_name, file.mime_type)
+    if user_id is not None:
+        last_pos = next(
+            (w.position for w in (file.watch_progress or []) if w.user_id == user_id),
+            0,
+        )
+    else:
+        last_pos = file.watch_progress[0].position if file.watch_progress else 0
     data = {
         "id": file.id,
         "user_id": file.user_id,
@@ -42,7 +49,7 @@ def add_urls_to_file(file: File) -> dict:
         "thumbnail_url": f"/api/stream/{file.id}/thumbnail"
         if file.thumbnail_file_id
         else None,
-        "last_pos": file.watch_progress[0].position if file.watch_progress else 0,
+        "last_pos": last_pos,
     }
 
     if file.public_hash:

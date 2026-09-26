@@ -9,8 +9,14 @@ import time
 import ctypes
 import uvicorn
 import uvicorn.server as uvs
+from dotenv import load_dotenv
 
-_libc = ctypes.CDLL("libc.so.6")
+load_dotenv()
+
+try:
+    _libc = ctypes.CDLL("libc.so.6")
+except OSError:
+    _libc = None
 _log = logging.getLogger("run")
 
 uvs.Server.capture_signals = lambda self: contextlib.nullcontext()
@@ -30,8 +36,16 @@ async def _periodic_housekeeping():
     """Every 60s: release free memory, evict stale stream caches, prune msg cache."""
     while True:
         await asyncio.sleep(60)
-        gc.collect()
-        _libc.malloc_trim(0)
+
+        def _gc_and_trim():
+            gc.collect()
+            if _libc is not None:
+                try:
+                    _libc.malloc_trim(0)
+                except Exception:
+                    pass
+
+        await asyncio.to_thread(_gc_and_trim)
         try:
             now = time.monotonic()
             # Active streams — never evict
@@ -58,13 +72,19 @@ async def _periodic_housekeeping():
 
 
 config = uvicorn.Config(
-    app, host="0.0.0.0", port=7680, log_level="info", access_log=False
+    app,
+    host="0.0.0.0",
+    port=int(os.environ.get("SERVER_PORT", "7680")),
+    log_level="info",
+    access_log=False,
 )
 server = uvs.Server(config)
 
 
 async def run():
-    asyncio.create_task(_periodic_housekeeping())
+    from app.utils import spawn_background
+
+    spawn_background(_periodic_housekeeping())
     await server.serve()
 
 
