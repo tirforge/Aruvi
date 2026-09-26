@@ -27,12 +27,12 @@ jobs:
           - { os: windows-latest, platform: windows }
     steps:
       - name: Checkout pake toolkit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: tw93/pake
 
       - name: Checkout Aruvi (icon source)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: aruvi
 
