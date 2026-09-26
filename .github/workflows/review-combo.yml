@@ -115,14 +115,19 @@ jobs:
         run: |
           mkdir -p findings
           PR=${{ github.event.pull_request.number }}
-          # 1. opencode review (posted by github-actions bot)
-          gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate \
-            --jq '[.[] | select(.user.login=="github-actions") | .body] | join("\n---\n")' > findings/opencode.md
+          # 1. opencode review (posted by github-actions bot).
+          # Fetch-then-filter with guards: --paginate can emit page arrays
+          # that break --jq object filters, and any API hiccup under bash -e
+          # kills the whole step. So: fetch raw (never fail), then filter
+          # locally with null-safe recursion that handles flat or paged shapes.
+          gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate > findings/issues-raw.json \
+            || echo '[]' > findings/issues-raw.json
+          jq -r '[.. | objects | select(.user?.login=="github-actions") | .body] | join("\n---\n")' findings/issues-raw.json > findings/opencode.md
           # 2. CodeRabbit (issue + inline review comments)
-          gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate \
-            --jq '[.[] | select(.user.login=="coderabbitai[bot]" or .user.login=="coderabbitai") | .body] | join("\n---\n")' > findings/rabbit-main.md
-          gh api "repos/${{ github.repository }}/pulls/$PR/comments" --paginate \
-            --jq '[.[] | select(.user.login=="coderabbitai[bot]" or .user.login=="coderabbitai") | ("`"+.path+":"+([.line,.original_line]|map(values)|join(",")+"` "+.body))] | join("\n---\n")' > findings/rabbit-inline.md
+          jq -r '[.. | objects | select(.user?.login=="coderabbitai[bot]" or .user?.login=="coderabbitai") | .body] | join("\n---\n")' findings/issues-raw.json > findings/rabbit-main.md
+          gh api "repos/${{ github.repository }}/pulls/$PR/comments" --paginate > findings/pull-raw.json \
+            || echo '[]' > findings/pull-raw.json
+          jq -r '[.. | objects | select(.user?.login=="coderabbitai[bot]" or .user?.login=="coderabbitai") | ("`"+(.path // "?")+":"+([.line,.original_line]|map(values)|join(","))+"` "+.body)] | join("\n---\n")' findings/pull-raw.json > findings/rabbit-inline.md
           # 3. SonarCloud open issues on this PR. Download to a file first,
           # then parse — never pipe a download straight into an interpreter.
           # Fallback keeps the job alive if the API is unreachable; empty
