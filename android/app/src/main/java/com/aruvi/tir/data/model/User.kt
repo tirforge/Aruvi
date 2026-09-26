@@ -16,9 +16,9 @@ data class User(
 ) {
     val displayName: String
         get() = when {
-            firstName != null && lastName != null -> "$firstName $lastName"
-            firstName != null -> firstName
-            username != null -> "@$username"
-            else -> "User $telegramId"
+            !firstName.isNullOrBlank() && !lastName.isNullOrBlank() -> "$firstName $lastName"
+            !firstName.isNullOrBlank() -> firstName!!
+            !username.isNullOrBlank() -> "@$username"
+            else -> "User"
         }
 }

@@ -28,6 +28,7 @@ import com.aruvi.tir.ui.theme.*
 /**
  * TV-optimized media card with focus-trail glow, 3D tilt, and type badges.
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun MediaCard(
     file: FileItem,
@@ -164,7 +165,7 @@ private fun FileTypeBadge(
     fileName: String,
     modifier: Modifier = Modifier
 ) {
-    val extension = fileName.substringAfterLast('.', "").lowercase()
+    val extension = fileName.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
     val (icon, color) = when (extension) {
         "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v" ->
             Icons.Default.Movie to TVPrimary
@@ -225,6 +226,7 @@ private fun ResumeBadge(modifier: Modifier = Modifier) {
 /**
  * Large media card variant for featured content.
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun LargeMediaCard(
     file: FileItem,

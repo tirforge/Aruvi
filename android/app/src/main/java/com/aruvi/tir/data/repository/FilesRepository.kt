@@ -50,8 +50,10 @@ class FilesRepository @Inject constructor(
             if (response.isSuccessful) {
                 val body = response.body()
                 if (body != null) Result.success(body) else Result.failure(Exception("Empty response from server"))
-            } else {
+            } else if (response.code() == 404) {
                 Result.failure(Exception("File not found"))
+            } else {
+                Result.failure(Exception("Failed to load file: HTTP ${response.code()}"))
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e

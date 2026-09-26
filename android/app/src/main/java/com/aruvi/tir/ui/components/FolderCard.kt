@@ -22,6 +22,7 @@ import com.aruvi.tir.ui.theme.*
  * TV-optimized folder card with gradient background, animated icon,
  * focus-trail glow, and 3D tilt.
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun FolderCard(
     folder: Folder,
@@ -93,6 +94,7 @@ fun FolderCard(
 /**
  * Horizontal folder card for list view.
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun FolderListItem(
     folder: Folder,

@@ -71,6 +71,10 @@ class DetailsViewModel @Inject constructor(
      * Load file details and watch progress.
      */
     fun loadFileDetails() {
+        if (fileId <= 0) {
+            _uiState.value = _uiState.value.copy(isLoading = false, error = "Invalid file")
+            return
+        }
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
 
@@ -148,14 +152,14 @@ class DetailsViewModel @Inject constructor(
      * Get thumbnail URL.
      */
     fun getThumbnailUrl(): String {
-        return "${_uiState.value.serverUrl}/api/stream/$fileId/thumbnail"
+        return "${_uiState.value.serverUrl.trimEnd('/')}/api/stream/$fileId/thumbnail"
     }
 
     /**
      * Get stream URL.
      */
     fun getStreamUrl(): String {
-        return "${_uiState.value.serverUrl}/api/stream/$fileId"
+        return "${_uiState.value.serverUrl.trimEnd('/')}/api/stream/$fileId"
     }
 
     /**
@@ -248,6 +252,10 @@ class DetailsViewModel @Inject constructor(
                                 val progress = if (task.totalBytes > 0)
                                     (task.downloadedBytes * 100 / task.totalBytes).toInt()
                                 else 0
+                                // FAILED/CANCELLED releases the one-shot guard so the
+                                // Download button works again for a retry.
+                                val terminal = task.status == DownloadStatus.FAILED ||
+                                    task.status == DownloadStatus.CANCELLED
                                 _uiState.value = _uiState.value.copy(
                                     downloadStatus = when (task.status) {
                                         DownloadStatus.RUNNING -> DownloadManager.STATUS_RUNNING
@@ -261,6 +269,8 @@ class DetailsViewModel @Inject constructor(
                                     downloadedBytes = task.downloadedBytes,
                                     totalBytes = task.totalBytes,
                                     downloadSpeed = task.speed,
+                                    downloadStarted = !terminal,
+                                    downloadId = if (terminal) null else _uiState.value.downloadId,
                                     isFileLocal = task.status == DownloadStatus.COMPLETED,
                                     localFilePath = if (task.status == DownloadStatus.COMPLETED) task.localPath else _uiState.value.localFilePath
                                 )

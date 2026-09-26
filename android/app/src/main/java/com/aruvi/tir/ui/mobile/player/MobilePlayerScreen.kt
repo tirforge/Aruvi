@@ -680,7 +680,7 @@ fun MobilePlayerControls(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Slider(
-                        value = currentPosition.toFloat(),
+                        value = currentPosition.toFloat().coerceIn(0f, duration.toFloat().coerceAtLeast(1f)),
                         onValueChange = { onSeek(it.toLong()) },
                         valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
                         colors = SliderDefaults.colors(
@@ -1037,6 +1037,7 @@ fun SettingsItem(
 }
 
 fun formatTime(ms: Long): String {
+    if (ms <= 0) return "0:00"
     val seconds = (ms / 1000) % 60
     val minutes = (ms / (1000 * 60)) % 60
     val hours = (ms / (1000 * 60 * 60))

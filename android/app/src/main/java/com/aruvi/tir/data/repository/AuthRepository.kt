@@ -192,6 +192,8 @@ class AuthRepository @Inject constructor(
     suspend fun logout() {
         try {
             api.logout()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             // Ignore logout API errors
         }

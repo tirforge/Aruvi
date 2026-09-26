@@ -10,6 +10,7 @@ import java.net.UnknownHostException
  * Utility extension to convert technical network/parsing errors into user-friendly messages.
  */
 fun Throwable.toUserFriendlyMessage(): String {
+    if (this is kotlinx.coroutines.CancellationException) throw this
     return when (this) {
         is MalformedJsonException, is JsonSyntaxException -> {
             "Server is waking up or returned invalid data. Please wait 10-20 seconds and try again."

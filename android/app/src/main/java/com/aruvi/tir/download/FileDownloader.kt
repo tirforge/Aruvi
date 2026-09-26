@@ -11,6 +11,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
@@ -84,6 +85,7 @@ class FileDownloader(
      */
     fun enqueue(fileId: Int, fileName: String, url: String, mimeType: String? = null): Long {
         val id = nextId.getAndIncrement()
+        val safeName = sanitizeFileName(fileName)
 
         // Register the task immediately so the UI sees it; the MediaStore
         // insert (a provider round-trip) happens off the caller thread —
@@ -91,7 +93,7 @@ class FileDownloader(
         val task = DownloadTask(
             id = id,
             fileId = fileId,
-            fileName = fileName,
+            fileName = safeName,
             url = url,
             mimeType = mimeType,
             status = DownloadStatus.PENDING,
@@ -100,7 +102,10 @@ class FileDownloader(
         updateTask(task)
 
         scope.launch(Dispatchers.IO) {
-            val ready = task.copy(localPath = createDestination(fileName, mimeType))
+            // A pause/cancel issued before the destination was ready must win;
+            // otherwise startDownload() would resurrect the task.
+            if (_tasks.value[id]?.status != DownloadStatus.PENDING) return@launch
+            val ready = task.copy(localPath = createDestination(safeName, mimeType))
             updateTask(ready)
             // Start foreground service to keep downloads alive in background
             try { DownloadService.start(context) } catch (_: Exception) {}
@@ -108,6 +113,17 @@ class FileDownloader(
         }
 
         return id
+    }
+
+    /**
+     * Strip path components and replace separators so a server-supplied
+     * fileName can never escape the Downloads directory (../ traversal)
+     * or create hidden subdirectories.
+     */
+    private fun sanitizeFileName(name: String): String {
+        val base = name.substringAfterLast('/').substringAfterLast('\\').trim()
+        val cleaned = base.replace(Regex("[/\\\\]"), "_").trim('.', ' ')
+        return cleaned.ifBlank { "download" }.take(255)
     }
 
     /**
@@ -191,6 +207,8 @@ class FileDownloader(
     fun resume(id: Long) {
         val task = _tasks.value[id] ?: return
         if (task.status != DownloadStatus.PAUSED && task.status != DownloadStatus.FAILED) return
+        activeJobs[id]?.cancel()
+        activeJobs.remove(id)
 
         // existingBytes() stats the partial file (disk / content provider) —
         // keep that off the main thread.
@@ -220,9 +238,7 @@ class FileDownloader(
         lastTimeMap.remove(id)
 
         val task = _tasks.value[id]
-        val currentTasks = _tasks.value.toMutableMap()
-        currentTasks.remove(id)
-        _tasks.value = currentTasks
+        _tasks.update { current -> current - id }
 
         // Delete the (possibly partial) file off the main thread
         if (task != null && task.status != DownloadStatus.COMPLETED) {
@@ -234,10 +250,14 @@ class FileDownloader(
      * Delete a completed download's file.
      */
     fun deleteFile(id: Long) {
+        // Stop any in-flight writer first; otherwise the coroutine keeps
+        // writing to the deleted destination and re-adds the task (zombie).
+        activeJobs[id]?.cancel()
+        activeJobs.remove(id)
+        lastBytesMap.remove(id)
+        lastTimeMap.remove(id)
         val task = _tasks.value[id] ?: return
-        val currentTasks = _tasks.value.toMutableMap()
-        currentTasks.remove(id)
-        _tasks.value = currentTasks
+        _tasks.update { current -> current - id }
         scope.launch(Dispatchers.IO) { deleteDestination(task) }
     }
 
@@ -247,6 +267,8 @@ class FileDownloader(
      * connection keeps making progress instead of dying after a few MB.
      */
     private fun startDownload(task: DownloadTask) {
+        // Never run two writers for the same task (double-resume corrupts the file).
+        activeJobs[task.id]?.cancel()
         val job = scope.launch(Dispatchers.IO) {
             try {
                 var attempt = 0
@@ -309,11 +331,23 @@ class FileDownloader(
         }
 
         try {
-            val response = okHttpClient.newCall(requestBuilder.build()).execute()
+            okHttpClient.newCall(requestBuilder.build()).execute().use { response ->
 
             if (!response.isSuccessful && response.code != 206) {
+                if (response.code == 416) {
+                    // Stale Range (server file changed): drop the partial bytes and
+                    // restart from 0. For MediaStore rows the URI must be kept —
+                    // truncating preserves it; deleting would orphan the task.
+                    if (contentUri != null) {
+                        try {
+                            context.contentResolver.openFileDescriptor(Uri.parse(contentUri), "w")?.close()
+                        } catch (_: Exception) {}
+                    } else {
+                        deleteDestination(task)
+                    }
+                    throw DownloadRetryableException("HTTP 416: range unsatisfiable, restarting")
+                }
                 val retryable = response.code == 429 || response.code >= 500
-                response.close()
                 if (retryable) {
                     throw DownloadRetryableException("HTTP ${response.code}: ${response.message}")
                 }
@@ -384,7 +418,12 @@ class FileDownloader(
                         val bytesRead = stream.read(buffer)
                         if (bytesRead == -1) break
 
-                        channel.write(java.nio.ByteBuffer.wrap(buffer, 0, bytesRead))
+                        // FileChannel.write may write fewer bytes than remaining;
+                        // loop until the whole chunk is persisted.
+                        val byteBuf = java.nio.ByteBuffer.wrap(buffer, 0, bytesRead)
+                        while (byteBuf.hasRemaining()) {
+                            channel.write(byteBuf)
+                        }
                         bytesWritten += bytesRead
 
                         // Throttle UI updates to every 500ms to avoid excessive StateFlow emissions
@@ -410,8 +449,6 @@ class FileDownloader(
                 }
             }
 
-            response.close()
-
             // Check if completed or cancelled
             if (!coroutineContext.isActive) return false
 
@@ -430,6 +467,7 @@ class FileDownloader(
                 speed = 0L
             ) ?: return false)
             return true
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: IOException) {
@@ -440,6 +478,6 @@ class FileDownloader(
     }
 
     private fun updateTask(task: DownloadTask) {
-        _tasks.value = _tasks.value + (task.id to task)
+        _tasks.update { current -> current + (task.id to task) }
     }
 }

@@ -37,7 +37,8 @@ data class FileItem(
         get() {
             if (fileSize <= 0) return "0 B"
             val units = arrayOf("B", "KB", "MB", "GB", "TB")
-            val digitGroups = (log10(fileSize.toDouble()) / log10(1024.0)).toInt()
+            val digitGroups = ((log10(fileSize.toDouble()) / log10(1024.0)).toInt())
+                .coerceIn(0, units.size - 1)
             return DecimalFormat("#,##0.#").format(
                 fileSize / 1024.0.pow(digitGroups.toDouble())
             ) + " " + units[digitGroups]
@@ -76,13 +77,13 @@ data class FileItem(
      * Check if this is a video file.
      */
     val isVideo: Boolean
-        get() = fileType == "video" || mimeType?.startsWith("video/") == true
+        get() = fileType.equals("video", ignoreCase = true) || mimeType?.startsWith("video/", ignoreCase = true) == true
 
     /**
      * Check if this is an audio file.
      */
     val isAudio: Boolean
-        get() = fileType == "audio" || mimeType?.startsWith("audio/") == true
+        get() = fileType.equals("audio", ignoreCase = true) || mimeType?.startsWith("audio/", ignoreCase = true) == true
 
     /**
      * Check if this is playable media (video or audio).
@@ -96,7 +97,7 @@ data class FileItem(
     val progressPercent: Float
         get() {
             val prog = watchProgress ?: return 0f
-            val dur = duration ?: return 0f
+            val dur = duration?.takeIf { it.isFinite() } ?: return 0f
             if (dur <= 0.0) return 0f
             return (prog.toFloat() / dur.toFloat() * 100f).coerceIn(0f, 100f)
         }
@@ -106,8 +107,8 @@ data class FileItem(
  * Paginated response wrapper for files.
  */
 data class PaginatedResponse<T>(
-    @SerializedName("files") val items: List<T>,
-    @SerializedName("total") val total: Int,
-    @SerializedName("page") val page: Int,
-    @SerializedName("per_page") val perPage: Int
+    @SerializedName("files") val items: List<T> = emptyList(),
+    @SerializedName("total") val total: Int = 0,
+    @SerializedName("page") val page: Int = 0,
+    @SerializedName("per_page") val perPage: Int = 0
 )

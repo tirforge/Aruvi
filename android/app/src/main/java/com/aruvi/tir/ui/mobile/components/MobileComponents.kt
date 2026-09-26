@@ -107,12 +107,12 @@ fun FolderOptionsButton(onDelete: () -> Unit, onMove: () -> Unit) {
 
 @Composable
 fun InputDialog(title: String, initialValue: String = "", onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
-    var text by remember { mutableStateOf(initialValue) }
+    var text by remember(initialValue) { mutableStateOf(initialValue) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = { OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true) },
-        confirmButton = { TextButton(onClick = { onConfirm(text) }) { Text("Confirm") } },
+        confirmButton = { TextButton(onClick = { if (text.isNotBlank()) onConfirm(text.trim()) }, enabled = text.isNotBlank()) { Text("Confirm") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
@@ -131,11 +131,18 @@ fun MovePickerDialog(
     var error by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        val tree = loadFolderTree()
-        rootTree = tree
-        isLoading = false
-        if (tree.isEmpty()) {
-            error = "No folders found"
+        try {
+            val tree = loadFolderTree()
+            rootTree = tree
+            if (tree.isEmpty()) {
+                error = "No folders found"
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            error = e.message ?: "Failed to load folders"
+        } finally {
+            isLoading = false
         }
     }
 

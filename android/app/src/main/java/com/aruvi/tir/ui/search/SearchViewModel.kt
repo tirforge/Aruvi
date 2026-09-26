@@ -83,6 +83,7 @@ class SearchViewModel @Inject constructor(
                 search(query)
             } else {
                 _uiState.value = _uiState.value.copy(
+                    isSearching = false,
                     results = emptyList(),
                     hasSearched = false
                 )
@@ -95,24 +96,30 @@ class SearchViewModel @Inject constructor(
      */
     private suspend fun search(query: String) {
         _uiState.value = _uiState.value.copy(isSearching = true, error = null)
-
-        val result = filesRepository.searchFiles(query, limit = 50)
-        result.fold(
-            onSuccess = { files ->
-                _uiState.value = _uiState.value.copy(
-                    isSearching = false,
-                    results = files,
-                    hasSearched = true
-                )
-            },
-            onFailure = { e ->
-                _uiState.value = _uiState.value.copy(
-                    isSearching = false,
-                    error = e.message ?: "Search failed",
-                    hasSearched = true
-                )
-            }
-        )
+        try {
+            val result = filesRepository.searchFiles(query, limit = 50)
+            // Drop stale results if the query changed while we were in flight.
+            if (query != _uiState.value.query) return
+            result.fold(
+                onSuccess = { files ->
+                    _uiState.value = _uiState.value.copy(
+                        isSearching = false,
+                        results = files,
+                        hasSearched = true
+                    )
+                },
+                onFailure = { e ->
+                    _uiState.value = _uiState.value.copy(
+                        isSearching = false,
+                        error = e.message ?: "Search failed",
+                        hasSearched = true
+                    )
+                }
+            )
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            _uiState.value = _uiState.value.copy(isSearching = false)
+            throw e
+        }
     }
 
     /**
@@ -183,8 +190,8 @@ class SearchViewModel @Inject constructor(
             
             try {
                 val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-                    setDataAndType(android.net.Uri.parse(streamUrl), "video/*")
-                    flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                    setDataAndType(android.net.Uri.parse(streamUrl), file.mimeType ?: "video/*")
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 context.startActivity(intent)
             } catch (e: Exception) {

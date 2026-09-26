@@ -22,3 +22,12 @@ mirrorbot-work/
 
 # Release APK copies
 dist/
+
+# Secrets / signing material — never commit
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+google-services.json
+.env

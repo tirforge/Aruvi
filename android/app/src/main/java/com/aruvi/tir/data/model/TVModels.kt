@@ -10,9 +10,9 @@ import com.google.gson.annotations.SerializedName
  * TV Browse response - returns all data needed for home screen in one call.
  */
 data class TVBrowseResponse(
-    @SerializedName("continue_watching") val continueWatching: List<FileItem>,
-    @SerializedName("recent") val recentFiles: List<FileItem>,
-    @SerializedName("folders") val folders: List<Folder>
+    @SerializedName("continue_watching") val continueWatching: List<FileItem> = emptyList(),
+    @SerializedName("recent") val recentFiles: List<FileItem> = emptyList(),
+    @SerializedName("folders") val folders: List<Folder> = emptyList()
 )
 
 /**

@@ -19,7 +19,7 @@ data class WatchProgress(
      */
     val formattedPosition: String
         get() {
-            val seconds = position
+            val seconds = position.coerceAtLeast(0)
             val hours = seconds / 3600
             val minutes = (seconds % 3600) / 60
             val secs = seconds % 60
@@ -36,8 +36,8 @@ data class WatchProgress(
     val progressPercent: Float
         get() {
             val dur = duration ?: return 0f
-            if (dur == 0) return 0f
-            return (position.toFloat() / dur.toFloat() * 100f).coerceIn(0f, 100f)
+            if (dur <= 0) return 0f
+            return (position.coerceAtLeast(0).toFloat() / dur.toFloat() * 100f).coerceIn(0f, 100f)
         }
 }
 

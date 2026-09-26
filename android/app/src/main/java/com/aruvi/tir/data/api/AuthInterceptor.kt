@@ -20,9 +20,9 @@ class AuthInterceptor @Inject constructor(
 
         // Skip auth for login endpoints
         val path = originalRequest.url.encodedPath
-        if (path.contains("/auth/generate-code") ||
-            path.contains("/auth/verify-code") ||
-            path.contains("/auth/refresh")) {
+        if (path.endsWith("/auth/generate-code") ||
+            path.endsWith("/auth/verify-code") ||
+            path.endsWith("/auth/refresh")) {
             return chain.proceed(originalRequest)
         }
 

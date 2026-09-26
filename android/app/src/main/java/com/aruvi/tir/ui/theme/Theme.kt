@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.aruvi.tir.ui.mobile.findActivity
 
 private val DarkColorScheme = darkColorScheme(
     primary = TVPrimary,
@@ -86,11 +87,13 @@ fun TelePlayMobileTheme(
 
     if (!view.isInEditMode) {
         androidx.compose.runtime.SideEffect {
-            val window = (view.context as android.app.Activity).window
-            window.statusBarColor = android.graphics.Color.TRANSPARENT
-            window.navigationBarColor = android.graphics.Color.TRANSPARENT
-            androidx.core.view.WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
-            androidx.core.view.WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = false
+            val activity = view.context.findActivity() as? android.app.Activity
+            activity?.window?.let { window ->
+                window.statusBarColor = android.graphics.Color.TRANSPARENT
+                window.navigationBarColor = android.graphics.Color.TRANSPARENT
+                androidx.core.view.WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
+                androidx.core.view.WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = false
+            }
         }
     }
 
