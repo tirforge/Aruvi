@@ -1,7 +1,7 @@
 # TelePlay Backend
 
 # Telegram MTProto Client (Kurigram — drop-in Pyrogram fork)
-kurigram[fast]>=2.2.23
+kurigram[fast]>=2.2.26
 
 # Web Framework
 fastapi>=0.109.0
