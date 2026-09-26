@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 import secrets
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete, update
+from sqlalchemy import select, func, update
 from sqlalchemy.orm import selectinload, defer
 
 from ..database import get_db

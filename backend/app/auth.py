@@ -15,7 +15,6 @@ from sqlalchemy import select, update
 from .config import get_settings
 from .database import get_db
 from .models import User
-from .schemas import TokenPayload
 
 
 def _utcnow():

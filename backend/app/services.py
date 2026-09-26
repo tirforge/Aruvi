@@ -1,13 +1,13 @@
 """
 Shared business logic and database queries.
 """
-from typing import List, Optional
+from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from sqlalchemy.orm import selectinload
 
-from .models import File, WatchProgress, Folder
-from sqlalchemy.orm import selectinload, defer
+from .models import File, WatchProgress
+from sqlalchemy.orm import defer
 from .media_types import classify_file_type
 
 def escape_like(value: str) -> str:
@@ -67,7 +67,7 @@ async def fetch_continue_watching_files(db: AsyncSession, user_id: int, limit: i
             File.user_id == user_id,
             WatchProgress.user_id == user_id,
             WatchProgress.position > 0,
-            WatchProgress.completed == False
+            WatchProgress.completed.is_(False)
         )
         .options(selectinload(File.watch_progress), defer(File.thumbnail_data))
         .order_by(desc(WatchProgress.updated_at))

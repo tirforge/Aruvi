@@ -1,0 +1,23 @@
+name: Ruff
+
+# Free Python lint review: pycodestyle errors + pyflakes on the backend.
+# Rules live in backend/pyproject.toml (tight set on purpose — see comments).
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Ruff
+        run: pip install "ruff==0.16.9"
+
+      - name: Lint backend
+        run: ruff check backend/app

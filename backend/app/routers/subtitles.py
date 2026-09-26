@@ -255,7 +255,7 @@ async def search_subtitles(
         # guessit is pure-Python and slow (100-500 ms on long release names) —
         # never run it on the event loop.
         info = await asyncio.to_thread(_guessit, file.file_name)
-    except Exception as exc:
+    except Exception:
         raise HTTPException(status_code=422, detail="Could not parse a title from this file name")
 
     title = info.get("title") or info.get("series")
@@ -356,7 +356,7 @@ async def subtitle_content(
 
     try:
         video = await asyncio.to_thread(_video_from_name, file.file_name)
-    except Exception as exc:
+    except Exception:
         raise HTTPException(status_code=422, detail="Could not parse a title from this file name")
 
     try:

@@ -61,7 +61,7 @@ def format_duration(seconds: int) -> str:
     return f"{minutes}m {secs}s"
 
 
-from .utils import sanitize_filename, md_safe  # noqa: re-export for backward compat
+from .utils import sanitize_filename, md_safe  # noqa: F401  # re-export for backward compat
 
 
 
@@ -699,7 +699,7 @@ async def handle_file(client, message: Message):
         if file_info['duration']:
             response += f"⏱ Duration: {format_duration(file_info['duration'])}\n"
         
-        response += f"\n📁 Folder: / (root)\n\n"
+        response += "\n📁 Folder: / (root)\n\n"
         response += f"💡 Use `/file {file.id}` to manage this file"
         
         await status_msg.edit(

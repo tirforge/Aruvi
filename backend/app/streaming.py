@@ -6,10 +6,8 @@ import asyncio
 import ctypes
 import gc
 import os
-import re
 import sys
 import time
-import traceback
 import logging
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -284,7 +282,7 @@ def get_forward_snapshot() -> list[dict]:
 
 
 from pyrogram import Client
-from pyrogram.file_id import FileId, FileType
+from pyrogram.file_id import FileId
 from pyrogram.errors import FileReferenceExpired, FileReferenceInvalid, AuthKeyUnregistered, AuthBytesInvalid
 
 from .telegram import clients, reconnect_client
@@ -1069,7 +1067,7 @@ async def prefetch_by_ids(chat_id: int, message_id: int, from_bytes: int = 0):
     for prefetch_client in ordered:
         try:
             c_idx = getattr(prefetch_client, "pool_index", 0)
-            sem = get_client_semaphore(c_idx)
+            get_client_semaphore(c_idx)  # ensure it exists; get_messages needs no slot (see below)
             # get_messages is an RPC on the main session — no need to hold the
             # media-session semaphore for it (and the cache avoids flood-waits).
             msg = await _fetch_message(prefetch_client, chat_id, message_id)
@@ -1103,7 +1101,6 @@ async def parallel_stream_generator(
     Each worker uses its own client and fetches its own Message object
     to avoid cross-bot FILE_REFERENCE_INVALID errors.
     """
-    pool_size = len(clients)
     if concurrency is None:
         concurrency = max(1, sum(1 for c in clients if c.is_connected))
 
@@ -1292,7 +1289,6 @@ async def parallel_stream_generator(
         """Fetch a single chunk, forward-caching it on success. Stops after timeout."""
         if timeout is None:
             timeout = STREAM_CHUNK_TIMEOUT_S
-        t0 = time.perf_counter()
         # Same ordering as _fetch_batch: cooldown → transmission slot → session
         # lock, so a busy bot's semaphore never stalls the global lock.
         dc_id = _msg_dc_id(msg)

@@ -1,15 +1,14 @@
 """
 TV-specific API endpoints optimized for Android TV clients.
 """
-from typing import List
 import asyncio
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, func, text
+from sqlalchemy import select, desc, func
 from sqlalchemy.orm import selectinload, defer
 
 from ..database import get_db, async_session
-from ..models import File, User, Folder, WatchProgress
+from ..models import File, User, Folder
 from ..auth import get_current_user
 from ..config import get_settings
 from ..services import (
