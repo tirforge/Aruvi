@@ -120,12 +120,16 @@ class DetailsViewModel @Inject constructor(
      * Disk access — dispatched to IO (caller runs on Main).
      */
     private fun checkLocalFile(fileName: String) {
+        // fileName is server-controlled — strip path separators/traversal so
+        // File(downloadsDir, fileName) cannot escape Downloads.
+        val safeName = fileName.substringAfterLast('/').substringAfterLast('\\')
+            .replace("..", "_").trim().ifBlank { return }
         viewModelScope.launch {
             val localFile = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 val downloadsDir = Environment.getExternalStoragePublicDirectory(
                     Environment.DIRECTORY_DOWNLOADS
                 )
-                File(downloadsDir, fileName).takeIf { it.exists() && it.length() > 0 }
+                File(downloadsDir, safeName).takeIf { it.exists() && it.length() > 0 }
             }
             if (localFile != null) {
                 _uiState.value = _uiState.value.copy(
@@ -214,7 +218,7 @@ class DetailsViewModel @Inject constructor(
         val units = arrayOf("B", "KB", "MB", "GB", "TB")
         val digitGroups = (Math.log(bytes.toDouble()) / Math.log(1024.0)).toInt()
         val index = digitGroups.coerceIn(0, units.size - 1)
-        return "%.1f %s".format(bytes / Math.pow(1024.0, index.toDouble()), units[index])
+        return "%.1f %s".format(java.util.Locale.US, bytes / Math.pow(1024.0, index.toDouble()), units[index])
     }
 
     /**

@@ -972,7 +972,11 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                         null
                     }
                     var foundUri: Uri? = null
-                    val legacyFile = downloadsDir?.let { File(it, file.fileName) }
+                    // fileName is server-controlled — sanitize so the legacy
+                    // File() lookup cannot escape Downloads via "../".
+                    val safeFileName = file.fileName.substringAfterLast('/').substringAfterLast('\\')
+                        .replace("..", "_").trim()
+                    val legacyFile = downloadsDir?.let { File(it, safeFileName) }
                     if (legacyFile != null && legacyFile.exists() && legacyFile.length() > 0) {
                         foundUri = Uri.fromFile(legacyFile)
                     } else if (Build.VERSION.SDK_INT >= 29) {
@@ -1113,6 +1117,15 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
 
+            // Only hand http(s) URLs to external apps — a compromised server
+            // or nav arg could otherwise inject intent://, content:// or
+            // file:// targets (confused-deputy open).
+            val scheme = intent.data?.scheme?.lowercase()
+            if (scheme != "http" && scheme != "https") {
+                Toast.makeText(context, "Invalid stream URL", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+
             if (context.packageManager.resolveActivity(intent, 0) == null) {
                 Toast.makeText(context, "No external player found", Toast.LENGTH_SHORT).show()
                 return@launch
@@ -1143,6 +1156,10 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
             try { exoPlayer.pause() } catch (_: Throwable) {}
             try { exoPlayer.playWhenReady = false } catch (_: Throwable) {}
             try { exoPlayer.volume = 0f } catch (_: Throwable) {}
+
+            // Snapshot of the current file (used below for MKV detection,
+            // title and thumbnail). Must be declared before first use.
+            val file = _uiState.value.file
 
             // Prefer the public, unauthenticated stream URL so the Chromecast
             // receiver can fetch it directly (it cannot send bearer tokens or
@@ -1179,7 +1196,6 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 }
             }
 
-            val file = _uiState.value.file
             val title = file?.fileName ?: "Aruvi"
 
             // Thumbnails are also fetched by the receiver, so pass the token as
@@ -1354,7 +1370,10 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 // Never swallow cast-load failures silently: a rejected load
                 // leaves the receiver idle ("no media selected") with no clue
                 // why. Surface it in logcat under the cast tag.
-                android.util.Log.w("PlayerViewModel", "castToDevice load failed url=$url", e)
+                // NOTE: url contains ?token=<JWT> — never log it verbatim.
+                val safeUrl = url.substringBefore("?token=") +
+                    if (url.contains("?token=")) "?token=REDACTED" else ""
+                android.util.Log.w("PlayerViewModel", "castToDevice load failed url=$safeUrl", e)
             }
         }
     }

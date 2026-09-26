@@ -112,7 +112,14 @@ fun InputDialog(title: String, initialValue: String = "", onDismiss: () -> Unit,
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = { OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true) },
-        confirmButton = { TextButton(onClick = { onConfirm(text) }) { Text("Confirm") } },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(text.trim()) },
+                // Blank rename/create would only fail with a backend 400 —
+                // disable up-front.
+                enabled = text.isNotBlank()
+            ) { Text("Confirm") }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }

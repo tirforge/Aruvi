@@ -61,7 +61,13 @@ class MobileHomeViewModel @Inject constructor(
         viewModelScope.launch {
             savedStateHandle.getStateFlow<Int?>("folderId", null).collect { folderId ->
                 val id = if (folderId == -1) null else folderId
-                val name = savedStateHandle.get<String>("folderName") ?: "Home"
+                // folderName is Uri.encode()d on navigate — decode for display.
+                val rawName = savedStateHandle.get<String>("folderName") ?: "Home"
+                val name = try {
+                    android.net.Uri.decode(rawName) ?: rawName
+                } catch (_: Exception) {
+                    rawName
+                }
 
                 // If the folderId changed and it's not the current one, load it
                 if (id != _uiState.value.currentFolderId) {

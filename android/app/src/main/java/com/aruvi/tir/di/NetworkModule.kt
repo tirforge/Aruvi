@@ -41,8 +41,14 @@ object NetworkModule {
         // - NO body logging (Level.BODY buffers entire response into memory, killing large downloads)
         // - Longer read timeout for large files
         // - Auth interceptor for automatic token handling
+        // HEADERS logging would print ?token= URLs verbatim in release —
+        // keep it DEBUG-only.
         val downloadLogging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.HEADERS
+            level = if (BuildConfig.DEBUG) {
+                HttpLoggingInterceptor.Level.HEADERS
+            } else {
+                HttpLoggingInterceptor.Level.NONE
+            }
             redactHeader("Authorization")
         }
         val downloadClient = OkHttpClient.Builder()

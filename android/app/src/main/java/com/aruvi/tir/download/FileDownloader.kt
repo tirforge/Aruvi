@@ -11,6 +11,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
@@ -116,9 +117,10 @@ class FileDownloader(
      * legacy raw file path is used.
      */
     private fun createDestination(fileName: String, mimeType: String?): String {
+        val safeName = sanitizeFileName(fileName)
         if (Build.VERSION.SDK_INT >= 29) {
             val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                put(MediaStore.Downloads.DISPLAY_NAME, safeName)
                 put(MediaStore.Downloads.MIME_TYPE, mimeType)
                 put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                 put(MediaStore.Downloads.IS_PENDING, 1)
@@ -128,7 +130,18 @@ class FileDownloader(
             )
             if (uri != null) return uri.toString()
         }
-        return legacyPath(fileName)
+        return legacyPath(safeName)
+    }
+
+    /**
+     * Strip path traversal / separator characters from server-controlled
+     * file names ("../", "/", absolute paths). Minimal: keep the base name
+     * only, replacing separators with "_".
+     */
+    private fun sanitizeFileName(raw: String): String {
+        val base = raw.substringAfterLast('/').substringAfterLast('\\')
+        val cleaned = base.replace("..", "_").trim().ifBlank { "download" }
+        return cleaned.take(255)
     }
 
     private fun legacyPath(fileName: String): String =
@@ -220,9 +233,7 @@ class FileDownloader(
         lastTimeMap.remove(id)
 
         val task = _tasks.value[id]
-        val currentTasks = _tasks.value.toMutableMap()
-        currentTasks.remove(id)
-        _tasks.value = currentTasks
+        _tasks.update { current -> current - id }
 
         // Delete the (possibly partial) file off the main thread
         if (task != null && task.status != DownloadStatus.COMPLETED) {
@@ -235,9 +246,7 @@ class FileDownloader(
      */
     fun deleteFile(id: Long) {
         val task = _tasks.value[id] ?: return
-        val currentTasks = _tasks.value.toMutableMap()
-        currentTasks.remove(id)
-        _tasks.value = currentTasks
+        _tasks.update { current -> current - id }
         scope.launch(Dispatchers.IO) { deleteDestination(task) }
     }
 
@@ -325,6 +334,7 @@ class FileDownloader(
             }
 
             val body = response.body ?: run {
+                response.close()
                 updateTask(task.copy(
                     status = DownloadStatus.FAILED,
                     error = "Empty response body"
@@ -355,10 +365,16 @@ class FileDownloader(
             val output: java.nio.channels.FileChannel = if (contentUri != null) {
                 val pfd = context.contentResolver.openFileDescriptor(
                     Uri.parse(contentUri), if (startOffset > 0) "rw" else "w"
-                ) ?: return false
+                ) ?: run {
+                    response.close()
+                    return false
+                }
                 java.io.FileOutputStream(pfd.fileDescriptor).channel
             } else {
-                val file = File(task.localPath ?: return false)
+                val file = File(task.localPath ?: run {
+                    response.close()
+                    return false
+                })
                 file.parentFile?.mkdirs()
                 val channel = RandomAccessFile(file, "rw").channel
                 // A full 200 response overwrites from the start - truncate any stale
@@ -440,6 +456,6 @@ class FileDownloader(
     }
 
     private fun updateTask(task: DownloadTask) {
-        _tasks.value = _tasks.value + (task.id to task)
+        _tasks.update { current -> current + (task.id to task) }
     }
 }

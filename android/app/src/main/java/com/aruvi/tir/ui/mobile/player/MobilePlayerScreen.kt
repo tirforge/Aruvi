@@ -127,7 +127,7 @@ fun MobilePlayerScreen(
         onDispose {
             activity?.requestedOrientation = originalOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             if (window != null) {
-                WindowCompat.setDecorFitsSystemWindows(window, false)
+                WindowCompat.setDecorFitsSystemWindows(window, true)
                 window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 val insetsController = WindowCompat.getInsetsController(window, window.decorView)
                 insetsController.show(WindowInsetsCompat.Type.systemBars())

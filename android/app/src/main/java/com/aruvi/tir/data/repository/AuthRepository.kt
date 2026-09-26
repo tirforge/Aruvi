@@ -116,12 +116,17 @@ class AuthRepository @Inject constructor(
                         saveTokens(body.accessToken, body.refreshToken)
                         body.accessToken
                     } else {
-                        clearAuth()
+                        // Empty body on success is transient — keep existing
+                        // tokens so a later refresh can retry.
                         null
                     }
                 } else {
-                    // Refresh rejected (invalid/expired session) - clear auth
-                    clearAuth()
+                    // Only clear auth when the server definitively rejects the
+                    // session (401/403). Rate-limits (429) and transient 5xx
+                    // must NOT log the user out.
+                    if (response.code() == 401 || response.code() == 403) {
+                        clearAuth()
+                    }
                     null
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {

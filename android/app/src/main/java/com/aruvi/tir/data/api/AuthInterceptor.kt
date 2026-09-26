@@ -42,22 +42,19 @@ class AuthInterceptor @Inject constructor(
 
         // If 401, try to refresh token
         if (response.code == 401) {
-            val failedResponse = response
             val newToken = runBlocking { authRepository.get().refreshAccessToken() }
-            failedResponse.close()
 
             if (newToken != null) {
-                // Retry with new token
+                // Retry with new token (close the failed 401 first to free the connection)
+                response.close()
                 val retryRequest = originalRequest.newBuilder()
                     .header("Authorization", "Bearer $newToken")
                     .build()
                 response = chain.proceed(retryRequest)
-            } else {
-                // Refresh failed — return a FRESH unauthenticated response.
-                // Returning the closed one would make Retrofit throw
-                // "IllegalStateException: closed" instead of a clean 401.
-                response = chain.proceed(originalRequest)
             }
+            // else: refresh failed — return the original 401 as-is so callers
+            // see a clean 401 instead of firing a duplicate unauthenticated
+            // request (which doubles traffic and masks the real failure).
         }
 
         return response

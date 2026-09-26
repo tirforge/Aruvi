@@ -86,7 +86,15 @@ fun TelePlayMobileTheme(
 
     if (!view.isInEditMode) {
         androidx.compose.runtime.SideEffect {
-            val window = (view.context as android.app.Activity).window
+            // view.context may be a ContextWrapper (dialog/preview), not an
+            // Activity — a hard cast would crash with ClassCastException.
+            var ctx: android.content.Context? = view.context
+            var activity: android.app.Activity? = null
+            while (ctx != null && activity == null) {
+                activity = ctx as? android.app.Activity
+                ctx = (ctx as? android.content.ContextWrapper)?.baseContext
+            }
+            val window = activity?.window ?: return@SideEffect
             window.statusBarColor = android.graphics.Color.TRANSPARENT
             window.navigationBarColor = android.graphics.Color.TRANSPARENT
             androidx.core.view.WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
