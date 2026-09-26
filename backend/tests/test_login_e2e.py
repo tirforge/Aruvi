@@ -3,6 +3,7 @@
 generate-code -> long-poll verify (pending 202) -> bot-style atomic claim ->
 long-poll verify completes with tokens -> token works on /auth/me.
 """
+
 import importlib
 import os
 import shutil
@@ -20,14 +21,20 @@ import conftest  # noqa: F401
 @pytest_asyncio.fixture
 async def temp_db():
     tmpdir = tempfile.mkdtemp()
-    os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{os.path.join(tmpdir, 'test.db')}"
+    os.environ["DATABASE_URL"] = (
+        f"sqlite+aiosqlite:///{os.path.join(tmpdir, 'test.db')}"
+    )
     import app.config
+
     importlib.reload(app.config)
     import app.database
+
     importlib.reload(app.database)
     import app.models
+
     importlib.reload(app.models)
     from app.database import init_db
+
     await init_db()
     yield
     shutil.rmtree(tmpdir, ignore_errors=True)
@@ -38,6 +45,7 @@ async def _bot_style_claim(code: str, telegram_id: int) -> int:
     from sqlalchemy import update
     from app.database import async_session
     from app.models import LoginCode
+
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     async with async_session() as db:
         result = await db.execute(
@@ -72,6 +80,7 @@ async def test_full_login_flow_web_sequence(temp_db):
         #    then the code is claimed for that telegram_id
         from app.database import async_session
         from app.models import User
+
         async with async_session() as db:
             db.add(User(telegram_id=777001))
             await db.commit()
@@ -108,11 +117,14 @@ async def test_bot_minted_preclaimed_code_logs_in_immediately(temp_db):
 
     async with async_session() as db:
         db.add(User(telegram_id=888001))
-        db.add(LoginCode(
-            code="PRECL1",
-            telegram_id=888001,
-            expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=10),
-        ))
+        db.add(
+            LoginCode(
+                code="PRECL1",
+                telegram_id=888001,
+                expires_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                + timedelta(minutes=10),
+            )
+        )
         await db.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
@@ -130,11 +142,14 @@ async def test_legacy_code_endpoint_still_works(temp_db):
 
     async with async_session() as db:
         db.add(User(telegram_id=999001))
-        db.add(LoginCode(
-            code="LEGAC1",
-            telegram_id=999001,
-            expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=10),
-        ))
+        db.add(
+            LoginCode(
+                code="LEGAC1",
+                telegram_id=999001,
+                expires_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                + timedelta(minutes=10),
+            )
+        )
         await db.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
@@ -156,11 +171,14 @@ async def test_claimed_code_with_missing_user_is_terminal_410(temp_db):
     from app.models import LoginCode
 
     async with async_session() as db:
-        db.add(LoginCode(
-            code="ORPHN1",
-            telegram_id=123123,  # claimed, but no User row exists
-            expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=10),
-        ))
+        db.add(
+            LoginCode(
+                code="ORPHN1",
+                telegram_id=123123,  # claimed, but no User row exists
+                expires_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                + timedelta(minutes=10),
+            )
+        )
         await db.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:

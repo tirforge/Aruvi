@@ -1,12 +1,14 @@
 """
 Pydantic schemas for API request/response validation.
 """
+
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, ConfigDict, Field, field_validator #WP
+from pydantic import BaseModel, ConfigDict, Field, field_validator  # WP
 
 
 # ============== User Schemas ==============
+
 
 class UserBase(BaseModel):
     telegram_id: int
@@ -23,7 +25,7 @@ class UserResponse(UserBase):
     id: int
     created_at: datetime
     last_active: datetime
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -42,6 +44,7 @@ class AdminStats(BaseModel):
 
 
 # ============== Folder Schemas ==============
+
 
 class FolderBase(BaseModel):
     name: str
@@ -63,15 +66,16 @@ class FolderResponse(FolderBase):
     created_at: datetime
     updated_at: datetime
     file_count: int = 0
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 
 class FolderWithChildren(FolderResponse):
     children: List["FolderWithChildren"] = []
-    
+
 
 # ============== File Schemas ==============
+
 
 class FileBase(BaseModel):
     file_name: str
@@ -110,7 +114,7 @@ class FileResponse(FileBase):
     public_hash: Optional[str] = None
     public_stream_url: Optional[str] = None
     last_pos: int = 0
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -123,20 +127,21 @@ class FileListResponse(BaseModel):
 
 # ============== Watch Progress Schemas ==============
 
+
 class WatchProgressBase(BaseModel):
     position: int
     duration: Optional[int] = None
     completed: bool = False
 
 
-class WatchProgressUpdate(BaseModel): #QB
-    position: int #PT
-    duration: Optional[int] = None #XB
-    completed: Optional[bool] = None #QZ
+class WatchProgressUpdate(BaseModel):  # QB
+    position: int  # PT
+    duration: Optional[int] = None  # XB
+    completed: Optional[bool] = None  # QZ
 
     model_config = ConfigDict(extra="ignore")  # Android client sends extra fields
 
-    @field_validator('position', 'duration', mode='before')
+    @field_validator("position", "duration", mode="before")
     @classmethod
     def _int_from_float(cls, v):
         return int(v) if isinstance(v, float) else v
@@ -147,11 +152,12 @@ class WatchProgressResponse(WatchProgressBase):
     user_id: int
     file_id: int
     updated_at: datetime
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 
 # ============== Auth Schemas ==============
+
 
 class Token(BaseModel):
     access_token: str
@@ -161,8 +167,9 @@ class Token(BaseModel):
 
 class RefreshTokenRequest(BaseModel):
     """Request body for token refresh."""
+
     refresh_token: str = Field(..., alias="refreshToken")
-    
+
     model_config = ConfigDict(populate_by_name=True)
 
 

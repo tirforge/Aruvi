@@ -1,6 +1,7 @@
 """
 TV-specific API endpoints optimized for Android TV clients.
 """
+
 import asyncio
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,10 +13,10 @@ from ..models import File, User, Folder
 from ..auth import get_current_user
 from ..config import get_settings
 from ..services import (
-    escape_like, 
-    add_urls_to_file, 
-    fetch_recent_files, 
-    fetch_continue_watching_files
+    escape_like,
+    add_urls_to_file,
+    fetch_recent_files,
+    fetch_continue_watching_files,
 )
 
 router = APIRouter(prefix="/tv", tags=["TV"])
@@ -98,9 +99,18 @@ async def tv_revision(
     all scoped to the current user. NULL when a table is empty.
     """
     query = select(
-        select(func.max(File.created_at)).where(File.user_id == current_user.id).scalar_subquery().label("files_created_at"),
-        select(func.max(File.updated_at)).where(File.user_id == current_user.id).scalar_subquery().label("files_updated_at"),
-        select(func.max(Folder.updated_at)).where(Folder.user_id == current_user.id).scalar_subquery().label("folders_updated_at"),
+        select(func.max(File.created_at))
+        .where(File.user_id == current_user.id)
+        .scalar_subquery()
+        .label("files_created_at"),
+        select(func.max(File.updated_at))
+        .where(File.user_id == current_user.id)
+        .scalar_subquery()
+        .label("files_updated_at"),
+        select(func.max(Folder.updated_at))
+        .where(Folder.user_id == current_user.id)
+        .scalar_subquery()
+        .label("folders_updated_at"),
     )
     result = await db.execute(query)
     row = result.one()
@@ -146,7 +156,7 @@ async def tv_search(
         select(File)
         .where(
             File.user_id == current_user.id,
-            File.file_name.ilike(f"%{escape_like(q)}%", escape="\\")
+            File.file_name.ilike(f"%{escape_like(q)}%", escape="\\"),
         )
         .options(selectinload(File.watch_progress), defer(File.thumbnail_data))
         .order_by(desc(File.created_at))
@@ -154,30 +164,25 @@ async def tv_search(
     )
     files_result = await db.execute(files_query)
     files = files_result.scalars().all()
-    
+
     # Search folders by name
     folders_query = (
         select(Folder)
         .where(
             Folder.user_id == current_user.id,
-            Folder.name.ilike(f"%{escape_like(q)}%", escape="\\")
+            Folder.name.ilike(f"%{escape_like(q)}%", escape="\\"),
         )
         .order_by(Folder.name)
         .limit(20)
     )
     folders_result = await db.execute(folders_query)
     folders = folders_result.scalars().all()
-    
+
     return {
         "files": [add_urls_to_file(f) for f in files],
         "folders": [
-            {
-                "id": f.id,
-                "name": f.name,
-                "parent_id": f.parent_id
-            }
-            for f in folders
-        ]
+            {"id": f.id, "name": f.name, "parent_id": f.parent_id} for f in folders
+        ],
     }
 
 
@@ -194,16 +199,16 @@ async def tv_folder_detail(
     Returns folder info, subfolders, files, and parent path for navigation.
     """
     from fastapi import HTTPException
-    
+
     # Get the folder
     folder_result = await db.execute(
         select(Folder).where(Folder.id == folder_id, Folder.user_id == current_user.id)
     )
     folder = folder_result.scalar_one_or_none()
-    
+
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
-    
+
     # Get subfolders
     subfolders_result = await db.execute(
         select(Folder)
@@ -211,7 +216,7 @@ async def tv_folder_detail(
         .order_by(Folder.name)
     )
     subfolders = subfolders_result.scalars().all()
-    
+
     # Get files in this folder (paginated — a folder with tens of thousands
     # of files must not load and serialize every row in one response)
     files_result = await db.execute(
@@ -230,34 +235,41 @@ async def tv_folder_detail(
         .where(File.user_id == current_user.id, File.folder_id == folder_id)
     )
     total_files = total_result.scalar() or 0
-    
+
     # Build parent path for breadcrumb navigation — single query
     parent_path = []
     if folder.parent_id:
         all_folders_result = await db.execute(
-            select(Folder)
-            .where(Folder.user_id == current_user.id)
+            select(Folder).where(Folder.user_id == current_user.id)
         )
-        folder_map: dict[int, Folder] = {f.id: f for f in all_folders_result.scalars().all()}
+        folder_map: dict[int, Folder] = {
+            f.id: f for f in all_folders_result.scalars().all()
+        }
         current = folder
         chain: list[int] = []
         seen: set[int] = {folder.id}
-        while current.parent_id and current.parent_id in folder_map and current.parent_id not in seen:
+        while (
+            current.parent_id
+            and current.parent_id in folder_map
+            and current.parent_id not in seen
+        ):
             # `seen` guards against a corrupted parent chain looping forever.
             seen.add(current.parent_id)
             chain.append(current.parent_id)
             current = folder_map[current.parent_id]
         for pid in reversed(chain):
             a = folder_map[pid]
-            parent_path.append({
-                "id": a.id,
-                "name": a.name,
-                "parent_id": a.parent_id,
-                "user_id": a.user_id,
-                "created_at": a.created_at.isoformat() if a.created_at else None,
-                "updated_at": a.updated_at.isoformat() if a.updated_at else None,
-            })
-    
+            parent_path.append(
+                {
+                    "id": a.id,
+                    "name": a.name,
+                    "parent_id": a.parent_id,
+                    "user_id": a.user_id,
+                    "created_at": a.created_at.isoformat() if a.created_at else None,
+                    "updated_at": a.updated_at.isoformat() if a.updated_at else None,
+                }
+            )
+
     return {
         "folder": {
             "id": folder.id,
@@ -282,5 +294,5 @@ async def tv_folder_detail(
         "total_files": total_files,
         "limit": limit,
         "offset": offset,
-        "parent_path": parent_path
+        "parent_path": parent_path,
     }

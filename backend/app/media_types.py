@@ -8,23 +8,75 @@ This is what keeps e.g. a shared .mkv — delivered by the delivery bot as a
 *document* with video/x-matroska (or octet-stream) — from showing up as
 "document" in the UI instead of "video".
 """
+
 import os
 
 _VIDEO_EXT = {
-    ".mkv", ".mp4", ".avi", ".webm", ".mov", ".m4v", ".ts", ".m2ts", ".mts",
-    ".flv", ".wmv", ".mpg", ".mpeg", ".vob", ".ogv", ".3gp", ".divx", ".f4v",
-    ".rm", ".rmvb", ".asf", ".tp", ".mxf",
+    ".mkv",
+    ".mp4",
+    ".avi",
+    ".webm",
+    ".mov",
+    ".m4v",
+    ".ts",
+    ".m2ts",
+    ".mts",
+    ".flv",
+    ".wmv",
+    ".mpg",
+    ".mpeg",
+    ".vob",
+    ".ogv",
+    ".3gp",
+    ".divx",
+    ".f4v",
+    ".rm",
+    ".rmvb",
+    ".asf",
+    ".tp",
+    ".mxf",
 }
 
 _AUDIO_EXT = {
-    ".mp3", ".flac", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".oga", ".weba",
-    ".wma", ".alac", ".ape", ".aiff", ".au", ".mid", ".midi", ".amr", ".mka",
-    ".ac3", ".dts", ".eac3", ".wv",
+    ".mp3",
+    ".flac",
+    ".wav",
+    ".m4a",
+    ".aac",
+    ".ogg",
+    ".opus",
+    ".oga",
+    ".weba",
+    ".wma",
+    ".alac",
+    ".ape",
+    ".aiff",
+    ".au",
+    ".mid",
+    ".midi",
+    ".amr",
+    ".mka",
+    ".ac3",
+    ".dts",
+    ".eac3",
+    ".wv",
 }
 
 _IMAGE_EXT = {
-    ".jpg", ".jpeg", ".jfif", ".png", ".gif", ".webp", ".bmp", ".svg",
-    ".heic", ".heif", ".avif", ".tiff", ".tif", ".ico",
+    ".jpg",
+    ".jpeg",
+    ".jfif",
+    ".png",
+    ".gif",
+    ".webp",
+    ".bmp",
+    ".svg",
+    ".heic",
+    ".heif",
+    ".avif",
+    ".tiff",
+    ".tif",
+    ".ico",
 }
 
 

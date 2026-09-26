@@ -25,7 +25,10 @@ def _auto_jwt_secret() -> str:
         if _JWT_SECRET_FILE.exists():
             stored = _JWT_SECRET_FILE.read_text().strip()
             if stored:
-                logger.info("JWT_SECRET not set — using persisted secret from %s", _JWT_SECRET_FILE)
+                logger.info(
+                    "JWT_SECRET not set — using persisted secret from %s",
+                    _JWT_SECRET_FILE,
+                )
                 return stored
         _JWT_SECRET_FILE.parent.mkdir(parents=True, exist_ok=True)
         generated = secrets.token_hex(32)
@@ -36,13 +39,17 @@ def _auto_jwt_secret() -> str:
             pass
         logger.warning(
             "JWT_SECRET not set — generated and persisted to %s (set JWT_SECRET "
-            "explicitly for multi-replica deployments)", _JWT_SECRET_FILE,
+            "explicitly for multi-replica deployments)",
+            _JWT_SECRET_FILE,
         )
         return generated
     except OSError:
         # Read-only filesystem (e.g. ephemeral container storage): fall back
         # to the old per-process behavior rather than crash the app.
-        logger.warning("JWT_SECRET not set and %s unwritable — sessions invalidate on restart", _JWT_SECRET_FILE)
+        logger.warning(
+            "JWT_SECRET not set and %s unwritable — sessions invalidate on restart",
+            _JWT_SECRET_FILE,
+        )
         return secrets.token_hex(32)
 
 
@@ -53,7 +60,9 @@ class Settings(BaseSettings):
     telegram_bot_token: str
 
     telegram_helper_bot_tokens_str: str = Field("", alias="TELEGRAM_HELPER_BOT_TOKENS")
-    telegram_bot_session_strings_str: str = Field("", alias="TELEGRAM_BOT_SESSION_STRINGS")
+    telegram_bot_session_strings_str: str = Field(
+        "", alias="TELEGRAM_BOT_SESSION_STRINGS"
+    )
 
     auth_users_str: str = Field("", alias="AUTH_USERS")
     admin_ids_str: str = Field("", alias="ADMIN_IDS")
@@ -158,7 +167,7 @@ class Settings(BaseSettings):
 
     # Grab / movie search
     grab_group_username: str = ""  # e.g. "AutoFilterGroup"
-    grab_bot_username: str = ""    # e.g. "FileBot"
+    grab_bot_username: str = ""  # e.g. "FileBot"
     grab_session_string: str = ""  # single dedicated Ivy session (legacy)
 
     # Multi-group search: comma-separated list of groups (GRAB_GROUP_USERNAMES)
@@ -171,7 +180,9 @@ class Settings(BaseSettings):
     # When multiple are configured, N grab operations run concurrently.
     # Falls back to GRAB_SESSION_STRING, then TELEGRAM_BOT_SESSION_STRINGS.
     grab_session_strings_str: str = Field("", alias="GRAB_SESSION_STRINGS")
-    grab_keep_messages: bool = Field(False, alias="GRAB_KEEP_MESSAGES")  # if true, don't delete search/bot messages (avoids "deleted message" suspicion)
+    grab_keep_messages: bool = Field(
+        False, alias="GRAB_KEEP_MESSAGES"
+    )  # if true, don't delete search/bot messages (avoids "deleted message" suspicion)
 
     @property
     def grab_session_strings(self) -> list[str]:

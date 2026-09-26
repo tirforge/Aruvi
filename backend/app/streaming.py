@@ -2,6 +2,7 @@
 Custom streaming utilities for Telegram media files.
 Multi-client parallel streaming for maximum download speed.
 """
+
 import asyncio
 import ctypes
 import gc
@@ -28,6 +29,7 @@ class CappedSemaphore(asyncio.Semaphore):
     subclass no-ops a release once the value is back at the cap, preserving the
     cold-stream pipeline exactly while bounding cache-served streams too.
     """
+
     def release(self):
         if self._value < self._initial_cap:
             super().release()
@@ -36,7 +38,10 @@ class CappedSemaphore(asyncio.Semaphore):
         self._initial_cap = value
         super().__init__(value)
 
-BATCH_SIZE = int(os.environ.get("STREAM_BATCH_SIZE", "10"))  # chunks per stream_media call
+
+BATCH_SIZE = int(
+    os.environ.get("STREAM_BATCH_SIZE", "10")
+)  # chunks per stream_media call
 CHUNK_SIZE = 1024 * 1024  # 1 MB per chunk
 
 # Cache profile: RAM is a SMALL hot layer, the disk tier (disk_cache.py) is the
@@ -74,6 +79,7 @@ class ChunkCache:
     Key: chunk_idx -> bytes
     Max size: 2GB per video, evicts oldest entries when full.
     """
+
     def __init__(self, max_bytes: int = 2 * 1024 * 1024 * 1024):
         self._data: dict[int, bytes] = {}
         self._order: deque[int] = deque()
@@ -104,7 +110,11 @@ class ChunkCache:
                 self._size -= len(old_data)
                 self._evictions += 1
                 if self._evictions == 1 or self._evictions % 10 == 0:
-                    logger.info("Evicted %d chunks (%.1f MB)", self._evictions, self._size / 1024 / 1024)
+                    logger.info(
+                        "Evicted %d chunks (%.1f MB)",
+                        self._evictions,
+                        self._size / 1024 / 1024,
+                    )
 
     def clear(self) -> int:
         freed = self._size
@@ -128,12 +138,12 @@ class ChunkCache:
         }
 
 
-
 class CacheManager:
     """Manages per-video ChunkCache instances.
     Each (chat_id, message_id) pair gets its own 2GB FIFO cache,
     so concurrent streams don't evict each other's backward seek data.
     """
+
     def __init__(self, per_video_max: int = 2 * 1024 * 1024 * 1024):
         self._caches: dict[tuple[int, int], ChunkCache] = {}
         self._per_video_max = per_video_max
@@ -151,7 +161,9 @@ class CacheManager:
 
     def clear_all(self, exclude_keys: set[tuple[int, int]] | None = None) -> int:
         total = 0
-        keys_to_clear = [k for k in self._caches if exclude_keys is None or k not in exclude_keys]
+        keys_to_clear = [
+            k for k in self._caches if exclude_keys is None or k not in exclude_keys
+        ]
         for key in keys_to_clear:
             total += self._caches.pop(key).clear()
         return total
@@ -161,16 +173,18 @@ class CacheManager:
         result = []
         for (chat_id, message_id), cache in self._caches.items():
             info = cache.info
-            result.append({
-                "chat_id": chat_id,
-                "message_id": message_id,
-                "chunks": info["chunks"],
-                "size_mb": info["size_mb"],
-                "max_mb": info["max_mb"],
-                "hits": info["hits"],
-                "misses": info["misses"],
-                "evictions": info["evictions"],
-            })
+            result.append(
+                {
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "chunks": info["chunks"],
+                    "size_mb": info["size_mb"],
+                    "max_mb": info["max_mb"],
+                    "hits": info["hits"],
+                    "misses": info["misses"],
+                    "evictions": info["evictions"],
+                }
+            )
         return sorted(result, key=lambda x: x["size_mb"], reverse=True)
 
     @property
@@ -199,10 +213,17 @@ class CacheManager:
         }
 
 
-_cache_manager = CacheManager(per_video_max=STREAM_RAM_PER_VIDEO_MB * 1024 * 1024)  # RAM backward cache per video
-_forward_streams: dict[tuple[int, int], dict] = {}  # (chat_id, message_id) → live forward stream
-_cache_finished_at: dict[tuple[int, int], float] = {}  # (chat_id, msg_id) → monotonic when stream ended
+_cache_manager = CacheManager(
+    per_video_max=STREAM_RAM_PER_VIDEO_MB * 1024 * 1024
+)  # RAM backward cache per video
+_forward_streams: dict[
+    tuple[int, int], dict
+] = {}  # (chat_id, message_id) → live forward stream
+_cache_finished_at: dict[
+    tuple[int, int], float
+] = {}  # (chat_id, msg_id) → monotonic when stream ended
 CACHE_TTL = 1800  # 30 min cache retention after stream ends
+
 
 # Disk cache total usage (bytes), cached internally by DiskChunkCache.used_bytes
 # so status/diag polls don't stat every chunk on each request.
@@ -213,11 +234,13 @@ def _dc_disk_size() -> int:
 # ── Auto-restart when all streams finish ─────────────────────────────
 _pending_restart: asyncio.TimerHandle | None = None
 
+
 def _cancel_restart():
     global _pending_restart
     if _pending_restart is not None:
         _pending_restart.cancel()
         _pending_restart = None
+
 
 def _do_restart():
     global _pending_restart
@@ -228,7 +251,10 @@ def _do_restart():
     _prefetch_hwm.clear()
     _prefetch_cursor.clear()
     freed = _cache_manager.clear_all()
-    logger.warning("No active streams — cleared %.1f MB from cache", freed / 1024 / 1024)
+    logger.warning(
+        "No active streams — cleared %.1f MB from cache", freed / 1024 / 1024
+    )
+
 
 def _schedule_restart(delay: float = 900.0):
     global _pending_restart
@@ -258,7 +284,9 @@ def _evict_idle_ram_caches():
         _cache_finished_at.pop(key, None)
         freed = _cache_manager.remove(*key)
         if freed:
-            logger.info("RAM cache TTL evict: %s freed %.1f MB", key, freed / 1024 / 1024)
+            logger.info(
+                "RAM cache TTL evict: %s freed %.1f MB", key, freed / 1024 / 1024
+            )
 
 
 def get_forward_snapshot() -> list[dict]:
@@ -272,18 +300,25 @@ def get_forward_snapshot() -> list[dict]:
     for key, info in list(_forward_streams.items()):
         futures = info.get("results", {})
         done = sum(1 for f in futures.values() if f.done())
-        result.append({
-            "message_id": key[1],
-            "chat_id": info["chat_id"],
-            "prebuffer_mb": done,
-            "max_mb": info.get("total_chunks", 2000),
-        })
+        result.append(
+            {
+                "message_id": key[1],
+                "chat_id": info["chat_id"],
+                "prebuffer_mb": done,
+                "max_mb": info.get("total_chunks", 2000),
+            }
+        )
     return result
 
 
 from pyrogram import Client
 from pyrogram.file_id import FileId
-from pyrogram.errors import FileReferenceExpired, FileReferenceInvalid, AuthKeyUnregistered, AuthBytesInvalid
+from pyrogram.errors import (
+    FileReferenceExpired,
+    FileReferenceInvalid,
+    AuthKeyUnregistered,
+    AuthBytesInvalid,
+)
 
 from .telegram import clients, reconnect_client
 from .config import get_settings
@@ -312,13 +347,19 @@ def _schedule_disk_write(chat_id: int, message_id: int, chunk_idx: int, data: by
         global _disk_write_pending
         try:
             await asyncio.get_running_loop().run_in_executor(
-                _disk_write_executor, _disk_cache.put, chat_id, message_id, chunk_idx, data
+                _disk_write_executor,
+                _disk_cache.put,
+                chat_id,
+                message_id,
+                chunk_idx,
+                data,
             )
         finally:
             _disk_write_pending -= 1
 
     _disk_write_pending += 1
     asyncio.get_running_loop().create_task(_do())
+
 
 # ── Ahead-prefetcher (fills L1 RAM + L2 disk ahead of the playhead) ────────────
 # Follows the highest chunk the player has served ("hwm") and keeps pulling the
@@ -331,17 +372,17 @@ def _schedule_disk_write(chat_id: int, message_id: int, chunk_idx: int, data: by
 #      (gentler pacing below that), so concurrent streams still get headroom,
 #   4. short fetch timeout per mini-batch (2 chunks) so a slow bot is released.
 PREFETCH_MAX_AHEAD_CHUNKS = STREAM_PREFETCH_AHEAD_MB  # ~N MB ahead (1 MB chunks)
-PREFETCH_BATCH_LIMIT = 2                 # chunks per client hold (short)
-PREFETCH_ACQUIRE_TIMEOUT = 0.5           # courtesy acquire on a client (s)
-PREFETCH_FETCH_TIMEOUT = 5               # max seconds holding a client
-PREFETCH_IDLE_TIMEOUT = 30               # stop prefetch 30s after playback stops
-_YIELD_CHUNK_TIMEOUT = 30                # safety net: try a fresh single-chunk fetch
-                                         # if a chunk can't be resolved this long
-_STALL_REFETCH_LIMIT = 3                 # emergency refetches before aborting a
-                                         # stalled stream (each ~15s) — a transient
-                                         # Telegram slowdown must not truncate the
-                                         # response, but a dead DC can't hold the
-                                         # HTTP connection open forever.
+PREFETCH_BATCH_LIMIT = 2  # chunks per client hold (short)
+PREFETCH_ACQUIRE_TIMEOUT = 0.5  # courtesy acquire on a client (s)
+PREFETCH_FETCH_TIMEOUT = 5  # max seconds holding a client
+PREFETCH_IDLE_TIMEOUT = 30  # stop prefetch 30s after playback stops
+_YIELD_CHUNK_TIMEOUT = 30  # safety net: try a fresh single-chunk fetch
+# if a chunk can't be resolved this long
+_STALL_REFETCH_LIMIT = 3  # emergency refetches before aborting a
+# stalled stream (each ~15s) — a transient
+# Telegram slowdown must not truncate the
+# response, but a dead DC can't hold the
+# HTTP connection open forever.
 _prefetch_semaphore = asyncio.Semaphore(STREAM_PREFETCH_CONCURRENCY)
 _prefetch_ro = 0
 _prefetch_tasks: dict[tuple[int, int], asyncio.Task] = {}
@@ -373,7 +414,10 @@ def _memory_pressure() -> bool:
     cur = _process_rss_bytes()
     if cur <= 0:
         # Fallback: container-wide cgroup current usage.
-        for p in ("/sys/fs/cgroup/memory.current", "/sys/fs/cgroup/memory/memory.usage_in_bytes"):
+        for p in (
+            "/sys/fs/cgroup/memory.current",
+            "/sys/fs/cgroup/memory/memory.usage_in_bytes",
+        ):
             try:
                 with open(p) as f:
                     cur = int(f.read().strip())
@@ -383,7 +427,10 @@ def _memory_pressure() -> bool:
     if cur <= 0:
         return False
     mx = None
-    for p in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+    for p in (
+        "/sys/fs/cgroup/memory.max",
+        "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+    ):
         try:
             with open(p) as f:
                 v = int(f.read().strip())
@@ -427,7 +474,9 @@ async def _collect_ahead_batch(cl, msg, start_chunk: int, count: int) -> bytes:
     return bytes(d)
 
 
-async def _prefetch_fetch_batch(chat_id: int, message_id: int, start_chunk: int, batch_end: int, cache) -> int | None:
+async def _prefetch_fetch_batch(
+    chat_id: int, message_id: int, start_chunk: int, batch_end: int, cache
+) -> int | None:
     """Fetch chunks [start_chunk..batch_end] from one free bot into RAM + disk.
     Returns the last chunk index written, or None if no bot was available."""
     global _prefetch_ro
@@ -473,7 +522,7 @@ async def _prefetch_fetch_batch(chat_id: int, message_id: int, start_chunk: int,
                 offset = i * CHUNK_SIZE
                 if offset >= len(data):
                     break
-                chunk = data[offset:offset + CHUNK_SIZE]
+                chunk = data[offset : offset + CHUNK_SIZE]
                 cache.put(start_chunk + i, chunk)
                 _schedule_disk_write(chat_id, message_id, start_chunk + i, chunk)
                 wrote = start_chunk + i
@@ -518,7 +567,10 @@ async def _ahead_prefetch_loop(key: tuple[int, int], file_size: int):
                 if hwm < 0:
                     await asyncio.sleep(0.5)
                     continue
-                if time.monotonic() - _prefetch_last_activity.get(key, 0) > PREFETCH_IDLE_TIMEOUT:
+                if (
+                    time.monotonic() - _prefetch_last_activity.get(key, 0)
+                    > PREFETCH_IDLE_TIMEOUT
+                ):
                     break
                 cur = _prefetch_cursor.get(key, hwm + 1)
                 if cur > total_chunks - 1:
@@ -528,7 +580,9 @@ async def _ahead_prefetch_loop(key: tuple[int, int], file_size: int):
                     continue
                 cache = _cache_manager.get_cache(chat_id, message_id)
                 try:
-                    on_disk = await asyncio.to_thread(_disk_cache.contains, chat_id, message_id, cur)
+                    on_disk = await asyncio.to_thread(
+                        _disk_cache.contains, chat_id, message_id, cur
+                    )
                 except Exception:
                     on_disk = False
                 if cache.get(cur) is not None or on_disk:
@@ -541,7 +595,9 @@ async def _ahead_prefetch_loop(key: tuple[int, int], file_size: int):
                     await asyncio.sleep(0.5)
                     continue
                 try:
-                    wrote = await _prefetch_fetch_batch(chat_id, message_id, cur, batch_end, cache)
+                    wrote = await _prefetch_fetch_batch(
+                        chat_id, message_id, cur, batch_end, cache
+                    )
                 finally:
                     try:
                         _prefetch_semaphore.release()
@@ -582,6 +638,7 @@ def start_ahead_prefetch(chat_id: int, message_id: int, file_size: int):
     _prefetch_size[key] = file_size
     _prefetch_last_activity[key] = time.monotonic()
     _prefetch_tasks[key] = asyncio.create_task(_ahead_prefetch_loop(key, file_size))
+
 
 settings = get_settings()
 
@@ -630,7 +687,9 @@ def _mark_dc_degraded(dc_id):
     deadline = time.monotonic() + _DC_AUTH_COOLDOWN
     if _dc_auth_failure_until.get(dc_id, 0) < deadline:
         _dc_auth_failure_until[dc_id] = deadline
-        logger.warning("DC %d media auth degraded, cooldown %.0fs", dc_id, _DC_AUTH_COOLDOWN)
+        logger.warning(
+            "DC %d media auth degraded, cooldown %.0fs", dc_id, _DC_AUTH_COOLDOWN
+        )
 
 
 async def _wait_dc_cooldown(dc_id):
@@ -665,7 +724,9 @@ async def _media_session_scope(cl, msg):
         await _wait_dc_cooldown(dc_id)
         if not _media_sessions_warmed.is_set():
             try:
-                await asyncio.wait_for(_media_sessions_warmed.wait(), timeout=_WARMUP_WAIT)
+                await asyncio.wait_for(
+                    _media_sessions_warmed.wait(), timeout=_WARMUP_WAIT
+                )
             except asyncio.TimeoutError:
                 pass  # warm-up stuck on a bad DC — proceed anyway, lock still serializes
         async with _media_session_lock:
@@ -673,14 +734,18 @@ async def _media_session_scope(cl, msg):
     else:
         yield
 
+
 # Limit total concurrent streams. Each stream holds up to STREAM_INFLIGHT_MB of
 # resolved 1 MB chunks awaiting yield plus a small RAM backward cache; the bulk
 # of data lives on the disk tier. With STREAM_MAX_CONCURRENT=4 and the default
 # RAM profile (~24 MB cache + ~96 MB in-flight + shared prefetch), worst case is
 # ~1 GB of hot RAM — safe on the ~3 GB production box.
 _stream_semaphore = asyncio.Semaphore(STREAM_MAX_CONCURRENT)
+
+
 class ClientPoolEmpty(Exception):
     """No connected client available in the pool."""
+
     pass
 
 
@@ -773,20 +838,26 @@ class ClientPool:
 # Lazy module-level pool instance
 _client_pool: ClientPool | None = None
 
+
 def get_client_pool() -> ClientPool:
     global _client_pool
     if _client_pool is None:
         _client_pool = ClientPool(clients)
     return _client_pool
 
+
 def get_client_semaphore(client_index: int) -> asyncio.Semaphore:
     if client_index not in _client_semaphores:
         # Use the configured concurrency limit
-        _client_semaphores[client_index] = asyncio.Semaphore(settings.telegram_client_concurrency)
+        _client_semaphores[client_index] = asyncio.Semaphore(
+            settings.telegram_client_concurrency
+        )
     return _client_semaphores[client_index]
+
 
 # Per-client reconnection lock: prevents concurrent reconnect racing with in-flight RPCs
 _client_reconnect_locks: dict[int, asyncio.Lock] = {}
+
 
 def get_client_reconnect_lock(client_index: int) -> asyncio.Lock:
     if client_index not in _client_reconnect_locks:
@@ -828,7 +899,10 @@ async def _invalidate_media_sessions(client, dc_id=None):
 
 # ── Byte-accurate stream (GDrive) ───────────────────────────────────────────────
 
-async def _byte_accurate_file_stream(client, message, file_size: int, offset_start: int, offset_end: int):
+
+async def _byte_accurate_file_stream(
+    client, message, file_size: int, offset_start: int, offset_end: int
+):
     """Download a byte range via Kurigram's native get_file.
 
     Kurigram handles the media session (cached per DC, warm at boot), CDN
@@ -850,15 +924,17 @@ async def _byte_accurate_file_stream(client, message, file_size: int, offset_sta
 
     def _trim(part: bytes, byte_offset: int):
         if byte_offset < offset_start:
-            part = part[offset_start - byte_offset:]
+            part = part[offset_start - byte_offset :]
             byte_offset = offset_start
         if byte_offset + len(part) > offset_end:
-            part = part[:offset_end - byte_offset]
+            part = part[: offset_end - byte_offset]
         return byte_offset, part
 
     async def _pump(fid, limit_chunks):
         nonlocal start_chunk
-        async for part in client.get_file(fid, file_size=file_size, limit=limit_chunks, offset=start_chunk):
+        async for part in client.get_file(
+            fid, file_size=file_size, limit=limit_chunks, offset=start_chunk
+        ):
             byte_offset, part = _trim(part, start_chunk * CHUNK)
             if part:
                 yield byte_offset, bytes(part)
@@ -868,7 +944,9 @@ async def _byte_accurate_file_stream(client, message, file_size: int, offset_sta
         async for item in _pump(file_id_obj, total_chunks):
             yield item
     except (FileReferenceExpired, FileReferenceInvalid):
-        refreshed = await _fetch_message(client, message.chat.id, message.id, force=True)
+        refreshed = await _fetch_message(
+            client, message.chat.id, message.id, force=True
+        )
         refreshed_media = _get_media(refreshed) if refreshed else None
         if not refreshed_media:
             return
@@ -990,7 +1068,9 @@ async def prefetch_first_batch(client, message, from_bytes: int = 0):
     # lazily — do NOT hit Telegram and hold a bot for a redundant fetch. This
     # also stops N concurrent requests from each warming the same 10MB.
     try:
-        if await asyncio.to_thread(_disk_cache.contains, chat_id, message_id, start_chunk):
+        if await asyncio.to_thread(
+            _disk_cache.contains, chat_id, message_id, start_chunk
+        ):
             return
     except Exception:
         pass
@@ -1005,8 +1085,10 @@ async def prefetch_first_batch(client, message, from_bytes: int = 0):
         # Prefer the client the caller picked (prefetch_by_ids chooses a helper
         # to keep bot 0 free for forward/storage ops); fall back to the first
         # connected client if the passed one is unavailable.
-        prefetch_client = client if (client is not None and client.is_connected) else next(
-            (c for c in clients if c.is_connected), None
+        prefetch_client = (
+            client
+            if (client is not None and client.is_connected)
+            else next((c for c in clients if c.is_connected), None)
         )
         if not prefetch_client:
             return
@@ -1018,7 +1100,9 @@ async def prefetch_first_batch(client, message, from_bytes: int = 0):
         async with sem:
             # Per-batch time cap so a slow bot is released rather than held.
             t0 = time.monotonic()
-            async for part in prefetch_client.stream_media(msg, limit=BATCH_SIZE, offset=start_chunk):
+            async for part in prefetch_client.stream_media(
+                msg, limit=BATCH_SIZE, offset=start_chunk
+            ):
                 data = bytes(part)
                 cache.put(start_chunk, data)
                 _schedule_disk_write(chat_id, message_id, start_chunk, data)
@@ -1067,7 +1151,9 @@ async def prefetch_by_ids(chat_id: int, message_id: int, from_bytes: int = 0):
     for prefetch_client in ordered:
         try:
             c_idx = getattr(prefetch_client, "pool_index", 0)
-            get_client_semaphore(c_idx)  # ensure it exists; get_messages needs no slot (see below)
+            get_client_semaphore(
+                c_idx
+            )  # ensure it exists; get_messages needs no slot (see below)
             # get_messages is an RPC on the main session — no need to hold the
             # media-session semaphore for it (and the cache avoids flood-waits).
             msg = await _fetch_message(prefetch_client, chat_id, message_id)
@@ -1080,13 +1166,16 @@ async def prefetch_by_ids(chat_id: int, message_id: int, from_bytes: int = 0):
         except Exception as e:
             if _is_auth_bytes_invalid(e):
                 await _invalidate_media_sessions(prefetch_client)
-                logger.warning("prefetch: bot %d AUTH_BYTES_INVALID, trying next client", c_idx)
+                logger.warning(
+                    "prefetch: bot %d AUTH_BYTES_INVALID, trying next client", c_idx
+                )
                 continue
             logger.warning("prefetch: bot %d failed: %s", c_idx, e)
             break  # non-auth errors are not client-specific; stop
 
 
 # ── Main streaming generator ───────────────────────────────────────────────────
+
 
 async def parallel_stream_generator(
     initial_message,
@@ -1113,10 +1202,7 @@ async def parallel_stream_generator(
 
     # Pre-create Futures for ordered yielding
     loop = asyncio.get_running_loop()
-    results = {
-        (start_chunk + i): loop.create_future()
-        for i in range(total_chunks)
-    }
+    results = {(start_chunk + i): loop.create_future() for i in range(total_chunks)}
 
     # Cancel any pending auto-restart — a new stream just started
     _cancel_restart()
@@ -1127,7 +1213,12 @@ async def parallel_stream_generator(
     # this entry); a blind pop would unregister the newer stream and make the
     # monitor + restart-scheduler think no stream is active.
     _backpressure = CappedSemaphore(STREAM_INFLIGHT_MB)  # ~200 MB in-flight per stream
-    _forward_stream = {"chat_id": chat_id, "results": results, "total_chunks": total_chunks, "updated_at": time.monotonic()}
+    _forward_stream = {
+        "chat_id": chat_id,
+        "results": results,
+        "total_chunks": total_chunks,
+        "updated_at": time.monotonic(),
+    }
     _forward_streams[(chat_id, message_id)] = _forward_stream
 
     async def _resolve_chunk_now(chunk_idx: int, data: bytes) -> bool:
@@ -1206,7 +1297,9 @@ async def parallel_stream_generator(
         uncached_ranges.append((range_start, end_chunk))
 
     if cache_hits:
-        logger.info("%d/%d cached (%d ranges)", cache_hits, total_chunks, len(uncached_ranges))
+        logger.info(
+            "%d/%d cached (%d ranges)", cache_hits, total_chunks, len(uncached_ranges)
+        )
     else:
         logger.debug("No cache: fetching %d", total_chunks)
 
@@ -1217,7 +1310,9 @@ async def parallel_stream_generator(
             batch_end = min(batch_start + BATCH_SIZE - 1, rend)
             task_queue.put_nowait((batch_start, batch_end))
 
-    async def _fetch_batch(batch_start, batch_end, cl, msg, sem, timeout=None, stall=None):
+    async def _fetch_batch(
+        batch_start, batch_end, cl, msg, sem, timeout=None, stall=None
+    ):
         """Fetch a batch, assigning each chunk as it arrives.
         Forward-caches each chunk immediately so concurrent streams
         of the same file benefit before the yield loop.
@@ -1248,9 +1343,13 @@ async def parallel_stream_generator(
         try:
             await asyncio.wait_for(sem.acquire(), timeout=STREAM_SEM_WAIT_TIMEOUT_S)
         except asyncio.TimeoutError:
-            logger.warning("Batch %d-%d waited %.0fs for bot %d — skipping",
-                batch_start, batch_end, STREAM_SEM_WAIT_TIMEOUT_S,
-                getattr(cl, 'pool_index', '?'))
+            logger.warning(
+                "Batch %d-%d waited %.0fs for bot %d — skipping",
+                batch_start,
+                batch_end,
+                STREAM_SEM_WAIT_TIMEOUT_S,
+                getattr(cl, "pool_index", "?"),
+            )
             return False
         try:
             async with _media_session_scope(cl, msg):
@@ -1259,13 +1358,20 @@ async def parallel_stream_generator(
                 # concurrent cold starts) would otherwise retry upload.GetFile
                 # forever and hold the stream open indefinitely.
                 async with asyncio.timeout(timeout):
-                    async for part in cl.stream_media(msg, limit=batch_end - batch_start + 1, offset=batch_start):
+                    async for part in cl.stream_media(
+                        msg, limit=batch_end - batch_start + 1, offset=batch_start
+                    ):
                         now = time.perf_counter()
                         if current > batch_start and now - last_progress > stall:
-                            logger.warning("Batch %d-%d stalled %.0fs (bot %d, got %d/%d)",
-                                batch_start, batch_end, now - last_progress,
-                                getattr(cl, 'pool_index', '?'), current - batch_start,
-                                batch_end - batch_start + 1)
+                            logger.warning(
+                                "Batch %d-%d stalled %.0fs (bot %d, got %d/%d)",
+                                batch_start,
+                                batch_end,
+                                now - last_progress,
+                                getattr(cl, "pool_index", "?"),
+                                current - batch_start,
+                                batch_end - batch_start + 1,
+                            )
                             break
                         data = bytes(part)
                         video_cache.put(current, data)
@@ -1274,15 +1380,27 @@ async def parallel_stream_generator(
                         current += 1
                         last_progress = time.perf_counter()
         except asyncio.TimeoutError:
-            logger.warning("Batch %d-%d timed out after %.0fs (bot %d, got %d/%d)",
-                batch_start, batch_end, timeout, getattr(cl, 'pool_index', '?'), current - batch_start,
-                batch_end - batch_start + 1)
+            logger.warning(
+                "Batch %d-%d timed out after %.0fs (bot %d, got %d/%d)",
+                batch_start,
+                batch_end,
+                timeout,
+                getattr(cl, "pool_index", "?"),
+                current - batch_start,
+                batch_end - batch_start + 1,
+            )
             return False
         finally:
             sem.release()
         elapsed = time.perf_counter() - t0
         if elapsed > 2.5:
-            logger.warning("Slow batch %d-%d: %.1fs (bot %d)", batch_start, batch_end, elapsed, getattr(cl, 'pool_index', '?'))
+            logger.warning(
+                "Slow batch %d-%d: %.1fs (bot %d)",
+                batch_start,
+                batch_end,
+                elapsed,
+                getattr(cl, "pool_index", "?"),
+            )
         return current - 1 == batch_end
 
     async def _fetch_one(chunk_offset, cl, msg, sem, timeout=None):
@@ -1304,7 +1422,9 @@ async def parallel_stream_generator(
                 # media session (auth throttling) can't hold this chunk forever.
                 async with asyncio.timeout(timeout):
                     d = bytearray()
-                    async for part in cl.stream_media(msg, limit=1, offset=chunk_offset):
+                    async for part in cl.stream_media(
+                        msg, limit=1, offset=chunk_offset
+                    ):
                         d.extend(part)
                 data = bytes(d)
                 video_cache.put(chunk_offset, data)
@@ -1313,7 +1433,12 @@ async def parallel_stream_generator(
         except asyncio.TimeoutError:
             logger.warning("Chunk %d timed out after %.0fs", chunk_offset, timeout)
             return None
-        except (FileReferenceInvalid, FileReferenceExpired, AuthKeyUnregistered, AuthBytesInvalid):
+        except (
+            FileReferenceInvalid,
+            FileReferenceExpired,
+            AuthKeyUnregistered,
+            AuthBytesInvalid,
+        ):
             raise
         except Exception:
             return None
@@ -1337,10 +1462,19 @@ async def parallel_stream_generator(
                     try:
                         local_msg = await _fetch_message(client, chat_id, message_id)
                     except Exception as e:
-                        logger.error("Bot %d: failed to fetch message %d: %s", c_idx, message_id, e)
+                        logger.error(
+                            "Bot %d: failed to fetch message %d: %s",
+                            c_idx,
+                            message_id,
+                            e,
+                        )
                         return
                 if not local_msg:
-                    logger.error("Bot %d: message %d not found — failing chunks", c_idx, message_id)
+                    logger.error(
+                        "Bot %d: message %d not found — failing chunks",
+                        c_idx,
+                        message_id,
+                    )
                     while not task_queue.empty():
                         try:
                             batch_start, batch_end = task_queue.get_nowait()
@@ -1350,7 +1484,9 @@ async def parallel_stream_generator(
                             fut = results[chunk_offset]
                             if not fut.done():
                                 fut.set_exception(
-                                    SourceMessageGone(f"message {message_id} not found in chat {chat_id}")
+                                    SourceMessageGone(
+                                        f"message {message_id} not found in chat {chat_id}"
+                                    )
                                 )
                                 # Mark retrieved so an early client disconnect
                                 # (futures never awaited) doesn't warn at GC.
@@ -1374,36 +1510,74 @@ async def parallel_stream_generator(
                         # Kurigram's stream_media handles CDN redirects internally
                         # (FileCdnRedirect → temp CDN session → decrypt → hash check),
                         # so a single native path covers both normal and CDN fetches.
-                        batch_ok = await _fetch_batch(batch_start, batch_end, client, local_msg, semaphore)
+                        batch_ok = await _fetch_batch(
+                            batch_start, batch_end, client, local_msg, semaphore
+                        )
                     except (FileReferenceInvalid, FileReferenceExpired):
-                        logger.warning("Bot %d: batch file reference expired, re-fetching message", c_idx)
+                        logger.warning(
+                            "Bot %d: batch file reference expired, re-fetching message",
+                            c_idx,
+                        )
                         _mark_msg_poisoned(client, chat_id, message_id)
                         try:
-                            local_msg = await _fetch_message(client, chat_id, message_id, force=True)
-                            batch_ok = await _fetch_batch(batch_start, batch_end, client, local_msg, semaphore)
+                            local_msg = await _fetch_message(
+                                client, chat_id, message_id, force=True
+                            )
+                            batch_ok = await _fetch_batch(
+                                batch_start, batch_end, client, local_msg, semaphore
+                            )
                         except Exception:
                             pass
                     except AuthKeyUnregistered:
-                        logger.warning("Bot %d: auth key expired in batch, reconnecting...", c_idx)
+                        logger.warning(
+                            "Bot %d: auth key expired in batch, reconnecting...", c_idx
+                        )
                         async with get_client_reconnect_lock(c_idx):
                             if await reconnect_client(client):
                                 try:
-                                    local_msg = await _fetch_message(client, chat_id, message_id, force=True)
-                                    batch_ok = await _fetch_batch(batch_start, batch_end, client, local_msg, semaphore)
+                                    local_msg = await _fetch_message(
+                                        client, chat_id, message_id, force=True
+                                    )
+                                    batch_ok = await _fetch_batch(
+                                        batch_start,
+                                        batch_end,
+                                        client,
+                                        local_msg,
+                                        semaphore,
+                                    )
                                 except Exception:
                                     pass
                     except AuthBytesInvalid:
-                        logger.warning("Bot %d: auth bytes invalid, refreshing media session...", c_idx)
+                        logger.warning(
+                            "Bot %d: auth bytes invalid, refreshing media session...",
+                            c_idx,
+                        )
                         async with get_client_reconnect_lock(c_idx):
-                            await _invalidate_media_sessions(client, _msg_dc_id(local_msg))
+                            await _invalidate_media_sessions(
+                                client, _msg_dc_id(local_msg)
+                            )
                             if await reconnect_client(client):
                                 try:
-                                    local_msg = await _fetch_message(client, chat_id, message_id, force=True)
-                                    batch_ok = await _fetch_batch(batch_start, batch_end, client, local_msg, semaphore)
+                                    local_msg = await _fetch_message(
+                                        client, chat_id, message_id, force=True
+                                    )
+                                    batch_ok = await _fetch_batch(
+                                        batch_start,
+                                        batch_end,
+                                        client,
+                                        local_msg,
+                                        semaphore,
+                                    )
                                 except Exception:
                                     pass
                     except Exception as e:
-                        logger.error("Bot %d failed batch %d-%d: %s", c_idx, batch_start, batch_end, e)
+                        logger.error(
+                            "Bot %d failed batch %d-%d: %s",
+                            c_idx,
+                            batch_start,
+                            batch_end,
+                            e,
+                        )
                         worker_failed = True
 
                     if batch_ok:
@@ -1415,64 +1589,117 @@ async def parallel_stream_generator(
                         if chunk_offset not in results or results[chunk_offset].done():
                             continue
                         try:
-                            chunk_data = await _fetch_one(chunk_offset, client, local_msg, semaphore)
+                            chunk_data = await _fetch_one(
+                                chunk_offset, client, local_msg, semaphore
+                            )
                             if chunk_data is not None:
                                 await _resolve_chunk_now(chunk_offset, chunk_data)
                                 continue
                         except (FileReferenceInvalid, FileReferenceExpired):
-                            logger.warning("Bot %d: file reference expired for chunk %d", c_idx, chunk_offset)
+                            logger.warning(
+                                "Bot %d: file reference expired for chunk %d",
+                                c_idx,
+                                chunk_offset,
+                            )
                             _mark_msg_poisoned(client, chat_id, message_id)
                             try:
-                                local_msg = await _fetch_message(client, chat_id, message_id, force=True)
+                                local_msg = await _fetch_message(
+                                    client, chat_id, message_id, force=True
+                                )
                                 async with semaphore:
                                     d = bytearray()
-                                    async for part in client.stream_media(local_msg, limit=1, offset=chunk_offset):
+                                    async for part in client.stream_media(
+                                        local_msg, limit=1, offset=chunk_offset
+                                    ):
                                         d.extend(part)
                                 data = bytes(d)
                                 video_cache.put(chunk_offset, data)
                                 await _resolve_chunk_now(chunk_offset, data)
                                 continue
                             except Exception as e2:
-                                logger.error("Bot %d failed chunk %d after re-fetch: %s", c_idx, chunk_offset, e2)
+                                logger.error(
+                                    "Bot %d failed chunk %d after re-fetch: %s",
+                                    c_idx,
+                                    chunk_offset,
+                                    e2,
+                                )
                         except AuthKeyUnregistered:
-                            logger.warning("Bot %d: auth key expired for chunk %d", c_idx, chunk_offset)
+                            logger.warning(
+                                "Bot %d: auth key expired for chunk %d",
+                                c_idx,
+                                chunk_offset,
+                            )
                             async with get_client_reconnect_lock(c_idx):
                                 if await reconnect_client(client):
                                     try:
-                                        local_msg = await _fetch_message(client, chat_id, message_id, force=True)
+                                        local_msg = await _fetch_message(
+                                            client, chat_id, message_id, force=True
+                                        )
                                         async with semaphore:
                                             d = bytearray()
-                                            async for part in client.stream_media(local_msg, limit=1, offset=chunk_offset):
+                                            async for part in client.stream_media(
+                                                local_msg, limit=1, offset=chunk_offset
+                                            ):
                                                 d.extend(part)
                                         data = bytes(d)
                                         video_cache.put(chunk_offset, data)
                                         await _resolve_chunk_now(chunk_offset, data)
                                         continue
                                     except Exception as e2:
-                                        logger.error("Bot %d failed chunk %d after reconnect: %s", c_idx, chunk_offset, e2)
+                                        logger.error(
+                                            "Bot %d failed chunk %d after reconnect: %s",
+                                            c_idx,
+                                            chunk_offset,
+                                            e2,
+                                        )
                                 else:
-                                    logger.error("Bot %d: reconnect failed for chunk %d", c_idx, chunk_offset)
+                                    logger.error(
+                                        "Bot %d: reconnect failed for chunk %d",
+                                        c_idx,
+                                        chunk_offset,
+                                    )
                         except AuthBytesInvalid:
-                            logger.warning("Bot %d: auth bytes invalid for chunk %d, refreshing media session...", c_idx, chunk_offset)
+                            logger.warning(
+                                "Bot %d: auth bytes invalid for chunk %d, refreshing media session...",
+                                c_idx,
+                                chunk_offset,
+                            )
                             async with get_client_reconnect_lock(c_idx):
-                                await _invalidate_media_sessions(client, _msg_dc_id(local_msg))
+                                await _invalidate_media_sessions(
+                                    client, _msg_dc_id(local_msg)
+                                )
                                 if await reconnect_client(client):
                                     try:
-                                        local_msg = await _fetch_message(client, chat_id, message_id, force=True)
+                                        local_msg = await _fetch_message(
+                                            client, chat_id, message_id, force=True
+                                        )
                                         async with semaphore:
                                             d = bytearray()
-                                            async for part in client.stream_media(local_msg, limit=1, offset=chunk_offset):
+                                            async for part in client.stream_media(
+                                                local_msg, limit=1, offset=chunk_offset
+                                            ):
                                                 d.extend(part)
                                         data = bytes(d)
                                         video_cache.put(chunk_offset, data)
                                         await _resolve_chunk_now(chunk_offset, data)
                                         continue
                                     except Exception as e2:
-                                        logger.error("Bot %d failed chunk %d after refresh: %s", c_idx, chunk_offset, e2)
+                                        logger.error(
+                                            "Bot %d failed chunk %d after refresh: %s",
+                                            c_idx,
+                                            chunk_offset,
+                                            e2,
+                                        )
                                 else:
-                                    logger.error("Bot %d: reconnect failed for chunk %d", c_idx, chunk_offset)
+                                    logger.error(
+                                        "Bot %d: reconnect failed for chunk %d",
+                                        c_idx,
+                                        chunk_offset,
+                                    )
                         except Exception as e:
-                            logger.error("Bot %d failed chunk %d: %s", c_idx, chunk_offset, e)
+                            logger.error(
+                                "Bot %d failed chunk %d: %s", c_idx, chunk_offset, e
+                            )
                             worker_failed = True
                     task_queue.task_done()
                 if worker_failed:
@@ -1484,7 +1711,6 @@ async def parallel_stream_generator(
         except asyncio.TimeoutError:
             logger.error("Worker %d: timed out waiting for client", worker_id)
 
-
     # Launch workers — but only when there are uncached chunks to fetch. A
     # fully RAM/disk-cached range has an empty queue; spawning workers would
     # just have each grab a client slot to find nothing (needless lock churn
@@ -1492,9 +1718,7 @@ async def parallel_stream_generator(
     # _resolve_chunk / _fetch_chunk_now, which take clients on demand.
     worker_tasks = []
     if not task_queue.empty():
-        worker_tasks = [
-            asyncio.create_task(worker(i)) for i in range(concurrency)
-        ]
+        worker_tasks = [asyncio.create_task(worker(i)) for i in range(concurrency)]
 
     async def _fetch_chunk_now(chunk_idx: int):
         """Emergency single-chunk fetch used when a chunk that was disk-resident
@@ -1523,6 +1747,7 @@ async def parallel_stream_generator(
     # first-batch TTFB stays low (~1-3s healthy, ~5-7s on a slow DC).
     MIN_PREBUFFER = 10
     prebuffer_n = min(MIN_PREBUFFER, total_chunks)
+
     # Resolve disk-resident prebuffer chunks directly (lazy, no RAM burst).
     # This must cover BOTH branches below: with an empty RAM cache a
     # single-chunk range that is disk-resident has NO worker assigned to it
@@ -1548,13 +1773,23 @@ async def parallel_stream_generator(
                 if not results[cidx].done():
                     results[cidx].set_result(data)
                 return
-            logger.error("Prebuffer chunk %d unrecoverable — aborting stream %d", cidx, message_id)
+            logger.error(
+                "Prebuffer chunk %d unrecoverable — aborting stream %d",
+                cidx,
+                message_id,
+            )
             raise asyncio.TimeoutError(f"Prebuffer chunk {cidx} unrecoverable")
+
     if prebuffer_n > 1:
-        await asyncio.gather(*(_prebuffer_chunk(start_chunk + i) for i in range(prebuffer_n)))
-        logger.info("Prebuffered %d / %d chunks (%.1f MB)",
-                    prebuffer_n, total_chunks,
-                    prebuffer_n * chunk_size / 1024 / 1024)
+        await asyncio.gather(
+            *(_prebuffer_chunk(start_chunk + i) for i in range(prebuffer_n))
+        )
+        logger.info(
+            "Prebuffered %d / %d chunks (%.1f MB)",
+            prebuffer_n,
+            total_chunks,
+            prebuffer_n * chunk_size / 1024 / 1024,
+        )
     elif prebuffer_n == 1:
         await _prebuffer_chunk(start_chunk)
 
@@ -1563,13 +1798,16 @@ async def parallel_stream_generator(
     cache_served = 0
     bytes_yielded = 0
     try:
+
         async def _resolve_chunk(chunk_idx: int) -> bytes:
             """Resolve a chunk for the yield loop. A transient Telegram
             slowdown (flood wait, slow DC) must not truncate the response, so
             a stalled worker result is retried via bounded emergency
             single-chunk fetches before giving up."""
             if chunk_idx in disk_resident:
-                ddata = await asyncio.to_thread(_disk_cache.get, chat_id, message_id, chunk_idx)
+                ddata = await asyncio.to_thread(
+                    _disk_cache.get, chat_id, message_id, chunk_idx
+                )
                 if ddata is not None:
                     return ddata
                 data = await _fetch_chunk_now(chunk_idx)
@@ -1582,14 +1820,23 @@ async def parallel_stream_generator(
                         return await results[chunk_idx]
                 except asyncio.TimeoutError:
                     refetches += 1
-                    logger.warning("Chunk %d stalled %.0fs — emergency refetch (%d/%d)",
-                                   chunk_idx, _YIELD_CHUNK_TIMEOUT, refetches, _STALL_REFETCH_LIMIT)
+                    logger.warning(
+                        "Chunk %d stalled %.0fs — emergency refetch (%d/%d)",
+                        chunk_idx,
+                        _YIELD_CHUNK_TIMEOUT,
+                        refetches,
+                        _STALL_REFETCH_LIMIT,
+                    )
                     data = await _fetch_chunk_now(chunk_idx)
                     if data is not None:
                         return data
                     if refetches >= _STALL_REFETCH_LIMIT:
-                        logger.error("Chunk %d unrecoverable after %d refetches — aborting stream %d",
-                                     chunk_idx, refetches, message_id)
+                        logger.error(
+                            "Chunk %d unrecoverable after %d refetches — aborting stream %d",
+                            chunk_idx,
+                            refetches,
+                            message_id,
+                        )
                         raise asyncio.TimeoutError(
                             f"Chunk {chunk_idx} unrecoverable after {refetches} refetches"
                         )
@@ -1616,7 +1863,12 @@ async def parallel_stream_generator(
             bytes_yielded += len(chunk_data)
             if not first_chunk_logged:
                 elapsed = time.perf_counter() - stream_start
-                logger.info("Chunk %d in %.1fs (cached=%s)", chunk_idx, elapsed, cached_data is not None)
+                logger.info(
+                    "Chunk %d in %.1fs (cached=%s)",
+                    chunk_idx,
+                    elapsed,
+                    cached_data is not None,
+                )
                 first_chunk_logged = True
 
             # Active client-liveness probe: uvicorn only pushes http.disconnect
@@ -1626,7 +1878,10 @@ async def parallel_stream_generator(
             if request is not None:
                 try:
                     if await request.is_disconnected():
-                        logger.info("Streamgen msg %d ended: client disconnected (polled)", message_id)
+                        logger.info(
+                            "Streamgen msg %d ended: client disconnected (polled)",
+                            message_id,
+                        )
                         return
                 except Exception:
                     pass  # never let a liveness check kill a healthy stream
@@ -1653,12 +1908,20 @@ async def parallel_stream_generator(
             elif ei[0] is asyncio.CancelledError:
                 # ASGI layer cancelled us — uvicorn tears down the response
                 # task the moment the client socket dies (or on shutdown).
-                logger.info("Streamgen msg %d ended: cancelled (client disconnect/shutdown)", message_id)
+                logger.info(
+                    "Streamgen msg %d ended: cancelled (client disconnect/shutdown)",
+                    message_id,
+                )
             else:
                 import traceback as _tb
-                logger.error("Streamgen msg %d aborted: %s: %s\n%s",
-                             message_id, ei[0].__name__, ei[1],
-                             "".join(_tb.format_tb(ei[2])))
+
+                logger.error(
+                    "Streamgen msg %d aborted: %s: %s\n%s",
+                    message_id,
+                    ei[0].__name__,
+                    ei[1],
+                    "".join(_tb.format_tb(ei[2])),
+                )
         # Cancel workers, await drain, then clear results (avoids "Task destroyed but pending").
         # Bounded: a worker wedged in a Telegram RPC (flood wait, broken DC) must
         # never hold the HTTP response open for minutes — abandon it after 5s.
@@ -1669,7 +1932,11 @@ async def parallel_stream_generator(
                 asyncio.gather(*worker_tasks, return_exceptions=True), timeout=5
             )
         except (asyncio.TimeoutError, asyncio.CancelledError):
-            logger.warning("Worker drain timed out for msg %d (%d tasks)", message_id, len(worker_tasks))
+            logger.warning(
+                "Worker drain timed out for msg %d (%d tasks)",
+                message_id,
+                len(worker_tasks),
+            )
         results.clear()
         if _forward_streams.get((chat_id, message_id)) is _forward_stream:
             _forward_streams.pop((chat_id, message_id), None)
@@ -1689,12 +1956,17 @@ async def parallel_stream_generator(
         # Cache kept alive across seek requests — OOM guard in main.py handles eviction
         elapsed = time.perf_counter() - stream_start
         cinfo = video_cache.info
-        logger.info("Done: %d ch, %.1f MB, %.1fs", total_chunks, bytes_yielded / 1024 / 1024, elapsed)
+        logger.info(
+            "Done: %d ch, %.1f MB, %.1fs",
+            total_chunks,
+            bytes_yielded / 1024 / 1024,
+            elapsed,
+        )
         logger.info("Cache hits/evicts: %d/%d", cinfo["hits"], cinfo["evictions"])
 
 
 async def stream_file(
-    client: Client,          # kept for API compat; pool is used instead
+    client: Client,  # kept for API compat; pool is used instead
     message,
     from_bytes: int,
     until_bytes: int,
@@ -1710,7 +1982,9 @@ async def stream_file(
     bytes_to_skip = from_bytes % CHUNK_SIZE
 
     t0 = time.perf_counter()
-    logger.debug("Streaming %d-%d (%d bytes)", from_bytes, until_bytes, total_bytes_needed)
+    logger.debug(
+        "Streaming %d-%d (%d bytes)", from_bytes, until_bytes, total_bytes_needed
+    )
 
     await _stream_semaphore.acquire()
     try:
@@ -1733,6 +2007,11 @@ async def stream_file(
         _stream_semaphore.release()
 
     elapsed = time.perf_counter() - t0
-    logger.info("stream_file %d-%d done: %.1f MB in %.1fs (%.1f Mbps)",
-                from_bytes, until_bytes, bytes_yielded / 1024 / 1024, elapsed,
-                bytes_yielded * 8 / elapsed / 1024 / 1024 if elapsed > 0 else 0)
+    logger.info(
+        "stream_file %d-%d done: %.1f MB in %.1fs (%.1f Mbps)",
+        from_bytes,
+        until_bytes,
+        bytes_yielded / 1024 / 1024,
+        elapsed,
+        bytes_yielded * 8 / elapsed / 1024 / 1024 if elapsed > 0 else 0,
+    )

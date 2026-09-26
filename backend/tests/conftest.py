@@ -36,4 +36,4 @@ os.environ.setdefault("MEMORY", "3Gi")
 os.environ.setdefault("OOM_THRESHOLD_PCT", "90")
 
 # Add backend to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))

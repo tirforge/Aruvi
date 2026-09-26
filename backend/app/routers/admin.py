@@ -29,9 +29,7 @@ async def admin_stats(
     folders_c = await db.execute(select(func.count()).select_from(Folder))
     storage_c = await db.execute(select(func.coalesce(func.sum(File.file_size), 0)))
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
-    active_c = await db.execute(
-        select(func.count()).where(User.last_active >= cutoff)
-    )
+    active_c = await db.execute(select(func.count()).where(User.last_active >= cutoff))
     return AdminStats(
         total_users=users_c.scalar() or 0,
         total_files=files_c.scalar() or 0,
@@ -113,7 +111,9 @@ async def admin_toggle_admin(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     if user.id == admin.id:
-        raise HTTPException(status_code=400, detail="Cannot change your own admin status")
+        raise HTTPException(
+            status_code=400, detail="Cannot change your own admin status"
+        )
     user.is_admin = not user.is_admin
     await db.commit()
     return {"is_admin": user.is_admin}
@@ -135,6 +135,7 @@ async def admin_delete_user(
     # Collect storage-channel message ids BEFORE the cascade delete removes
     # the file rows, so the Telegram copies can be cleaned up after commit.
     from ..telegram import delete_from_storage_channel, invalidate_message_cache_batch
+
     msg_result = await db.execute(
         select(File.channel_message_id).where(File.user_id == user.id)
     )
@@ -149,7 +150,7 @@ async def admin_delete_user(
     # never hold the DB transaction open. DB rows are already gone either way.
     if msg_ids:
         for i in range(0, len(msg_ids), 100):
-            batch = msg_ids[i:i + 100]
+            batch = msg_ids[i : i + 100]
             try:
                 await delete_from_storage_channel(batch)
             except Exception:

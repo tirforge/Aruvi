@@ -4,7 +4,12 @@ import time
 import logging
 import threading
 from collections import deque
-from .streaming import _cache_manager, get_forward_snapshot, _forward_streams, _dc_disk_size
+from .streaming import (
+    _cache_manager,
+    get_forward_snapshot,
+    _forward_streams,
+    _dc_disk_size,
+)
 
 logger = logging.getLogger("streamer")
 
@@ -114,7 +119,9 @@ def _parse_mem_env(val: str) -> int:
     val = val.strip().upper()
     for suffix in ["GIB", "GI", "GB", "G", "MIB", "MI", "MB", "M"]:
         if val.endswith(suffix):
-            return int(float(val[: -len(suffix)]) * (1024**3 if suffix[0] == "G" else 1024**2))
+            return int(
+                float(val[: -len(suffix)]) * (1024**3 if suffix[0] == "G" else 1024**2)
+            )
     return int(val)
 
 
@@ -155,8 +162,8 @@ def _discover_cgroup_memory() -> tuple[int | None, int | None]:
 
 
 _MEM_STAT_PATHS = [
-    "/sys/fs/cgroup/memory.stat",           # cgroup v2
-    "/sys/fs/cgroup/memory/memory.stat",     # cgroup v1
+    "/sys/fs/cgroup/memory.stat",  # cgroup v2
+    "/sys/fs/cgroup/memory/memory.stat",  # cgroup v1
 ]
 
 
@@ -190,8 +197,16 @@ def _read_memory_stat() -> dict[str, int] | None:
     return None
 
 
-_MEM_STAT_KEYS = ["anon", "file", "kernel_stack", "pagetables",
-                   "slab_reclaimable", "slab_unreclaimable", "sock", "shmem"]
+_MEM_STAT_KEYS = [
+    "anon",
+    "file",
+    "kernel_stack",
+    "pagetables",
+    "slab_reclaimable",
+    "slab_unreclaimable",
+    "sock",
+    "shmem",
+]
 
 
 def _sum_memory_stat(stat: dict) -> int:
@@ -232,7 +247,7 @@ def _sum_proc_rss() -> int:
                     for cline in cf:
                         if cline.startswith("0::"):
                             pid_cgroup = cline.strip()[3:]
-                            pid_in_cgroup = (pid_cgroup == own_cgroup)
+                            pid_in_cgroup = pid_cgroup == own_cgroup
                             break
                     if not pid_in_cgroup:
                         continue
@@ -258,13 +273,22 @@ def maybe_oom_clear():
     global _last_oom_clear
     cur, mx = _discover_cgroup_memory()
     now = time.monotonic()
-    if cur is not None and mx is not None and cur > 0.65 * mx and now - _last_oom_clear > _OOM_CLEAR_COOLDOWN:
+    if (
+        cur is not None
+        and mx is not None
+        and cur > 0.65 * mx
+        and now - _last_oom_clear > _OOM_CLEAR_COOLDOWN
+    ):
         _last_oom_clear = now
         active = set(_forward_streams.keys())  # keys are (chat_id, message_id)
         freed = _cache_manager.clear_all(exclude_keys=active)
         kept = len(active)
         if freed > 0:
-            logger.warning("OOM guard: cleared %.1f MB from cache (%d streams preserved)", freed / 1024 / 1024, kept)
+            logger.warning(
+                "OOM guard: cleared %.1f MB from cache (%d streams preserved)",
+                freed / 1024 / 1024,
+                kept,
+            )
 
 
 def get_ram() -> dict:
@@ -306,7 +330,9 @@ def get_net() -> dict:
                 for line in f:
                     parts = line.strip().split()
                     iface = parts[0].rstrip(":")
-                    if iface == "lo" or iface.startswith(("lo:", "docker", "veth", "br-", "vibr")):
+                    if iface == "lo" or iface.startswith(
+                        ("lo:", "docker", "veth", "br-", "vibr")
+                    ):
                         continue
                     # Sum every real interface — hosts use ens5/wlan0/enp0s*, not
                     # just eth0 (rx/tx stayed 0 forever there).
@@ -372,7 +398,9 @@ async def get_status() -> dict:
         return get_cpu(), get_ram(), get_net()
 
     cpu, ram, net = await asyncio.to_thread(_sample)
-    _history.append({"cpu": cpu, "ram": ram["percent"], "rx": net["rx_mbps"], "tx": net["tx_mbps"]})
+    _history.append(
+        {"cpu": cpu, "ram": ram["percent"], "rx": net["rx_mbps"], "tx": net["tx_mbps"]}
+    )
     logs = _ring_handler.get_logs() if _ring_handler else []
     cache = _cache_manager.info
     per_video = _cache_manager.per_video
@@ -387,21 +415,31 @@ async def get_status() -> dict:
         v["forward_max_mb"] = fwd["max_mb"] if fwd else 0
     # Active streams not yet in backward cache
     for mid, fwd in forward_by_mid.items():
-        per_video.append({
-            "message_id": mid,
-            "chat_id": fwd["chat_id"],
-            "chunks": 0, "size_mb": 0, "max_mb": 200,
-            "hits": 0, "misses": 0, "evictions": 0,
-            "forward_mb": fwd["prebuffer_mb"],
-            "forward_max_mb": fwd["max_mb"],
-        })
+        per_video.append(
+            {
+                "message_id": mid,
+                "chat_id": fwd["chat_id"],
+                "chunks": 0,
+                "size_mb": 0,
+                "max_mb": 200,
+                "hits": 0,
+                "misses": 0,
+                "evictions": 0,
+                "forward_mb": fwd["prebuffer_mb"],
+                "forward_max_mb": fwd["max_mb"],
+            }
+        )
 
     cache["per_video"] = per_video
-    cache["forward"] = {
-        "total_prebuffer_mb": sum(s["prebuffer_mb"] for s in forward),
-        "total_max_mb": sum(s["max_mb"] for s in forward),
-        "stream_count": len(forward),
-    } if forward else None
+    cache["forward"] = (
+        {
+            "total_prebuffer_mb": sum(s["prebuffer_mb"] for s in forward),
+            "total_max_mb": sum(s["max_mb"] for s in forward),
+            "stream_count": len(forward),
+        }
+        if forward
+        else None
+    )
     # Full-cache directory scan — run off the event loop so status polls
     # never stall active streams when the 15s internal cache expires.
     disk_bytes = await asyncio.to_thread(_dc_disk_size)

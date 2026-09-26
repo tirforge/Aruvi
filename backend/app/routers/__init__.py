@@ -1,6 +1,7 @@
 """
 Router package initialization.
 """
+
 from .files import router as files_router
 from .folders import router as folders_router
 from .streaming import router as streaming_router
@@ -14,4 +15,17 @@ from .grab import router as grab_router
 from .subtitles import router as subtitles_router
 from .setup import router as setup_router
 
-__all__ = ["files_router", "folders_router", "streaming_router", "auth_router", "tv_router", "admin_router", "gdrive_router", "legal_router", "diagnostic_router", "grab_router", "subtitles_router", "setup_router"]
+__all__ = [
+    "files_router",
+    "folders_router",
+    "streaming_router",
+    "auth_router",
+    "tv_router",
+    "admin_router",
+    "gdrive_router",
+    "legal_router",
+    "diagnostic_router",
+    "grab_router",
+    "subtitles_router",
+    "setup_router",
+]

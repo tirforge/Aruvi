@@ -7,6 +7,7 @@ provider paginates every result page (huge + 400 blips) and its download
 requires a username/password login — while the REST API works with just an
 API key (free tier: 5 subs/day anonymous).
 """
+
 import asyncio
 import os
 import logging
@@ -64,15 +65,27 @@ def _os_enabled() -> bool:
 
 
 _KEYS = {
-    "resolution", "source", "video_codec", "audio_codec", "release_group",
-    "format", "edition", "proper_count", "stream", "video_profile",
+    "resolution",
+    "source",
+    "video_codec",
+    "audio_codec",
+    "release_group",
+    "format",
+    "edition",
+    "proper_count",
+    "stream",
+    "video_profile",
 }
 
 
 def _video_from_name(name: str) -> object:
     """Build a subliminal Movie/Episode from a stored file name via guessit."""
     info = _guessit(name)
-    base_title = info.get("title") or info.get("series") or os.path.splitext(os.path.basename(name))[0]
+    base_title = (
+        info.get("title")
+        or info.get("series")
+        or os.path.splitext(os.path.basename(name))[0]
+    )
     kwargs = {k: v for k, v in info.items() if k in _KEYS and v is not None}
     year = kwargs.pop("year", None) or info.get("year")
     common = dict(year=int(year)) if year else {}
@@ -89,7 +102,9 @@ def _video_from_name(name: str) -> object:
             eps = [int(e) for e in eps if e is not None] or [1]
         except (TypeError, ValueError):
             season, eps = 1, [1]
-        return Episode(name, series=base_title, season=season, episodes=eps, **common, **kwargs)
+        return Episode(
+            name, series=base_title, season=season, episodes=eps, **common, **kwargs
+        )
 
     return Movie(name, title=base_title, **common, **kwargs)
 
@@ -149,8 +164,12 @@ def _os_lang_code() -> str:
     return alpha2
 
 
-async def _os_search(title: str | None, year: int | None,
-                     season: int | None = None, episode: int | None = None) -> list[dict]:
+async def _os_search(
+    title: str | None,
+    year: int | None,
+    season: int | None = None,
+    episode: int | None = None,
+) -> list[dict]:
     """Query api.opensubtitles.com /subtitles (single page). Returns serialized dicts."""
     if not title:
         return []
@@ -169,7 +188,9 @@ async def _os_search(title: str | None, year: int | None,
 
     try:
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-            r = await client.get(f"{_OS_URL}/subtitles", headers=_os_headers(), params=params)
+            r = await client.get(
+                f"{_OS_URL}/subtitles", headers=_os_headers(), params=params
+            )
             r.raise_for_status()
             payload = r.json()
     except Exception as exc:
@@ -186,17 +207,19 @@ async def _os_search(title: str | None, year: int | None,
         file_id = files[0].get("file_id")
         release = attrs.get("release") or attrs.get("slug") or f"subtitle {sub_id}"
         score = int(attrs.get("download_count") or 0)
-        out.append({
-            "provider": "opensubtitlescom",
-            "id": str(sub_id),
-            "download_id": file_id,
-            "name": release,
-            "language": _os_lang_code(),
-            "language_name": _os_lang_code(),
-            "score": score,
-            "format": "srt",
-            "matches": ["title"] + (["year"] if year else []),
-        })
+        out.append(
+            {
+                "provider": "opensubtitlescom",
+                "id": str(sub_id),
+                "download_id": file_id,
+                "name": release,
+                "language": _os_lang_code(),
+                "language_name": _os_lang_code(),
+                "score": score,
+                "format": "srt",
+                "matches": ["title"] + (["year"] if year else []),
+            }
+        )
     # most popular first
     out.sort(key=lambda d: d["score"], reverse=True)
     return out
@@ -205,7 +228,9 @@ async def _os_search(title: str | None, year: int | None,
 async def _os_download(sub_id: str, file_id: int | None) -> tuple[str, str]:
     """Download subtitle content via the /download endpoint. Returns (format, text)."""
     if file_id is None:
-        raise HTTPException(status_code=404, detail="Subtitle has no downloadable file entry")
+        raise HTTPException(
+            status_code=404, detail="Subtitle has no downloadable file entry"
+        )
     try:
         async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
             r = await client.post(
@@ -217,19 +242,28 @@ async def _os_download(sub_id: str, file_id: int | None) -> tuple[str, str]:
             dl = r.json()
             remaining = int(dl.get("remaining") or 0)
             if remaining <= 0:
-                raise HTTPException(status_code=429, detail="OpenSubtitles free download quota reached for today")
+                raise HTTPException(
+                    status_code=429,
+                    detail="OpenSubtitles free download quota reached for today",
+                )
             link = dl.get("link")
             if not link:
-                raise HTTPException(status_code=502, detail="OpenSubtitles returned no download link")
+                raise HTTPException(
+                    status_code=502, detail="OpenSubtitles returned no download link"
+                )
             content = (await client.get(link, headers=_os_headers())).content
     except HTTPException:
         raise
     except Exception as exc:
         logger.warning("opensubtitlescom download failed: %s", exc)
-        raise HTTPException(status_code=502, detail="Failed to download subtitle from provider")
+        raise HTTPException(
+            status_code=502, detail="Failed to download subtitle from provider"
+        )
 
     if not content:
-        raise HTTPException(status_code=502, detail="OpenSubtitles returned empty subtitle")
+        raise HTTPException(
+            status_code=502, detail="OpenSubtitles returned empty subtitle"
+        )
     text = content.decode("utf-8", errors="replace")
     fmt = "webvtt" if text.lstrip().startswith("WEBVTT") else "srt"
     return fmt, text
@@ -246,7 +280,9 @@ async def search_subtitles(
     current_user: User = Depends(get_current_user),
 ):
     """Look up internet subtitles for a stored file's guessed title."""
-    result = await db.execute(select(File).where(File.id == file_id, File.user_id == current_user.id))
+    result = await db.execute(
+        select(File).where(File.id == file_id, File.user_id == current_user.id)
+    )
     file = result.scalar_one_or_none()
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
@@ -256,11 +292,15 @@ async def search_subtitles(
         # never run it on the event loop.
         info = await asyncio.to_thread(_guessit, file.file_name)
     except Exception:
-        raise HTTPException(status_code=422, detail="Could not parse a title from this file name")
+        raise HTTPException(
+            status_code=422, detail="Could not parse a title from this file name"
+        )
 
     title = info.get("title") or info.get("series")
     if not title:
-        raise HTTPException(status_code=422, detail="Could not parse a title from this file name")
+        raise HTTPException(
+            status_code=422, detail="Could not parse a title from this file name"
+        )
 
     candidates: list[dict] = []
     providers = _subliminal_providers()
@@ -274,11 +314,14 @@ async def search_subtitles(
     if providers:
         _ensure_region()
         try:
+
             def _search():
                 video = _video_from_name(file.file_name)
                 found = subliminal.list_subtitles({video}, langs, providers=providers)
                 subs = found.get(video, [])
-                subs.sort(key=lambda s: subliminal.compute_score(s, video), reverse=True)
+                subs.sort(
+                    key=lambda s: subliminal.compute_score(s, video), reverse=True
+                )
                 return video, subs
 
             # Video parsing + score computation are CPU-heavy — keep them off
@@ -337,16 +380,25 @@ async def subtitle_content(
     current_user: User = Depends(get_current_user),
 ):
     """Download a specific subtitle and return SRT/VTT text."""
-    result = await db.execute(select(File).where(File.id == file_id, File.user_id == current_user.id))
+    result = await db.execute(
+        select(File).where(File.id == file_id, File.user_id == current_user.id)
+    )
     file = result.scalar_one_or_none()
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
 
     if provider == "opensubtitlescom":
         if not _os_enabled():
-            raise HTTPException(status_code=400, detail="OpenSubtitles API key not configured")
+            raise HTTPException(
+                status_code=400, detail="OpenSubtitles API key not configured"
+            )
         fmt, text = await _os_download(subtitle_id, download_id)
-        return {"provider": provider, "layer_id": subtitle_id, "format": fmt, "text": text}
+        return {
+            "provider": provider,
+            "layer_id": subtitle_id,
+            "format": fmt,
+            "text": text,
+        }
 
     _ensure_region()
     try:
@@ -357,10 +409,14 @@ async def subtitle_content(
     try:
         video = await asyncio.to_thread(_video_from_name, file.file_name)
     except Exception:
-        raise HTTPException(status_code=422, detail="Could not parse a title from this file name")
+        raise HTTPException(
+            status_code=422, detail="Could not parse a title from this file name"
+        )
 
     try:
-        found = await asyncio.to_thread(subliminal.list_subtitles, {video}, langs, providers=[provider])
+        found = await asyncio.to_thread(
+            subliminal.list_subtitles, {video}, langs, providers=[provider]
+        )
     except Exception as exc:
         logger.warning("subtitle lookup for provider %s failed: %s", provider, exc)
         raise HTTPException(status_code=502, detail="Subtitle provider unreachable")
@@ -371,13 +427,17 @@ async def subtitle_content(
             target = sub
             break
     if target is None:
-        raise HTTPException(status_code=404, detail="Subtitle no longer available from that provider")
+        raise HTTPException(
+            status_code=404, detail="Subtitle no longer available from that provider"
+        )
 
     try:
         await asyncio.to_thread(subliminal.download_subtitles, [target])
     except Exception as exc:
         logger.warning("subtitle download failed: %s", exc)
-        raise HTTPException(status_code=502, detail="Failed to download subtitle from provider")
+        raise HTTPException(
+            status_code=502, detail="Failed to download subtitle from provider"
+        )
 
     content = target.content or b""
     try:
@@ -392,4 +452,9 @@ async def subtitle_content(
         else:
             fmt = "srt"
 
-    return {"provider": target.provider_name, "layer_id": subtitle_id, "format": fmt, "text": text}
+    return {
+        "provider": target.provider_name,
+        "layer_id": subtitle_id,
+        "format": fmt,
+        "text": text,
+    }

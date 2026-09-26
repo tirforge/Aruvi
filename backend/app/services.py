@@ -1,6 +1,7 @@
 """
 Shared business logic and database queries.
 """
+
 from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
@@ -10,9 +11,11 @@ from .models import File, WatchProgress
 from sqlalchemy.orm import defer
 from .media_types import classify_file_type
 
+
 def escape_like(value: str) -> str:
     """Escape special LIKE/ILIKE characters to prevent SQL injection."""
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
 
 def add_urls_to_file(file: File) -> dict:
     """Add stream and thumbnail URLs to file response."""
@@ -36,15 +39,18 @@ def add_urls_to_file(file: File) -> dict:
         "created_at": file.created_at,
         "updated_at": file.updated_at,
         "stream_url": f"/api/stream/{file.id}",
-        "thumbnail_url": f"/api/stream/{file.id}/thumbnail" if file.thumbnail_file_id else None,
+        "thumbnail_url": f"/api/stream/{file.id}/thumbnail"
+        if file.thumbnail_file_id
+        else None,
         "last_pos": file.watch_progress[0].position if file.watch_progress else 0,
     }
-    
+
     if file.public_hash:
         data["public_hash"] = file.public_hash
         data["public_stream_url"] = f"/api/stream/s/{file.public_hash}"
-        
+
     return data
+
 
 async def fetch_recent_files(db: AsyncSession, user_id: int, limit: int) -> List[File]:
     """Get recently added files across all folders."""
@@ -58,7 +64,10 @@ async def fetch_recent_files(db: AsyncSession, user_id: int, limit: int) -> List
     result = await db.execute(query)
     return result.scalars().all()
 
-async def fetch_continue_watching_files(db: AsyncSession, user_id: int, limit: int) -> List[File]:
+
+async def fetch_continue_watching_files(
+    db: AsyncSession, user_id: int, limit: int
+) -> List[File]:
     """Get files with watch progress (not completed)."""
     query = (
         select(File)
@@ -67,7 +76,7 @@ async def fetch_continue_watching_files(db: AsyncSession, user_id: int, limit: i
             File.user_id == user_id,
             WatchProgress.user_id == user_id,
             WatchProgress.position > 0,
-            WatchProgress.completed.is_(False)
+            WatchProgress.completed.is_(False),
         )
         .options(selectinload(File.watch_progress), defer(File.thumbnail_data))
         .order_by(desc(WatchProgress.updated_at))
