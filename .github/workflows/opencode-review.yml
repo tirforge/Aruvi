@@ -12,6 +12,9 @@ on:
 
 jobs:
   review:
+    # Dependabot PRs are version bumps (covered by Dependency Review) and the
+    # opencode action hard-fails on them: dependabot[bot] has no write perms.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
       id-token: write
