@@ -1,0 +1,36 @@
+name: merge-sweep
+
+# Autonomous bot-PR sweeper. On schedule (every 6h) or manual trigger, the
+# sweeper agent merges green bot PRs (dependabot version bumps, opencode
+# fix PRs) and reports the rest. Human PRs are never touched. It can never
+# bypass branch protection (no --admin, ever).
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: anomalyco/opencode/github@latest
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          model: opencode/muse-spark-1.3-contributor-free
+          variant: xhigh
+          agent: sweeper
+          prompt: |
+            Sweep all open bot pull requests per .opencode/agents/sweeper.md:
+            merge the green ones, digest the rest. Human PRs untouched.
