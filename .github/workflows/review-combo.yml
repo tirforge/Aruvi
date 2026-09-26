@@ -131,11 +131,14 @@ jobs:
           # 3. SonarCloud open issues on this PR. Download to a file first,
           # then parse — never pipe a download straight into an interpreter.
           # Fallback keeps the job alive if the API is unreachable; empty
-          # result parses as CLEAN below.
-          curl -s -u "$SONAR_TOKEN:" -o findings/sonar.json \
+          # result parses as CLEAN below. -f matters: dependabot-triggered
+          # runs get NO secrets from GitHub, so the call 401s with an empty
+          # body — without -f curl exits 0, the fallback never fires, and the
+          # empty file crashes the parser below.
+          curl -sf -u "$SONAR_TOKEN:" -o findings/sonar.json \
             "https://sonarcloud.io/api/issues/search?componentKeys=tirforge_Aruvi&pullRequest=$PR&resolved=false&ps=100" \
             || echo '{"issues":[]}' > findings/sonar.json
-          python3 -c "import json; d=json.load(open('findings/sonar.json')); print('\n---\n'.join(f\"[{i['severity']}] {i['component'].split(':')[-1]}:{i.get('line','?')} {i['rule']} — {i['message']}\" for i in d.get('issues',[])) or 'CLEAN: no open Sonar issues.')" > findings/sonar.md
+          python3 -c "import json; raw=open('findings/sonar.json').read().strip() or '{\"issues\":[]}'; d=json.loads(raw); print('\n---\n'.join(f\"[{i['severity']}] {i['component'].split(':')[-1]}:{i.get('line','?')} {i['rule']} — {i['message']}\" for i in d.get('issues',[])) or 'CLEAN: no open Sonar issues.')" > findings/sonar.md
           wc -c findings/*.md
 
       - name: Decide clean vs dirty
