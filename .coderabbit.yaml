@@ -19,3 +19,15 @@ reviews:
     - "!backend/app/static/vendor/**"
 chat:
   auto_reply: true
+code_guidelines:
+  - path: backend/**
+    guidelines: >
+      Flag: raw SQL without bind parameters, N+1 query patterns, auth/token
+      handling flaws, secrets in code, missing input validation on new
+      endpoints, unbounded file/memory operations on streams.
+  - path: frontend/**
+    guidelines: >
+      Flag: tokens in localStorage without rotation handling, XSS via
+      dangerouslySetInnerHTML or unescaped URLs, focus loss after modal/menu
+      close, unhandled promise rejections in event handlers, useEffect
+      missing cleanup or stale-closure races.
