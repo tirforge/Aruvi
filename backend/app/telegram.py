@@ -2,6 +2,7 @@
 PyroTGFork MTProto client for Telegram interactions.
 Handles both bot commands and file streaming via a client pool.
 """
+
 import re
 import time
 import os
@@ -37,14 +38,17 @@ if not logger.handlers:
 _startup_logs: list[str] = []
 _MAX_DIAG_LOGS = 200
 
+
 def diag_log(msg):
     _startup_logs.append(msg)
     if len(_startup_logs) > _MAX_DIAG_LOGS:
         _startup_logs.pop(0)
     logger.info(msg)
 
+
 def get_diag_logs():
     return list(_startup_logs)
+
 
 # Build pool at module level
 tokens = settings.all_bot_tokens
@@ -57,6 +61,7 @@ if _on_hf and settings.mt_proxy_url:
     diag_log("HF Space detected — ignoring MT_PROXY_URL, connecting directly")
 elif settings.mt_proxy_url:
     from urllib.parse import urlparse
+
     p = urlparse(settings.mt_proxy_url)
     proxy_cfg = dict(
         scheme=p.scheme or "socks5",
@@ -137,9 +142,13 @@ async def start_one_client(i, c):
                 diag_log(f"Client {i}: already connected — skipping start")
                 return
             try:
-                diag_log(f"Client {i}: starting (attempt {attempt}, is_connected={c.is_connected})")
+                diag_log(
+                    f"Client {i}: starting (attempt {attempt}, is_connected={c.is_connected})"
+                )
                 await asyncio.wait_for(c.start(), timeout=connect_timeout)
-                diag_log(f"Client {i}: start() returned (is_connected={c.is_connected})")
+                diag_log(
+                    f"Client {i}: start() returned (is_connected={c.is_connected})"
+                )
                 me = await c.get_me()
                 label = "Main" if i == 0 else "Helper"
                 diag_log(f"Client {i} ({label}) started → @{me.username}")
@@ -148,7 +157,9 @@ async def start_one_client(i, c):
                 err_str = str(e).lower()
                 if "already connected" in err_str:
                     # Another coroutine won the race and finished the start.
-                    diag_log(f"Client {i}: already connected (caught) — treating as started")
+                    diag_log(
+                        f"Client {i}: already connected (caught) — treating as started"
+                    )
                     return
                 raise
             except Exception as e:
@@ -161,16 +172,22 @@ async def start_one_client(i, c):
                     await asyncio.sleep(wait)
                     continue
                 if attempt < max_attempts:
-                    delay = 2 ** attempt
-                    diag_log(f"Client {i}: transient error (attempt {attempt}): {e}. Retrying in {delay}s...")
+                    delay = 2**attempt
+                    diag_log(
+                        f"Client {i}: transient error (attempt {attempt}): {e}. Retrying in {delay}s..."
+                    )
                     await asyncio.sleep(delay)
                     continue
                 tb = traceback.format_exc()
-                diag_log(f"Client {i} failed to start after {max_attempts} attempts: {e}\n{tb}")
+                diag_log(
+                    f"Client {i} failed to start after {max_attempts} attempts: {e}\n{tb}"
+                )
     # If all attempts exhausted and this is main bot, log and continue
     # (server starts without it; background retries in _finish_startup)
     if i == 0 and not c.is_connected:
-        diag_log(f"Bot 0 failed to connect after {max_attempts} attempts — starting server anyway")
+        diag_log(
+            f"Bot 0 failed to connect after {max_attempts} attempts — starting server anyway"
+        )
 
 
 async def start_all_clients():
@@ -200,7 +217,7 @@ _RECONNECT_COOLDOWN = 60.0
 
 async def reconnect_client(client: Client) -> bool:
     """Disconnect, re-authorize, and reconnect a Pyrogram client.
-    
+
     Uses start() (not just connect()) so a new auth key is obtained
     when the old one was invalidated (AuthKeyUnregistered).
     Returns True if reconnection succeeded, False otherwise.
@@ -218,14 +235,18 @@ async def reconnect_client(client: Client) -> bool:
             if client.is_connected:
                 await client.disconnect()
             await client.start()
-        diag_log(f"Client {getattr(client, 'pool_index', '?')} re-authorized successfully")
+        diag_log(
+            f"Client {getattr(client, 'pool_index', '?')} re-authorized successfully"
+        )
         return True
     except Exception as e:
         # Circuit breaker: failed reconnects are often Telegram-side auth
         # rate-limiting — retrying immediately across many workers just hammers
         # it. Back off before the next attempt.
         _reconnect_cooldown_until[idx] = now + _RECONNECT_COOLDOWN
-        diag_log(f"Client {getattr(client, 'pool_index', '?')} re-auth failed: {e} (cooldown {_RECONNECT_COOLDOWN:.0f}s)")
+        diag_log(
+            f"Client {getattr(client, 'pool_index', '?')} re-auth failed: {e} (cooldown {_RECONNECT_COOLDOWN:.0f}s)"
+        )
         return False
 
 
@@ -246,8 +267,7 @@ async def start_telegram_client():
     if channel_id and clients[0].is_connected:
         try:
             msg = await asyncio.wait_for(
-                clients[0].get_messages(channel_id, 1),
-                timeout=15
+                clients[0].get_messages(channel_id, 1), timeout=15
             )
             if msg:
                 diag_log(f"Main bot DC warmed — message {msg.id} fetched from channel")
@@ -292,7 +312,9 @@ async def _warmup_messages():
                 # get_message_from_channel reads tg_client's pool_index
                 # only, so per-helper keys would be dead weight.
                 if msg and not getattr(msg, "empty", False):
-                    if getattr(client, "pool_index", 0) == getattr(tg_client, "pool_index", 0):
+                    if getattr(client, "pool_index", 0) == getattr(
+                        tg_client, "pool_index", 0
+                    ):
                         key = (getattr(client, "pool_index", 0), msg.id)
                         if key not in _msg_cache:
                             _msg_cache[key] = (time.monotonic(), msg)
@@ -317,16 +339,17 @@ async def _finish_startup():
         # Poll until at least MIN_HELPERS are connected (or 30s timeout).
         # Clamp to the actual helper count so a low-bot deployment doesn't
         # always burn the full 30s poll window waiting for an unreachable cap.
-        MIN_HELPERS = min(16, len(clients) - 1)  #TW
+        MIN_HELPERS = min(16, len(clients) - 1)  # TW
         for _ in range(60):
             connected = sum(
-                1 for c in clients
-                if getattr(c, 'pool_index', 0) != 0 and c.is_connected
+                1
+                for c in clients
+                if getattr(c, "pool_index", 0) != 0 and c.is_connected
             )
             if connected >= MIN_HELPERS:
                 break
             await asyncio.sleep(0.5)
-        diag_log(f"Helper check: {connected}/{len(clients)-1} connected")
+        diag_log(f"Helper check: {connected}/{len(clients) - 1} connected")
 
     # Verify each bot can access the storage channel
     channel_id = settings.telegram_storage_channel_id
@@ -341,10 +364,16 @@ async def _finish_startup():
                 if msg:
                     diag_log(f"Client {i} (@{me.username}): channel access OK")
                 else:
-                    diag_log(f"Client {i} (@{me.username}): channel returned empty — add bot as admin")
+                    diag_log(
+                        f"Client {i} (@{me.username}): channel returned empty — add bot as admin"
+                    )
             except Exception as e:
-                diag_log(f"Client {i} (@{me.username}): CHANNEL_INVALID — add this bot as admin to channel {channel_id}")
-                diag_log(f"  Bot token starts with: {getattr(c, 'bot_token', '?')[:8]}...")
+                diag_log(
+                    f"Client {i} (@{me.username}): CHANNEL_INVALID — add this bot as admin to channel {channel_id}"
+                )
+                diag_log(
+                    f"  Bot token starts with: {getattr(c, 'bot_token', '?')[:8]}..."
+                )
                 diag_log(f"  Error: {e}")
 
     # Retry bot 0 if it failed earlier (transient Telegram DC issue)
@@ -363,10 +392,10 @@ async def _finish_startup():
     _spawn(_warm_media_sessions())
 
 
-_WARM_PROBE_N = 40            # recent channel messages probed to discover DCs
-_WARM_BOTS_PER_DC = 3         # bots warmed per secondary DC (primary DC: all)
-_WARM_STREAM_TIMEOUT = 15     # per (bot, DC) first-chunk timeout (auth included)
-_WARM_TOTAL_TIMEOUT = 120     # whole warm-up deadline — never hold boot >2 min
+_WARM_PROBE_N = 40  # recent channel messages probed to discover DCs
+_WARM_BOTS_PER_DC = 3  # bots warmed per secondary DC (primary DC: all)
+_WARM_STREAM_TIMEOUT = 15  # per (bot, DC) first-chunk timeout (auth included)
+_WARM_TOTAL_TIMEOUT = 120  # whole warm-up deadline — never hold boot >2 min
 
 
 async def _warm_media_sessions():
@@ -386,6 +415,7 @@ async def _warm_media_sessions():
     try:
         from .streaming import _media_session_lock, _media_sessions_warmed
         from pyrogram.file_id import FileId
+
         channel_id = settings.telegram_storage_channel_id
         if not channel_id:
             return
@@ -409,9 +439,12 @@ async def _warm_media_sessions():
         try:
             from sqlalchemy import text
             from .database import async_session
+
             async with async_session() as session:
                 rows = await session.execute(
-                    text("SELECT channel_message_id, file_id FROM files ORDER BY id DESC LIMIT 80")
+                    text(
+                        "SELECT channel_message_id, file_id FROM files ORDER BY id DESC LIMIT 80"
+                    )
                 )
                 for r in rows:
                     if len(dc_mids) >= 4:
@@ -422,21 +455,30 @@ async def _warm_media_sessions():
 
         # Fallback: decode DCs from messages already cached / probed.
         if len(dc_mids) < 2:
+
             async def _add_candidates(cands):
                 for m in cands:
                     if not m:
                         continue
-                    media = getattr(m, "video", None) or getattr(m, "document", None) or getattr(m, "audio", None)
+                    media = (
+                        getattr(m, "video", None)
+                        or getattr(m, "document", None)
+                        or getattr(m, "audio", None)
+                    )
                     if media:
                         _add_dc(m.id, media.file_id)
 
             await _add_candidates([msg for _t, msg in list(_msg_cache.values())[:200]])
             try:
-                last = await asyncio.wait_for(clients[0].get_messages(channel_id, 0), timeout=15)
+                last = await asyncio.wait_for(
+                    clients[0].get_messages(channel_id, 0), timeout=15
+                )
                 if last:
                     lo = max(1, last.id - _WARM_PROBE_N + 1)
                     recent = await asyncio.wait_for(
-                        clients[0].get_messages(channel_id, list(range(lo, last.id + 1))),
+                        clients[0].get_messages(
+                            channel_id, list(range(lo, last.id + 1))
+                        ),
                         timeout=30,
                     )
                     await _add_candidates(reversed(recent or []))
@@ -444,7 +486,9 @@ async def _warm_media_sessions():
                 pass
             for cand in range(1, 41):
                 try:
-                    probe = await asyncio.wait_for(clients[0].get_messages(channel_id, cand), timeout=15)
+                    probe = await asyncio.wait_for(
+                        clients[0].get_messages(channel_id, cand), timeout=15
+                    )
                     if probe:
                         await _add_candidates([probe])
                 except Exception:
@@ -456,30 +500,50 @@ async def _warm_media_sessions():
             return
 
         dc_order = list(dc_mids)  # order reflects DB recency (primary DC first)
-        diag_log(f"Warming media sessions serially for DCs {dc_order} "
-                 f"({len(connected)} bots)...")
+        diag_log(
+            f"Warming media sessions serially for DCs {dc_order} "
+            f"({len(connected)} bots)..."
+        )
         warmed = 0
         try:
             async with asyncio.timeout(_WARM_TOTAL_TIMEOUT):
                 for dc in dc_order:
                     mid = dc_mids[dc]
-                    limit = len(connected) if dc == dc_order[0] else min(_WARM_BOTS_PER_DC, len(connected))
+                    limit = (
+                        len(connected)
+                        if dc == dc_order[0]
+                        else min(_WARM_BOTS_PER_DC, len(connected))
+                    )
                     for bot in connected[:limit]:  # one auth at a time
                         try:
-                            fm = await asyncio.wait_for(bot.get_messages(channel_id, mid), timeout=15)
+                            fm = await asyncio.wait_for(
+                                bot.get_messages(channel_id, mid), timeout=15
+                            )
                             if not fm or not (fm.video or fm.document or fm.audio):
                                 continue
-                            async with _media_session_lock:  # never race a user stream's cold auth
+                            async with (
+                                _media_session_lock
+                            ):  # never race a user stream's cold auth
                                 async with asyncio.timeout(_WARM_STREAM_TIMEOUT):
-                                    async for _part in bot.stream_media(fm, limit=1, offset=0):
+                                    async for _part in bot.stream_media(
+                                        fm, limit=1, offset=0
+                                    ):
                                         break  # first chunk proves the media session works
                             warmed += 1
-                            diag_log(f"  Media-session warm-up: dc {dc}, bot {getattr(bot, 'pool_index', '?')} warm")
+                            diag_log(
+                                f"  Media-session warm-up: dc {dc}, bot {getattr(bot, 'pool_index', '?')} warm"
+                            )
                         except Exception as e:
-                            diag_log(f"  Media-session warm-up: dc {dc}, bot skip ({e})")
+                            diag_log(
+                                f"  Media-session warm-up: dc {dc}, bot skip ({e})"
+                            )
         except asyncio.TimeoutError:
-            diag_log(f"Media-session warm-up: hit {_WARM_TOTAL_TIMEOUT}s deadline, releasing")
-        diag_log(f"Media-session warm-up done: {warmed} session(s) warm across DCs {dc_order}")
+            diag_log(
+                f"Media-session warm-up: hit {_WARM_TOTAL_TIMEOUT}s deadline, releasing"
+            )
+        diag_log(
+            f"Media-session warm-up done: {warmed} session(s) warm across DCs {dc_order}"
+        )
     except Exception as e:
         diag_log(f"Media-session warm-up failed: {e}")
     finally:
@@ -524,10 +588,12 @@ _msg_cache: dict[tuple[int, int], tuple[float, Message]] = {}
 MSG_CACHE_TTL = 3600  # 1 hour (messages in storage channel don't change)
 _MSG_CACHE_MAX = 5000
 
+
 def _msg_cache_key(message_id: int) -> tuple[int, int]:
     """Cache is keyed per-client (pool_index) so we never hand a Message
     fetched by helper bot N to a stream running on tg_client (bot 0)."""
     return (getattr(tg_client, "pool_index", 0), message_id)
+
 
 def _prune_msg_cache():
     """Remove TTL-expired entries proactively."""
@@ -535,6 +601,7 @@ def _prune_msg_cache():
     stale = [key for key, (ts, _) in _msg_cache.items() if now - ts > MSG_CACHE_TTL]
     for key in stale:
         _msg_cache.pop(key, None)
+
 
 def _msg_cache_evict():
     """Remove oldest entries if cache exceeds max size."""
@@ -546,15 +613,19 @@ def _msg_cache_evict():
     for key, _ in by_age[:to_remove]:
         _msg_cache.pop(key, None)
 
+
 def invalidate_message_cache(message_id: int):
     for key in [k for k in _msg_cache if k[1] == message_id]:
         _msg_cache.pop(key, None)
+
 
 def invalidate_message_cache_batch(message_ids: list[int]):
     for mid in message_ids:
         invalidate_message_cache(mid)
 
+
 # ── convenience helpers (always use tg_client) ───────────────────────
+
 
 async def get_message_from_channel(message_id: int) -> Message:
     # Proactively drop TTL-expired entries — without this up to 5000 stale

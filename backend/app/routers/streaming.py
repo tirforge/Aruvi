@@ -1,6 +1,7 @@
 """
 Streaming API endpoints for media playback.
 """
+
 import re
 import asyncio
 import json
@@ -13,10 +14,22 @@ from sqlalchemy import select
 
 from ..database import get_db
 from ..models import File, User
-from ..auth import get_current_user, get_current_user_opt, verify_token, verify_token_payload
+from ..auth import (
+    get_current_user,
+    get_current_user_opt,
+    verify_token,
+    verify_token_payload,
+)
 
 from ..telegram import get_message_from_channel, tg_client, clients
-from ..streaming import stream_file as stream_file_chunks, prefetch_first_batch_safe, prefetch_by_ids, _cache_manager, _forward_streams, _dc_disk_size
+from ..streaming import (
+    stream_file as stream_file_chunks,
+    prefetch_first_batch_safe,
+    prefetch_by_ids,
+    _cache_manager,
+    _forward_streams,
+    _dc_disk_size,
+)
 from ..config import get_settings
 from ..rate_limit import limiter
 from ..utils import bearer_token_matches, spawn_background
@@ -73,7 +86,7 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
         if "," in range_header:
             return None
         # Suffix range: bytes=-500 (last N bytes)
-        suffix_match = re.match(r'bytes=-(\d+)', range_header)
+        suffix_match = re.match(r"bytes=-(\d+)", range_header)
         if suffix_match:
             suffix_len = int(suffix_match.group(1))
             if file_size == 0:
@@ -81,7 +94,7 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
             start = max(0, file_size - suffix_len)
             return start, file_size - 1
 
-        match = re.match(r'bytes=(\d+)-(\d*)', range_header)
+        match = re.match(r"bytes=(\d+)-(\d*)", range_header)
         if not match:
             return 0, file_size - 1
 
@@ -109,6 +122,7 @@ async def streaming_debug(request: Request):
             from ..database import async_session
             from ..models import User
             from sqlalchemy import select
+
             async with async_session() as db:
                 r = await db.execute(select(User).where(User.telegram_id == tid))
                 user = r.scalar_one_or_none()
@@ -128,11 +142,13 @@ async def streaming_debug(request: Request):
 
         bots = []
         for i, c in enumerate(clients):
-            bots.append({
-                "index": i,
-                "label": "Main" if i == 0 else f"Helper {i}",
-                "connected": c.is_connected,
-            })
+            bots.append(
+                {
+                    "index": i,
+                    "label": "Main" if i == 0 else f"Helper {i}",
+                    "connected": c.is_connected,
+                }
+            )
 
         forward_info = []
         for key in list(_forward_streams.keys()):
@@ -142,12 +158,14 @@ async def streaming_debug(request: Request):
             futures = info.get("results", {})
             done = sum(1 for f in list(futures.values()) if f.done())
             total = info.get("total_chunks", 0)
-            forward_info.append({
-                "message_id": key[1],
-                "done_futures": done,
-                "total_futures": len(futures),
-                "total_chunks": total,
-            })
+            forward_info.append(
+                {
+                    "message_id": key[1],
+                    "done_futures": done,
+                    "total_futures": len(futures),
+                    "total_chunks": total,
+                }
+            )
 
         return {
             "cache": {
@@ -157,8 +175,13 @@ async def streaming_debug(request: Request):
                 "misses": cache_info["misses"],
                 "evictions": cache_info["evictions"],
                 "hit_rate_pct": round(
-                    cache_info["hits"] / (cache_info["hits"] + cache_info["misses"]) * 100, 1
-                ) if (cache_info["hits"] + cache_info["misses"]) > 0 else 0,
+                    cache_info["hits"]
+                    / (cache_info["hits"] + cache_info["misses"])
+                    * 100,
+                    1,
+                )
+                if (cache_info["hits"] + cache_info["misses"]) > 0
+                else 0,
                 "per_video": per_video,
             },
             "disk_cache_mb": disk_mb,
@@ -263,13 +286,22 @@ async def stream_file_head(
     # Player resolves size via HEAD right before it starts playback — use this
     # moment to warm the chunk cache so the first GET serves from cache.
     try:
-        spawn_background(prefetch_by_ids(get_settings().telegram_storage_channel_id, file.channel_message_id))
+        spawn_background(
+            prefetch_by_ids(
+                get_settings().telegram_storage_channel_id, file.channel_message_id
+            )
+        )
     except Exception:
         pass  # best-effort
 
     from urllib.parse import quote
+
     mime_type = file.mime_type or "application/octet-stream"
-    disposition = "inline" if ("video/" in mime_type or "audio/" in mime_type or "image/" in mime_type) else "attachment"
+    disposition = (
+        "inline"
+        if ("video/" in mime_type or "audio/" in mime_type or "image/" in mime_type)
+        else "attachment"
+    )
     encoded_filename = quote(file.file_name)
     headers = {
         "Content-Type": mime_type,
@@ -302,7 +334,7 @@ async def stream_file(
         select(File).where(File.id == file_id, File.user_id == current_user.id)
     )
     file = result.scalar_one_or_none()
-    
+
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -384,9 +416,22 @@ async def stream_file(
     mime_type = file.mime_type or "application/octet-stream"
     # SVG is excluded from inline serving: it can carry scripts, so a shared
     # link would execute in our origin (stored XSS). Force download instead.
-    disposition = "attachment" if download else ("inline" if ("video/" in mime_type or "audio/" in mime_type or ("image/" in mime_type and "svg" not in mime_type)) else "attachment")
+    disposition = (
+        "attachment"
+        if download
+        else (
+            "inline"
+            if (
+                "video/" in mime_type
+                or "audio/" in mime_type
+                or ("image/" in mime_type and "svg" not in mime_type)
+            )
+            else "attachment"
+        )
+    )
 
     from urllib.parse import quote
+
     encoded_filename = quote(file.file_name)
 
     content_length = until_bytes - from_bytes + 1
@@ -407,7 +452,7 @@ async def stream_file(
         file_streamer(),
         status_code=206 if range_header else 200,
         media_type=mime_type,
-        headers=headers
+        headers=headers,
     )
 
 
@@ -469,11 +514,13 @@ async def get_thumbnail(
     # Serve from cache if available
     if file.thumbnail_data:
         mime = _detect_image_mime(file.thumbnail_data)
-        return Response(content=file.thumbnail_data, media_type=mime, headers=_thumb_headers)
-    
+        return Response(
+            content=file.thumbnail_data, media_type=mime, headers=_thumb_headers
+        )
+
     if not file.thumbnail_file_id:
         raise HTTPException(status_code=404, detail="Thumbnail not found")
-    
+
     try:
         # Get the message and download thumbnail
         message = await get_message_from_channel(file.channel_message_id)
@@ -490,23 +537,34 @@ async def get_thumbnail(
             thumbnail = message.audio.thumbs[0]
         elif message.photo:
             thumbnail = message.photo
-            
+
         if not thumbnail:
             if file.thumbnail_file_id:
                 try:
                     thumb_bytes = await tg_client.download_media(
-                        file.thumbnail_file_id,
-                        in_memory=True
+                        file.thumbnail_file_id, in_memory=True
                     )
-                    data = bytes(thumb_bytes.getbuffer()) if hasattr(thumb_bytes, 'getbuffer') else thumb_bytes
+                    data = (
+                        bytes(thumb_bytes.getbuffer())
+                        if hasattr(thumb_bytes, "getbuffer")
+                        else thumb_bytes
+                    )
                 except Exception:
-                    raise HTTPException(status_code=404, detail="Thumbnail not found in message")
+                    raise HTTPException(
+                        status_code=404, detail="Thumbnail not found in message"
+                    )
             else:
-                raise HTTPException(status_code=404, detail="Thumbnail not found in message")
-        else: #YH
-            thumb_bytes = await _download_thumb(message, thumbnail) #KJ
-            data = thumb_bytes.getvalue() if hasattr(thumb_bytes, 'getvalue') else bytes(thumb_bytes) #SY
-        
+                raise HTTPException(
+                    status_code=404, detail="Thumbnail not found in message"
+                )
+        else:  # YH
+            thumb_bytes = await _download_thumb(message, thumbnail)  # KJ
+            data = (
+                thumb_bytes.getvalue()
+                if hasattr(thumb_bytes, "getvalue")
+                else bytes(thumb_bytes)
+            )  # SY
+
         # Cache for future requests
         file.thumbnail_data = data
         await db.commit()
@@ -545,12 +603,12 @@ async def stream_public_file(
     # Get file by hash
     result = await db.execute(select(File).where(File.public_hash == public_hash))
     file = result.scalar_one_or_none()
-    
+
     if not file:
         raise HTTPException(status_code=404, detail="File not found or link revoked")
-        
+
     file_size = file.file_size
-    
+
     # Parse range header
     range_header = request.headers.get("range")
     parsed = parse_range_header(range_header, file_size)
@@ -613,7 +671,9 @@ async def stream_public_file(
             ):
                 yield chunk
         except asyncio.TimeoutError:
-            logger.warning("Public stream timed out after 300s for hash %s", public_hash)
+            logger.warning(
+                "Public stream timed out after 300s for hash %s", public_hash
+            )
             raise
         except Exception as e:
             logger.error("Public stream failed for hash %s: %s", public_hash, e)
@@ -623,9 +683,22 @@ async def stream_public_file(
     mime_type = file.mime_type or "application/octet-stream"
     # SVG is excluded from inline serving: it can carry scripts, so a shared
     # link would execute in our origin (stored XSS). Force download instead.
-    disposition = "attachment" if download else ("inline" if ("video/" in mime_type or "audio/" in mime_type or ("image/" in mime_type and "svg" not in mime_type)) else "attachment")
+    disposition = (
+        "attachment"
+        if download
+        else (
+            "inline"
+            if (
+                "video/" in mime_type
+                or "audio/" in mime_type
+                or ("image/" in mime_type and "svg" not in mime_type)
+            )
+            else "attachment"
+        )
+    )
 
     from urllib.parse import quote
+
     encoded_filename = quote(file.file_name)
 
     content_length = until_bytes - from_bytes + 1
@@ -646,8 +719,9 @@ async def stream_public_file(
         file_streamer(),
         status_code=206 if range_header else 200,
         media_type=mime_type,
-        headers=headers
+        headers=headers,
     )
+
 
 async def _probe_cast_streams(message, file_size: int, request: Request):
     """Best-effort ffprobe of the Telegram file (header only) to learn audio-track
@@ -657,9 +731,15 @@ async def _probe_cast_streams(message, file_size: int, request: Request):
         return None
     try:
         proc = await asyncio.create_subprocess_exec(
-            "ffprobe", "-v", "error",
-            "-show_entries", "stream=index,codec_type,codec_name:format=duration",
-            "-of", "json", "-i", "pipe:0",
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=index,codec_type,codec_name:format=duration",
+            "-of",
+            "json",
+            "-i",
+            "pipe:0",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -667,7 +747,9 @@ async def _probe_cast_streams(message, file_size: int, request: Request):
 
         async def _feed():
             try:
-                async for chunk in stream_file_chunks(tg_client, message, 0, file_size - 1, request=request):
+                async for chunk in stream_file_chunks(
+                    tg_client, message, 0, file_size - 1, request=request
+                ):
                     if proc.stdin is None:
                         break
                     proc.stdin.write(chunk)
@@ -697,8 +779,13 @@ async def _probe_cast_streams(message, file_size: int, request: Request):
 # for MKV/WebM). Excluding bitmap codecs (rather than allowlisting text ones) is
 # what avoids the regression where MP4's `mov_text` subs were wrongly dropped.
 BITMAP_SUBS = {
-    "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle",
-    "dvb_teletext", "eia_608", "eia_708", "arib_caption",
+    "hdmv_pgs_subtitle",
+    "dvd_subtitle",
+    "dvb_subtitle",
+    "dvb_teletext",
+    "eia_608",
+    "eia_708",
+    "arib_caption",
 }
 
 
@@ -719,7 +806,12 @@ def _parse_cast_probe(data: dict) -> dict:
         for s in streams
     )
     duration = float(data.get("format", {}).get("duration") or 0) or None
-    return {"audio_count": audio_count, "audio_langs": audio_langs, "has_text_subs": has_text_subs, "duration": duration}
+    return {
+        "audio_count": audio_count,
+        "audio_langs": audio_langs,
+        "has_text_subs": has_text_subs,
+        "duration": duration,
+    }
 
 
 def _norm_lang(lang) -> str:
@@ -741,18 +833,30 @@ def _resolve_cast_audio_map(probe, audio: int | None, audio_lang: str | None) ->
                 nl = _norm_lang(lang)
                 if nl and (nl == req or nl.startswith(req) or req.startswith(nl)):
                     return f"0:a:{i}?"
-            logger.warning("cast audio_lang %r not found in %s – falling back to all audio", audio_lang, audio_langs)
+            logger.warning(
+                "cast audio_lang %r not found in %s – falling back to all audio",
+                audio_lang,
+                audio_langs,
+            )
             return "0:a?"
-        logger.warning("cast audio_lang %r too short – falling back to all audio", audio_lang)
+        logger.warning(
+            "cast audio_lang %r too short – falling back to all audio", audio_lang
+        )
         return "0:a?"
     if audio is not None and 0 <= audio < audio_count:
         return f"0:a:{audio}?"
     if audio is not None:
-        logger.warning("cast audio index %s out of range (have %s) – falling back to all audio", audio, audio_count)
+        logger.warning(
+            "cast audio index %s out of range (have %s) – falling back to all audio",
+            audio,
+            audio_count,
+        )
     return "0:a?"
 
 
-def _build_cast_remux_cmd(audio_map: str, map_subs: bool, seek_time: float | None) -> list:
+def _build_cast_remux_cmd(
+    audio_map: str, map_subs: bool, seek_time: float | None
+) -> list:
     """Pure: build the ffmpeg argument list for the cast remux."""
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error"]
     if seek_time is not None:
@@ -763,7 +867,15 @@ def _build_cast_remux_cmd(audio_map: str, map_subs: bool, seek_time: float | Non
     cmd += ["-c:v", "copy", "-c:a", "copy"]
     if map_subs:
         cmd += ["-c:s", "mov_text"]
-    cmd += ["-movflags", "frag_keyframe+empty_moov+faststart", "-brand", "mp42", "-f", "mp4", "pipe:1"]
+    cmd += [
+        "-movflags",
+        "frag_keyframe+empty_moov+faststart",
+        "-brand",
+        "mp42",
+        "-f",
+        "mp4",
+        "pipe:1",
+    ]
     return cmd
 
 
@@ -773,8 +885,14 @@ async def stream_for_cast(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(get_current_user_opt),
-    audio: int | None = Query(None, description="Audio track index (0-based, ffmpeg audio ordinal) to use as default for Cast; kept for compatibility. Prefer audio_lang for exact selection."),
-    audio_lang: str | None = Query(None, description="Language of the audio track to use as default for Cast (e.g. 'en','eng','english'). Mapped to the exact ffmpeg audio stream via probe, so it is robust even when the sender's track index differs from ffmpeg's audio ordinal."),
+    audio: int | None = Query(
+        None,
+        description="Audio track index (0-based, ffmpeg audio ordinal) to use as default for Cast; kept for compatibility. Prefer audio_lang for exact selection.",
+    ),
+    audio_lang: str | None = Query(
+        None,
+        description="Language of the audio track to use as default for Cast (e.g. 'en','eng','english'). Mapped to the exact ffmpeg audio stream via probe, so it is robust even when the sender's track index differs from ffmpeg's audio ordinal.",
+    ),
 ):
     """Cast-optimized stream: remuxes MKV → fragmented MP4 for Default Receiver.
     Query `?audio_lang=<lang>` selects the audio track whose language matches the
@@ -803,7 +921,9 @@ async def stream_for_cast(
         current_user = await _user_from_download_token(request, file_id, db)
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    result = await db.execute(select(File).where(File.id == file_id, File.user_id == current_user.id))
+    result = await db.execute(
+        select(File).where(File.id == file_id, File.user_id == current_user.id)
+    )
     file = result.scalar_one_or_none()
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
@@ -811,13 +931,17 @@ async def stream_for_cast(
     if not message:
         raise HTTPException(status_code=404, detail="Message not found in channel")
 
-    is_mkv = file.file_name.lower().endswith(".mkv") or (file.mime_type or "").lower() == "video/x-matroska"
+    is_mkv = (
+        file.file_name.lower().endswith(".mkv")
+        or (file.mime_type or "").lower() == "video/x-matroska"
+    )
     # Non-MKV without audio selection: serve as MP4 passthrough (Shaka fMP4)
     # With ?audio_lang/<audio> we need to remux even for MP4 to select that audio as default
     # (Default ignores AUDIO MediaTracks, so we make the mobile's choice the file's sole default audio)
     if not is_mkv and audio is None and not audio_lang:
         mime_type = "video/mp4"
         from urllib.parse import quote
+
         encoded_filename = quote(file.file_name.rsplit(".", 1)[0] + ".mp4")
         headers = {
             "Content-Type": mime_type,
@@ -830,15 +954,23 @@ async def stream_for_cast(
             "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length, Content-Type",
         }
         spawn_background(prefetch_first_batch_safe(tg_client, message, 0))
+
         async def passthrough():
-            async for chunk in stream_file_chunks(tg_client, message, 0, file.file_size - 1, request=request):
+            async for chunk in stream_file_chunks(
+                tg_client, message, 0, file.file_size - 1, request=request
+            ):
                 yield chunk
+
         return StreamingResponse(passthrough(), media_type=mime_type, headers=headers)
 
     if shutil.which("ffmpeg") is None:
-        raise HTTPException(status_code=501, detail="ffmpeg not installed on server – cannot remux MKV for Cast")
+        raise HTTPException(
+            status_code=501,
+            detail="ffmpeg not installed on server – cannot remux MKV for Cast",
+        )
 
     from urllib.parse import quote
+
     encoded_filename = quote(file.file_name.rsplit(".", 1)[0] + ".mp4")
 
     # Probe once (header only) so we can (a) map the requested audio to the exact
@@ -873,7 +1005,9 @@ async def stream_for_cast(
         "X-Accel-Buffering": "no",
     }
     if seek_time is not None:
-        headers["Content-Range"] = f"bytes {start_byte}-{file.file_size - 1}/{file.file_size}"
+        headers["Content-Range"] = (
+            f"bytes {start_byte}-{file.file_size - 1}/{file.file_size}"
+        )
 
     spawn_background(prefetch_first_batch_safe(tg_client, message, 0))
 
@@ -889,13 +1023,18 @@ async def stream_for_cast(
         cmd = _build_cast_remux_cmd(audio_map, map_subs, seek_time)
         proc = await asyncio.create_subprocess_exec(
             *cmd,
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
+
         async def feed_stdin():
             try:
                 # When seeking we still must feed the FULL file (ffmpeg discards
                 # until -ss internally); for non-seek we feed from 0..size-1 too.
-                async for chunk in stream_file_chunks(tg_client, message, 0, file.file_size - 1, request=request):
+                async for chunk in stream_file_chunks(
+                    tg_client, message, 0, file.file_size - 1, request=request
+                ):
                     if proc.stdin is None:
                         break
                     proc.stdin.write(chunk)
@@ -909,6 +1048,7 @@ async def stream_for_cast(
                         proc.stdin.close()
                 except Exception:
                     pass
+
         feed_task = asyncio.create_task(feed_stdin())
         try:
             while True:
@@ -928,5 +1068,9 @@ async def stream_for_cast(
             except Exception:
                 pass
 
-    return StreamingResponse(ffmpeg_remux_stream(), media_type="video/mp4", headers=headers, status_code=status_code)
-
+    return StreamingResponse(
+        ffmpeg_remux_stream(),
+        media_type="video/mp4",
+        headers=headers,
+        status_code=status_code,
+    )

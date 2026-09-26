@@ -1,6 +1,7 @@
 """
 Authentication API endpoints.
 """
+
 import asyncio
 import logging
 import time
@@ -49,7 +50,7 @@ async def get_bot_info() -> BotInfoResponse:
         data = BotInfoResponse(
             username=me.username,
             name=f"{me.first_name} {me.last_name or ''}".strip(),
-            server_version="1.0.0"
+            server_version="1.0.0",
         )
         _bot_info_cache["data"] = data
         _bot_info_cache["ts"] = time.time()
@@ -82,22 +83,22 @@ async def refresh_token(
     payload = verify_token_payload(request.refresh_token, token_type="refresh")
     telegram_id = int(payload.get("sub")) if payload and payload.get("sub") else None
     token_version = payload.get("ver") if payload else None
-    
+
     if not telegram_id:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
-    
+
     # Verify user exists
-    result = await db.execute(
-        select(User).where(User.telegram_id == telegram_id)
-    )
+    result = await db.execute(select(User).where(User.telegram_id == telegram_id))
     user = result.scalar_one_or_none()
-    
+
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
-    
+
     if token_version is not None and token_version < user.auth_version:
-        raise HTTPException(status_code=401, detail="Refresh token has been invalidated")
-    
+        raise HTTPException(
+            status_code=401, detail="Refresh token has been invalidated"
+        )
+
     presented_hash = sha256(request.refresh_token.encode()).hexdigest()
     session_result = await db.execute(
         select(RefreshSession).where(
@@ -110,12 +111,14 @@ async def refresh_token(
         # Replayed, rotated, or forged token — reject it. This is also the
         # "logout-all" path at the session level (their stored sessions were
         # deleted or never created).
-        raise HTTPException(status_code=401, detail="Refresh token has been invalidated")
+        raise HTTPException(
+            status_code=401, detail="Refresh token has been invalidated"
+        )
     if session.expires_at < datetime.now(timezone.utc).replace(tzinfo=None):
         await db.delete(session)
         await db.commit()
         raise HTTPException(status_code=401, detail="Refresh token has expired")
-    
+
     # Rotate: old session is consumed, new one replaces it.
     new_access_token = create_access_token(telegram_id, version=user.auth_version)
     new_refresh_token = create_refresh_token(telegram_id, version=user.auth_version)
@@ -125,7 +128,7 @@ async def refresh_token(
         datetime.now(timezone.utc).replace(tzinfo=None) + REFRESH_TOKEN_DURATION
     )
     await db.commit()
-    
+
     return Token(
         access_token=new_access_token,
         refresh_token=new_refresh_token,
@@ -187,11 +190,11 @@ async def generate_login_code(
     login_code = None
     expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=10)
     for _ in range(5):
-        code = ''.join(secrets.choice(alphabet) for _ in range(6))
+        code = "".join(secrets.choice(alphabet) for _ in range(6))
         login_code = LoginCode(
             code=code,
             telegram_id=None,  # Initially null, set by bot
-            expires_at=expires_at
+            expires_at=expires_at,
         )
         db.add(login_code)
         try:
@@ -220,15 +223,13 @@ async def generate_login_code(
         )
 
     return LoginCodeResponse(
-        code=code,
-        expires_at=expires_at,
-        bot_username=bot_username,
-        bot_name=bot_name
+        code=code, expires_at=expires_at, bot_username=bot_username, bot_name=bot_name
     )
 
 
 def _pending_response():
     from fastapi.responses import JSONResponse
+
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
         content={"detail": "Code not yet verified", "status": "pending"},
@@ -280,7 +281,7 @@ async def _verify_login_code_once(
         select(LoginCode).where(LoginCode.code == code_request.code.upper())
     )
     login_code = result.scalar_one_or_none()
-    
+
     if not login_code:
         # Unknown code: keep polling (codes are minted asynchronously and the
         # client may poll before generation commits) — the outer loop's
@@ -316,7 +317,7 @@ async def _verify_login_code_once(
         select(User).where(User.telegram_id == login_code.telegram_id)
     )
     user = result.scalar_one_or_none()
-    
+
     if not user:
         # The claimer's account row is gone (deleted after the code was
         # claimed, or user creation raced/failed in the bot). Minting tokens
@@ -326,28 +327,31 @@ async def _verify_login_code_once(
         raise HTTPException(
             status_code=410,
             detail="This code is no longer valid. Send /start to the bot to "
-                   "recreate your account, then generate a new code.",
+            "recreate your account, then generate a new code.",
         )
-        
+
     # Generate tokens
     access_token = create_access_token(user.telegram_id, version=user.auth_version)
     refresh_token = create_refresh_token(user.telegram_id, version=user.auth_version)
-    db.add(RefreshSession(
-        user_id=user.id,
-        token_hash=sha256(refresh_token.encode()).hexdigest(),
-        expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + REFRESH_TOKEN_DURATION,
-    ))
-    
+    db.add(
+        RefreshSession(
+            user_id=user.id,
+            token_hash=sha256(refresh_token.encode()).hexdigest(),
+            expires_at=datetime.now(timezone.utc).replace(tzinfo=None)
+            + REFRESH_TOKEN_DURATION,
+        )
+    )
+
     await db.commit()
-    
+
     return AuthResponse(
         access_token=access_token,
         refresh_token=refresh_token,
-        user=UserResponse.model_validate(user, from_attributes=True)
+        user=UserResponse.model_validate(user, from_attributes=True),
     )
 
 
-# Keep this for backward compatibility or direct code login if needed, 
+# Keep this for backward compatibility or direct code login if needed,
 # but verify-code is the main one for TV flow now.
 @router.post("/code", response_model=AuthResponse)
 async def login_with_code(
@@ -355,11 +359,9 @@ async def login_with_code(
     code_request: LoginCodeRequest,
     db: AsyncSession = Depends(get_db),
 ):
-   """Legacy endpoint - use verify-code instead."""
-   # Same logic as verify-code but returns only Token
-   # ... (reusing logic or redirecting)
-   return await verify_login_code(
-       request,
-       VerifyCodeRequest(code=code_request.code),
-       db
-   )
+    """Legacy endpoint - use verify-code instead."""
+    # Same logic as verify-code but returns only Token
+    # ... (reusing logic or redirecting)
+    return await verify_login_code(
+        request, VerifyCodeRequest(code=code_request.code), db
+    )

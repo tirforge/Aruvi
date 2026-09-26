@@ -7,17 +7,20 @@ complete JSON/HTML/text bodies (API payloads), passes streamed bodies and
 non-200/206 responses through untouched. Large static assets (SPA bundle,
 vendored player) are served PRECOMPRESSED by main.serve_spa instead.
 """
+
 import gzip
 
 # Only these get compressed — never media, never octet-stream.
-COMPRESSIBLE_TYPES = frozenset({
-    "application/json",
-    "text/html",
-    "text/plain",
-    "text/css",
-    "application/javascript",
-    "application/manifest+json",
-})
+COMPRESSIBLE_TYPES = frozenset(
+    {
+        "application/json",
+        "text/html",
+        "text/plain",
+        "text/css",
+        "application/javascript",
+        "application/manifest+json",
+    }
+)
 
 
 def _content_type(start_message) -> str:
@@ -75,7 +78,8 @@ class CompressibleGZipMiddleware:
                     if len(compressed) < len(body):
                         start = state.pop("start")
                         headers = [
-                            (k, v) for k, v in start.get("headers", [])
+                            (k, v)
+                            for k, v in start.get("headers", [])
                             if k.lower() != b"content-length"
                         ]
                         headers += [

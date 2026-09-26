@@ -41,7 +41,7 @@ os.environ.setdefault("DISK_CACHE_PER_VIDEO_BYTES", "2147483648")
 os.environ.setdefault("MEMORY", "3Gi")
 os.environ.setdefault("OOM_THRESHOLD_PCT", "90")
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
 @pytest_asyncio.fixture
@@ -50,26 +50,29 @@ async def temp_db():
     tmpdir = tempfile.mkdtemp()
     db_path = os.path.join(tmpdir, "test.db")
     db_url = f"sqlite+aiosqlite:///{db_path}"
-    
+
     os.environ["DATABASE_URL"] = db_url
-    
+
     # Force re-import of config to pick up new DATABASE_URL
     import importlib
     import app.config
+
     importlib.reload(app.config)
     import app.database
+
     importlib.reload(app.database)
     import app.models
+
     importlib.reload(app.models)
-    
+
     from app.database import init_db, async_session
     from app.models import Base
-    
+
     await init_db()
-    
+
     async with async_session() as session:
         yield session
-    
+
     shutil.rmtree(tmpdir, ignore_errors=True)
 
 
@@ -77,11 +80,9 @@ async def temp_db():
 async def sample_user(temp_db):
     """Create a test user."""
     from app.models import User
+
     user = User(
-        telegram_id=999999,
-        username="testuser",
-        first_name="Test",
-        auth_version=0
+        telegram_id=999999, username="testuser", first_name="Test", auth_version=0
     )
     temp_db.add(user)
     await temp_db.commit()
@@ -91,10 +92,12 @@ async def sample_user(temp_db):
 
 def _make_mock_request(token: str):
     """Create a mock request with proper query_params interface."""
+
     class MockRequest:
         def __init__(self, token):
             self.headers = {"Authorization": f"Bearer {token}"}
             self.query_params = {"token": token}
+
     return MockRequest(token)
 
 
@@ -105,8 +108,10 @@ class TestAuthRotation:
     async def test_refresh_token_rotation_rejects_replay(self, temp_db):
         """Rotated refresh token cannot be reused."""
         from app.auth import (
-            create_access_token, create_refresh_token,
-            REFRESH_TOKEN_DURATION, verify_token_payload
+            create_access_token,
+            create_refresh_token,
+            REFRESH_TOKEN_DURATION,
+            verify_token_payload,
         )
         from app.routers.auth import refresh_token
         from app.models import User, RefreshSession
@@ -114,23 +119,23 @@ class TestAuthRotation:
 
         # Create user
         user = User(
-            telegram_id=999999,
-            username="testuser",
-            first_name="Test",
-            auth_version=0
+            telegram_id=999999, username="testuser", first_name="Test", auth_version=0
         )
         temp_db.add(user)
         await temp_db.commit()
         await temp_db.refresh(user)
 
         # Create initial refresh token and session
-        refresh_token_str = create_refresh_token(user.telegram_id, version=user.auth_version)
+        refresh_token_str = create_refresh_token(
+            user.telegram_id, version=user.auth_version
+        )
         token_hash = sha256(refresh_token_str.encode()).hexdigest()
         session = RefreshSession(
             user_id=user.id,
             token_hash=token_hash,
-            expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + REFRESH_TOKEN_DURATION,
-            last_used_at=datetime.now(timezone.utc).replace(tzinfo=None)
+            expires_at=datetime.now(timezone.utc).replace(tzinfo=None)
+            + REFRESH_TOKEN_DURATION,
+            last_used_at=datetime.now(timezone.utc).replace(tzinfo=None),
         )
         temp_db.add(session)
         await temp_db.commit()
@@ -138,7 +143,7 @@ class TestAuthRotation:
         # First refresh: should succeed and rotate
         req = RefreshTokenRequest(refresh_token=refresh_token_str)
         result = await refresh_token(req, db=temp_db)
-        
+
         assert result.access_token is not None
         assert result.refresh_token is not None
         assert result.refresh_token != refresh_token_str  # Token rotated
@@ -146,6 +151,7 @@ class TestAuthRotation:
         # Old token should now be invalid
         req2 = RefreshTokenRequest(refresh_token=refresh_token_str)
         from fastapi import HTTPException
+
         with pytest.raises(HTTPException) as exc_info:
             await refresh_token(req2, db=temp_db)
         assert exc_info.value.status_code == 401
@@ -158,7 +164,10 @@ class TestAuthRotation:
 
         # Exactly one session row exists
         from sqlalchemy import select
-        sessions = await temp_db.execute(select(RefreshSession).where(RefreshSession.user_id == user.id))
+
+        sessions = await temp_db.execute(
+            select(RefreshSession).where(RefreshSession.user_id == user.id)
+        )
         session_rows = sessions.scalars().all()
         assert len(session_rows) == 1
 
@@ -166,10 +175,10 @@ class TestAuthRotation:
     async def test_download_token_binds_file_id(self):
         """Download token includes file_id claim."""
         from app.auth import create_download_token, verify_token_payload
-        
+
         token = create_download_token(12345, file_id=98765)
         payload = verify_token_payload(token, token_type="download")
-        
+
         assert payload is not None
         assert payload.get("file_id") == 98765
         assert payload.get("sub") == "12345"
@@ -181,41 +190,49 @@ class TestParseRangeHeader:
 
     def test_no_header_full_range(self):
         from app.routers.streaming import parse_range_header
+
         start, end = parse_range_header(None, 100)
         assert (start, end) == (0, 99)
 
     def test_normal_range(self):
         from app.routers.streaming import parse_range_header
+
         start, end = parse_range_header("bytes=10-20", 100)
         assert (start, end) == (10, 20)
 
     def test_open_ended_range(self):
         from app.routers.streaming import parse_range_header
+
         start, end = parse_range_header("bytes=50-", 100)
         assert (start, end) == (50, 99)
 
     def test_suffix_range(self):
         from app.routers.streaming import parse_range_header
+
         start, end = parse_range_header("bytes=-20", 100)
         assert (start, end) == (80, 99)
 
     def test_clamped_end(self):
         from app.routers.streaming import parse_range_header
+
         start, end = parse_range_header("bytes=50-500", 100)
         assert (start, end) == (50, 99)
 
     def test_multipart_rejected(self):
         from app.routers.streaming import parse_range_header
+
         result = parse_range_header("bytes=0-10,20-30", 100)
         assert result is None
 
     def test_zero_byte_plain_get(self):
         from app.routers.streaming import parse_range_header
+
         start, end = parse_range_header(None, 0)
         assert (start, end) == (0, -1)
 
     def test_zero_byte_with_range(self):
         from app.routers.streaming import parse_range_header
+
         start, end = parse_range_header("bytes=-50", 0)
         assert (start, end) == (0, -1)
 
@@ -230,7 +247,7 @@ class TestDownloadTokenValidation:
 
         token = create_download_token(sample_user.telegram_id, file_id=42)
         req = _make_mock_request(token)
-        
+
         result = await _user_from_download_token(req, 42, temp_db)
         assert result is not None
         assert result.id == sample_user.id
@@ -243,7 +260,7 @@ class TestDownloadTokenValidation:
 
         token = create_download_token(sample_user.telegram_id, file_id=999)
         req = _make_mock_request(token)
-        
+
         with pytest.raises(HTTPException) as exc_info:
             await _user_from_download_token(req, 42, temp_db)  # different file_id
         assert exc_info.value.status_code == 403
@@ -257,7 +274,7 @@ class TestDownloadTokenValidation:
         settings = get_settings()
         payload = {"sub": "notanint", "file_id": 1, "ver": 0, "exp": 9999999999}
         token = jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
-        
+
         req = _make_mock_request(token)
         result = await _user_from_download_token(req, 1, temp_db)
         assert result is None
@@ -280,8 +297,12 @@ class TestPatchListenerQueue:
                 self.reply_to_message_id = None
                 self._cont = False
                 self._stop = False
-            def continue_propagation(self): self._cont = True
-            def stop_propagation(self): self._stop = True
+
+            def continue_propagation(self):
+                self._cont = True
+
+            def stop_propagation(self):
+                self._stop = True
 
         patch.types.Message = Msg
 
@@ -297,7 +318,9 @@ class TestPatchListenerQueue:
                 fut = loop.create_future()
                 entry = {"future": fut, "filters": None}
                 client.listeners.setdefault(key, collections.deque()).append(entry)
-                fut.add_done_callback(functools.partial(client._forget_listener, key, entry))
+                fut.add_done_callback(
+                    functools.partial(client._forget_listener, key, entry)
+                )
                 return fut, entry
 
             # Seed two listeners
@@ -334,8 +357,12 @@ class TestPatchListenerQueue:
                 self.reply_to_message_id = None
                 self._cont = False
                 self._stop = False
-            def continue_propagation(self): self._cont = True
-            def stop_propagation(self): self._stop = True
+
+            def continue_propagation(self):
+                self._cont = True
+
+            def stop_propagation(self):
+                self._stop = True
 
         patch.types.Message = Msg
 
@@ -350,7 +377,9 @@ class TestPatchListenerQueue:
             fut = loop.create_future()
             entry = {"future": fut, "filters": None}
             client.listeners.setdefault("1", collections.deque()).append(entry)
-            fut.add_done_callback(functools.partial(client._forget_listener, "1", entry))
+            fut.add_done_callback(
+                functools.partial(client._forget_listener, "1", entry)
+            )
 
             # Command should NOT be consumed
             cmd = Msg(text="/cancel")
@@ -378,19 +407,19 @@ class TestDiskCacheUniqueTemp:
         with tempfile.TemporaryDirectory() as tmpdir:
             os.environ["DISK_CACHE_DIR"] = tmpdir
             os.environ["DISK_CACHE_ENABLED"] = "1"
-            
+
             cache = DiskChunkCache()
             chat_id, message_id, chunk_idx = 1, 2, 3
-            
+
             # Simulate concurrent puts
             data1 = b"data1" * 1000
             data2 = b"data2" * 1000
-            
+
             await asyncio.gather(
                 asyncio.to_thread(cache.put, chat_id, message_id, chunk_idx, data1),
                 asyncio.to_thread(cache.put, chat_id, message_id, chunk_idx, data2),
             )
-            
+
             # One of the writes won - verify final file is complete (not torn)
             final_path = cache._movie_dir(chat_id, message_id) / f"{chunk_idx}.bin"
             assert final_path.exists()
@@ -414,7 +443,7 @@ class TestGDriveRawWrite:
                 _raw_write(fd, 0, b"hello world")
             finally:
                 os.close(fd)
-            
+
             with open(test_file, "rb") as f:
                 assert f.read() == b"hello world"
 
@@ -423,7 +452,7 @@ class TestGrabberCollectReplies:
     """Test _collect_bot_replies prefers direct replies."""
 
     def test_direct_reply_preferred(self):
-        # Logic verified in code: direct replies break early, 
+        # Logic verified in code: direct replies break early,
         # non-direct only fallback and loop continues scanning
         pass  # Logic verified in code review
 
@@ -460,9 +489,7 @@ class TestTokenVersionBinding:
         await temp_db.commit()
 
         stale = create_download_token(sample_user.telegram_id, file_id=42, version=0)
-        result = await _user_from_download_token(
-            _make_mock_request(stale), 42, temp_db
-        )
+        result = await _user_from_download_token(_make_mock_request(stale), 42, temp_db)
         assert result is None
 
         fresh = create_download_token(sample_user.telegram_id, file_id=42, version=1)
@@ -486,19 +513,25 @@ class TestVerifyCodeSingleUse:
         code = LoginCode(
             code="ABC123",
             telegram_id=sample_user.telegram_id,
-            expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=5),
+            expires_at=datetime.now(timezone.utc).replace(tzinfo=None)
+            + timedelta(minutes=5),
         )
         temp_db.add(code)
         await temp_db.commit()
 
         # slowapi's decorator validates a real starlette Request
         from starlette.requests import Request as StarletteRequest
-        req = StarletteRequest({
-            "type": "http", "method": "POST",
-            "path": "/api/auth/verify-code",
-            "headers": [], "query_string": b"",
-            "client": ("127.0.0.1", 12345),
-        })
+
+        req = StarletteRequest(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/api/auth/verify-code",
+                "headers": [],
+                "query_string": b"",
+                "client": ("127.0.0.1", 12345),
+            }
+        )
         first = await verify_login_code(req, VerifyCodeRequest(code="ABC123"), temp_db)
         assert first.access_token
         assert first.refresh_token
@@ -518,12 +551,14 @@ class TestMarkdownSafety:
 
     def test_md_safe_replaces_backticks(self):
         from app.utils import md_safe
+
         assert md_safe("movie`name`.mkv") == "movie'name'.mkv"
         assert md_safe("") == ""
         assert md_safe("plain.mp4") == "plain.mp4"
 
     def test_sanitize_filename_strips_path_separators(self):
         from app.utils import sanitize_filename
+
         assert "/" not in sanitize_filename("../../etc/passwd")
         assert "\x00" not in sanitize_filename("bad\x00name")
 
@@ -535,19 +570,25 @@ class TestPublicStreamRangeGuards:
     @staticmethod
     def _req(range_header: str | None = None):
         from starlette.requests import Request
+
         headers = []
         if range_header:
             headers.append((b"range", range_header.encode()))
-        return Request({
-            "type": "http", "method": "GET",
-            "path": "/s/pubhash123",
-            "headers": headers, "query_string": b"",
-            "client": ("127.0.0.1", 12345),
-        })
+        return Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/s/pubhash123",
+                "headers": headers,
+                "query_string": b"",
+                "client": ("127.0.0.1", 12345),
+            }
+        )
 
     @pytest_asyncio.fixture
     async def public_file(self, temp_db, sample_user):
         from app.models import File
+
         f = File(
             user_id=sample_user.id,
             file_id="pyrogram-file-id",
@@ -567,6 +608,7 @@ class TestPublicStreamRangeGuards:
     @pytest.mark.asyncio
     async def test_multipart_range_416_not_500(self, temp_db, public_file):
         from app.routers.streaming import stream_public_file
+
         resp = await stream_public_file(
             public_hash="pubhash123",
             request=self._req("bytes=0-10,20-30"),
@@ -579,17 +621,26 @@ class TestPublicStreamRangeGuards:
     async def test_zero_byte_plain_get_200(self, temp_db, sample_user):
         from app.models import File
         from app.routers.streaming import stream_public_file
+
         f = File(
             user_id=sample_user.id,
-            file_id="fid", file_unique_id="u2", file_name="empty.mp4",
-            file_size=0, mime_type="video/mp4", file_type="video",
-            channel_message_id=78, public_hash="zerohash",
+            file_id="fid",
+            file_unique_id="u2",
+            file_name="empty.mp4",
+            file_size=0,
+            mime_type="video/mp4",
+            file_type="video",
+            channel_message_id=78,
+            public_hash="zerohash",
         )
         temp_db.add(f)
         await temp_db.commit()
 
         resp = await stream_public_file(
-            public_hash="zerohash", request=self._req(None), db=temp_db, download=0,
+            public_hash="zerohash",
+            request=self._req(None),
+            db=temp_db,
+            download=0,
         )
         assert resp.status_code == 200
 
@@ -597,17 +648,26 @@ class TestPublicStreamRangeGuards:
     async def test_zero_byte_with_range_416(self, temp_db, sample_user):
         from app.models import File
         from app.routers.streaming import stream_public_file
+
         f = File(
             user_id=sample_user.id,
-            file_id="fid", file_unique_id="u3", file_name="empty.mp4",
-            file_size=0, mime_type="video/mp4", file_type="video",
-            channel_message_id=79, public_hash="zerohash2",
+            file_id="fid",
+            file_unique_id="u3",
+            file_name="empty.mp4",
+            file_size=0,
+            mime_type="video/mp4",
+            file_type="video",
+            channel_message_id=79,
+            public_hash="zerohash2",
         )
         temp_db.add(f)
         await temp_db.commit()
 
         resp = await stream_public_file(
-            public_hash="zerohash2", request=self._req("bytes=0-100"), db=temp_db, download=0,
+            public_hash="zerohash2",
+            request=self._req("bytes=0-100"),
+            db=temp_db,
+            download=0,
         )
         assert resp.status_code == 416
 
@@ -617,10 +677,11 @@ class TestMemEnvParsing:
 
     def test_suffixes(self):
         from app.status import _parse_mem_env
-        assert _parse_mem_env("3Gi") == 3 * 1024 ** 3
-        assert _parse_mem_env("3G") == 3 * 1024 ** 3
-        assert _parse_mem_env("512M") == 512 * 1024 ** 2
-        assert _parse_mem_env("2MB") == 2 * 1024 ** 2
+
+        assert _parse_mem_env("3Gi") == 3 * 1024**3
+        assert _parse_mem_env("3G") == 3 * 1024**3
+        assert _parse_mem_env("512M") == 512 * 1024**2
+        assert _parse_mem_env("2MB") == 2 * 1024**2
         assert _parse_mem_env("1048576") == 1048576
 
 
@@ -630,6 +691,7 @@ class TestDiskCacheTmpSafety:
     def test_used_bytes_excludes_tmp(self):
         from app.disk_cache import DiskChunkCache
         import pathlib
+
         with tempfile.TemporaryDirectory() as tmpdir:
             cache = DiskChunkCache(cache_dir=pathlib.Path(tmpdir))
             d = cache._movie_dir(1, 2)
@@ -643,6 +705,7 @@ class TestDiskCacheTmpSafety:
         from app.disk_cache import DiskChunkCache
         import pathlib
         import time as _time
+
         with tempfile.TemporaryDirectory() as tmpdir:
             cache = DiskChunkCache(cache_dir=pathlib.Path(tmpdir))
             d = cache._movie_dir(1, 2)
@@ -660,14 +723,15 @@ class TestDiskCacheTmpSafety:
             monkeypatch.setattr(dc_mod, "DISK_CACHE_PER_VIDEO_BYTES", 150)
             cache.sweep()
 
-            assert tmp_f.exists()      # in-flight write protected
-            assert not c0.exists()     # oldest real chunk evicted instead
+            assert tmp_f.exists()  # in-flight write protected
+            assert not c0.exists()  # oldest real chunk evicted instead
             assert c1.exists()
 
     def test_sweep_prunes_last_active(self):
         from app.disk_cache import DiskChunkCache
         import pathlib
         import time as _time
+
         with tempfile.TemporaryDirectory() as tmpdir:
             cache = DiskChunkCache(cache_dir=pathlib.Path(tmpdir))
             cache._last_active[(9, 9)] = _time.time()  # dir never existed
@@ -739,15 +803,20 @@ class TestStatusAuthGate:
     @staticmethod
     def _req(auth: str | None = None):
         from starlette.requests import Request
+
         headers = []
         if auth:
             headers.append((b"authorization", auth.encode()))
-        return Request({
-            "type": "http", "method": "GET",
-            "path": "/api/status",
-            "headers": headers, "query_string": b"",
-            "client": ("127.0.0.1", 12345),
-        })
+        return Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/api/status",
+                "headers": headers,
+                "query_string": b"",
+                "client": ("127.0.0.1", 12345),
+            }
+        )
 
     @pytest.mark.asyncio
     async def test_anonymous_status_strips_sensitive_fields(self, monkeypatch):
@@ -755,10 +824,17 @@ class TestStatusAuthGate:
 
         async def fake_status():
             return {
-                "cpu": 1.0, "ram": {}, "net": {},
+                "cpu": 1.0,
+                "ram": {},
+                "net": {},
                 "logs": ["secret log line"],
-                "cache": {"per_video": [{"chat_id": -100}], "forward": {"total_prebuffer_mb": 1}},
-                "disk": {}, "uptime_seconds": 1, "history": [],
+                "cache": {
+                    "per_video": [{"chat_id": -100}],
+                    "forward": {"total_prebuffer_mb": 1},
+                },
+                "disk": {},
+                "uptime_seconds": 1,
+                "history": [],
             }
 
         monkeypatch.setattr(app_main, "get_status", fake_status)
@@ -773,10 +849,14 @@ class TestStatusAuthGate:
 
         async def fake_status():
             return {
-                "cpu": 1.0, "ram": {}, "net": {},
+                "cpu": 1.0,
+                "ram": {},
+                "net": {},
                 "logs": ["secret log line"],
                 "cache": {"per_video": [{"chat_id": -100}], "forward": None},
-                "disk": {}, "uptime_seconds": 1, "history": [],
+                "disk": {},
+                "uptime_seconds": 1,
+                "history": [],
             }
 
         monkeypatch.setattr(app_main, "get_status", fake_status)
@@ -803,6 +883,7 @@ class TestDisconnectProbeWiring:
     def test_generators_accept_request_param(self):
         import inspect
         from app.streaming import stream_file, parallel_stream_generator
+
         assert "request" in inspect.signature(stream_file).parameters
         assert "request" in inspect.signature(parallel_stream_generator).parameters
 
@@ -810,6 +891,7 @@ class TestDisconnectProbeWiring:
         # Source check: both file_streamer wrappers forward request=request
         import inspect
         from app.routers import streaming as rs
+
         src = inspect.getsource(rs)
         assert src.count("request=request") >= 2
 
@@ -846,12 +928,14 @@ class TestRlsAutoLockdown:
 
     def test_noop_on_sqlite(self):
         from app.database import _apply_rls_lockdown
+
         conn, calls = self._fake_conn("sqlite")
         _apply_rls_lockdown(conn)
         assert calls == []
 
     def test_enables_rls_on_all_model_tables(self):
         from app.database import _apply_rls_lockdown, Base
+
         conn, calls = self._fake_conn("postgresql")
         _apply_rls_lockdown(conn)
         enables = [c for c in calls if c.startswith("ALTER TABLE")]
@@ -861,6 +945,7 @@ class TestRlsAutoLockdown:
 
     def test_revoke_only_existing_api_roles(self):
         from app.database import _apply_rls_lockdown
+
         # service_role absent -> only anon+authenticated revoked (2 statements each)
         conn, calls = self._fake_conn("postgresql", roles=("anon", "authenticated"))
         _apply_rls_lockdown(conn)

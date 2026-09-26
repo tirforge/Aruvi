@@ -8,7 +8,6 @@ from pyrogram import errors, raw, session
 from pyrogram.filters import Filter
 
 
-
 class ListenerCanceled(Exception):
     pass
 
@@ -20,7 +19,7 @@ class PatchedClient(PyroClient):
 
     async def load_session(self):
         """Fix storage.loop (captured at module level) before opening."""
-        if hasattr(self, 'storage') and self.storage is not None:
+        if hasattr(self, "storage") and self.storage is not None:
             try:
                 self.storage.loop = asyncio.get_running_loop()
             except RuntimeError:
@@ -98,7 +97,10 @@ class PatchedClient(PyroClient):
             raise
 
     async def wait_for_inline_query(
-        self, user_id: int, filters: Optional[Filter] = None, timeout: Optional[int] = None
+        self,
+        user_id: int,
+        filters: Optional[Filter] = None,
+        timeout: Optional[int] = None,
     ):
         key = str(user_id)
         future = self.loop.create_future()
@@ -112,7 +114,10 @@ class PatchedClient(PyroClient):
             raise
 
     async def wait_for_inline_result(
-        self, user_id: int, filters: Optional[Filter] = None, timeout: Optional[int] = None
+        self,
+        user_id: int,
+        filters: Optional[Filter] = None,
+        timeout: Optional[int] = None,
     ):
         key = str(user_id)
         future = self.loop.create_future()
@@ -192,10 +197,13 @@ class PatchedClient(PyroClient):
                 sleep_threshold=sleep_threshold,
                 **kwargs,
             )
-                    
+
+
 async def resolve_listener(
     client: PatchedClient,
-    update: Union[types.CallbackQuery, types.Message, types.InlineQuery, types.ChosenInlineResult],
+    update: Union[
+        types.CallbackQuery, types.Message, types.InlineQuery, types.ChosenInlineResult
+    ],
 ):
     if isinstance(update, types.Message):
         # Never swallow bot commands into a pending flow: let /cancel and every
@@ -253,7 +261,9 @@ class Client(PatchedClient):
         else:
             if group not in self.dispatcher.groups:
                 self.dispatcher.groups[group] = []
-                self.dispatcher.groups = OrderedDict(sorted(self.dispatcher.groups.items()))
+                self.dispatcher.groups = OrderedDict(
+                    sorted(self.dispatcher.groups.items())
+                )
             self.dispatcher.groups[group].append(handler)
         return handler, group
 
@@ -265,7 +275,9 @@ class Client(PatchedClient):
         if not self._listeners_registered:
             self.add_handler(handlers.CallbackQueryHandler(resolve_listener), group=-1)
             self.add_handler(handlers.InlineQueryHandler(resolve_listener), group=-1)
-            self.add_handler(handlers.ChosenInlineResultHandler(resolve_listener), group=-1)
+            self.add_handler(
+                handlers.ChosenInlineResultHandler(resolve_listener), group=-1
+            )
             self.add_handler(handlers.MessageHandler(resolve_listener), group=-1)
             self._listeners_registered = True
         await super().start(*args, **kwargs)

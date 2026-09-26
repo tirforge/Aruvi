@@ -1,6 +1,7 @@
 """
 FastAPI main application with Telegram MTProto client lifecycle.
 """
+
 import asyncio
 import ctypes
 import gc
@@ -26,7 +27,20 @@ from .streaming import _evict_idle_ram_caches
 from .utils import bearer_token_matches
 from .gzip_middleware import CompressibleGZipMiddleware
 
-from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, admin_router, gdrive_router, legal_router, diagnostic_router, grab_router, subtitles_router, setup_router #JT
+from .routers import (
+    files_router,
+    folders_router,
+    streaming_router,
+    auth_router,
+    tv_router,
+    admin_router,
+    gdrive_router,
+    legal_router,
+    diagnostic_router,
+    grab_router,
+    subtitles_router,
+    setup_router,
+)  # JT
 
 # Import bot to register handlers
 from . import bot  # noqa
@@ -55,9 +69,9 @@ async def lifespan(app: FastAPI):
     cleanup_task = asyncio.create_task(_cleanup_expired_codes())
     oom_task = asyncio.create_task(_oom_guard_loop())
     disk_sweep_task = asyncio.create_task(_disk_cache_sweep_loop())
-    
+
     yield
-    
+
     oom_task.cancel()
     cleanup_task.cancel()
     startup_task.cancel()
@@ -69,7 +83,7 @@ async def lifespan(app: FastAPI):
         await disk_sweep_task
     except asyncio.CancelledError:
         pass
-    
+
     logger.info("Shutting down...")
     await stop_telegram_client()
     logger.info("Telegram client stopped")
@@ -80,6 +94,7 @@ async def _cleanup_expired_codes():
     from .database import async_session
     from .models import LoginCode
     from sqlalchemy import delete
+
     while True:
         try:
             await asyncio.sleep(300)  # every 5 minutes
@@ -88,11 +103,10 @@ async def _cleanup_expired_codes():
             # timestamptz that skews the comparison unless the session
             # timezone is UTC.
             from datetime import datetime, timezone
+
             cutoff = datetime.now(timezone.utc).replace(tzinfo=None)
             async with async_session() as db:
-                await db.execute(
-                    delete(LoginCode).where(LoginCode.expires_at < cutoff)
-                )
+                await db.execute(delete(LoginCode).where(LoginCode.expires_at < cutoff))
                 await db.commit()
         except asyncio.CancelledError:
             raise
@@ -102,6 +116,7 @@ async def _cleanup_expired_codes():
 
 async def _oom_guard_loop():
     """Check memory every 15s and clear caches if above 65%."""
+
     def _gc_and_trim():
         gc.collect()
         _libc.malloc_trim(0)
@@ -167,7 +182,13 @@ app.add_middleware(
     # dashboard traffic stays restricted to `allowed_origins`.
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "Range", "Accept-Encoding"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "Range",
+        "Accept-Encoding",
+    ],
     expose_headers=["Content-Range", "Accept-Ranges", "Content-Length", "Content-Type"],
 )
 
@@ -210,7 +231,6 @@ app.add_middleware(CompressibleGZipMiddleware, minimum_size=1024)
 app.add_middleware(SecurityHeadersMiddleware)
 
 
-
 # Include routers
 app.include_router(auth_router, prefix="/api")
 app.include_router(files_router, prefix="/api")
@@ -220,12 +240,10 @@ app.include_router(tv_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
 app.include_router(gdrive_router, prefix="/api")
 app.include_router(legal_router)
-app.include_router(diagnostic_router, prefix="/api") #WH
-app.include_router(grab_router, prefix="/api") #YQ
+app.include_router(diagnostic_router, prefix="/api")  # WH
+app.include_router(grab_router, prefix="/api")  # YQ
 app.include_router(subtitles_router, prefix="/api")
 app.include_router(setup_router, prefix="/api")  # one-shot session generator
-
-
 
 
 @app.head("/health", include_in_schema=False)
@@ -238,11 +256,11 @@ async def health_head():
 async def health():
     """Health check with client connection status."""
     from .telegram import tg_client
+
     return {
         "status": "healthy",
         "client_connected": tg_client.is_connected if tg_client else False,
     }
-
 
 
 @app.get("/diag")
@@ -252,6 +270,7 @@ async def diagnostic(request: Request):
     if not bearer_token_matches(auth, settings.debug_password):
         raise HTTPException(status_code=401, detail="Invalid debug token")
     from .telegram import tg_client, clients, get_diag_logs
+
     return {
         "client_connected": tg_client.is_connected if tg_client else False,
         "num_clients": len(clients),
@@ -266,15 +285,23 @@ async def diag_bot_test(request: Request):
         raise HTTPException(status_code=401, detail="Invalid debug token")
     from .telegram import tg_client
     import inspect
+
     result = {
         "client_connected": tg_client.is_connected if tg_client else False,
         "client_initialized": tg_client.is_initialized if tg_client else False,
-        "dispatcher_workers": len(tg_client.dispatcher.handler_worker_tasks) if tg_client else 0,
+        "dispatcher_workers": len(tg_client.dispatcher.handler_worker_tasks)
+        if tg_client
+        else 0,
     }
     handler_counts = {}
     for group, hs in tg_client.dispatcher.groups.items():
         handler_counts[str(group)] = [
-            {"type": type(h).__name__, "callback": h.callback.__name__ if inspect.isfunction(h.callback) else str(h.callback)[:50]}
+            {
+                "type": type(h).__name__,
+                "callback": h.callback.__name__
+                if inspect.isfunction(h.callback)
+                else str(h.callback)[:50],
+            }
             for h in hs
         ]
     result["handler_groups"] = handler_counts
@@ -304,8 +331,11 @@ async def diag_bot_send(request: Request, chat_id: int = 0):
     if not chat_id:
         return {"error": "pass ?chat_id=YOUR_TELEGRAM_ID"}
     from .telegram import tg_client
+
     try:
-        msg = await tg_client.send_message(chat_id, "🧪 Bot test message — if you see this, sending works!")
+        msg = await tg_client.send_message(
+            chat_id, "🧪 Bot test message — if you see this, sending works!"
+        )
         return {"sent": True, "message_id": msg.id}
     except Exception as e:
         return {"sent": False, "error": str(e)}
@@ -314,6 +344,7 @@ async def diag_bot_send(request: Request, chat_id: int = 0):
 @app.get("/api/v")
 async def api_v():
     return {"v": 2, "commit": "33c4c1a57a7a"}
+
 
 def _has_debug_auth(request: Request) -> bool:
     auth = request.headers.get("Authorization", "")
@@ -359,9 +390,11 @@ async def index():
         return FileResponse("app/static/index.html", headers=NO_CACHE_HEADERS)
     return JSONResponse(status_code=404, content={"detail": "Not found"})
 
+
 @app.get("/download", include_in_schema=False)
 async def download_page():
     return FileResponse("app/static/download.html", headers=NO_CACHE_HEADERS)
+
 
 @app.get("/{full_path:path}")
 async def serve_spa(request: Request, full_path: str):
@@ -388,7 +421,9 @@ async def serve_spa(request: Request, full_path: str):
         if gz_file and accepts_gzip:
             # Precompressed sibling from the build — ~70% smaller on the wire
             # (385KB JS -> 116KB, 11MB player -> ~3MB).
-            media_type = mimetypes.guess_type(static_file)[0] or "application/octet-stream"
+            media_type = (
+                mimetypes.guess_type(static_file)[0] or "application/octet-stream"
+            )
             return FileResponse(
                 gz_file,
                 media_type=media_type,
@@ -404,11 +439,13 @@ async def serve_spa(request: Request, full_path: str):
 
     return JSONResponse(status_code=404, content={"detail": "Not found"})
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "app.main:app",
         host=settings.server_host,
         port=settings.server_port,
-        reload=True
+        reload=True,
     )

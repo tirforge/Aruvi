@@ -37,16 +37,19 @@ strong{color:#E6E8EB}
 LOGO = """\
 <div class="logo">AR</div>"""
 
+
 def _nav(active: str) -> str:
     def link(href, label):
         cls = ' class="active"' if href == active else ""
         return f'<a href="{href}"{cls}>{label}</a>'
+
     return f"""\
 <div class="nav">
 {link("/privacy", "Privacy Policy")}
 {link("/terms", "Terms of Service")}
     <a href="https://github.com/tirforge/Aruvi">Aruvi</a>
 </div>"""
+
 
 PAGE_TPL = """\
 <!DOCTYPE html>
@@ -65,9 +68,15 @@ PAGE_TPL = """\
 </body>
 </html>"""
 
+
 def page(title, content, active):
     return PAGE_TPL.format(
-        title=title, style=STYLE, logo=LOGO, nav=_nav(active), content=content, year=YEAR
+        title=title,
+        style=STYLE,
+        logo=LOGO,
+        nav=_nav(active),
+        content=content,
+        year=YEAR,
     )
 
 

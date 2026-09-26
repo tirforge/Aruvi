@@ -38,7 +38,9 @@ SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
 class TokenExpiredError(Exception):
     """Google OAuth refresh token has been revoked or expired."""
+
     pass
+
 
 # In-memory nonce store for OAuth CSRF protection
 # {nonce: (telegram_id, timestamp, code_verifier)}
@@ -221,7 +223,10 @@ def ensure_aruvi_folder(service) -> str:
         folder = (
             service.files()
             .create(
-                body={"name": "Aruvi", "mimeType": "application/vnd.google-apps.folder"},
+                body={
+                    "name": "Aruvi",
+                    "mimeType": "application/vnd.google-apps.folder",
+                },
                 fields="id",
             )
             .execute()
@@ -320,18 +325,25 @@ async def upload_streaming(
                             ):
                                 # Offload blocking pwrite/fadvise to a thread —
                                 # these syscalls must never run on the event loop.
-                                await asyncio.to_thread(
-                                    _raw_write, fd, offset, chunk
-                                )
+                                await asyncio.to_thread(_raw_write, fd, offset, chunk)
                                 async with lock:
                                     downloaded += len(chunk)
                                     now = time.monotonic()
-                                    if progress_callback and (now - last_ts >= 1 or downloaded >= total):
-                                        await progress_callback(downloaded, total, "Downloading from Telegram")
+                                    if progress_callback and (
+                                        now - last_ts >= 1 or downloaded >= total
+                                    ):
+                                        await progress_callback(
+                                            downloaded,
+                                            total,
+                                            "Downloading from Telegram",
+                                        )
                                         last_ts = now
                         break  # success
                     except Exception as e:
-                        if attempt == 0 and ("AUTH_KEY_UNREGISTERED" in str(e) or "LIMIT_INVALID" in str(e)):
+                        if attempt == 0 and (
+                            "AUTH_KEY_UNREGISTERED" in str(e)
+                            or "LIMIT_INVALID" in str(e)
+                        ):
                             continue  # retry once with fresh session
                         async with lock:
                             if dlerr is None:
@@ -393,7 +405,9 @@ async def upload_streaming(
         # ── Phase 2: Upload sequentially to Drive ──
         # Token refresh does blocking network I/O — keep it off the event loop.
         access_token = await asyncio.to_thread(get_access_token, token_dict)
-        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=15.0)) as client:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(120.0, connect=15.0)
+        ) as client:
             session_resp = await client.post(
                 "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable",
                 headers={
@@ -417,11 +431,17 @@ async def upload_streaming(
                         break
                     start = uploaded
                     end = uploaded + len(chunk) - 1
-                    resp = await _upload_block(client, upload_url, chunk, start, end, downloaded)
+                    resp = await _upload_block(
+                        client, upload_url, chunk, start, end, downloaded
+                    )
                     uploaded += len(chunk)
                     now = time.monotonic()
-                    if progress_callback and (now - last_report >= 1 or uploaded >= downloaded):
-                        await progress_callback(uploaded, downloaded, "Uploading to Google Drive")
+                    if progress_callback and (
+                        now - last_report >= 1 or uploaded >= downloaded
+                    ):
+                        await progress_callback(
+                            uploaded, downloaded, "Uploading to Google Drive"
+                        )
                         last_report = now
 
     finally:
@@ -436,15 +456,12 @@ async def upload_streaming(
         raise RuntimeError("Upload completed but no file ID returned")
 
     try:
+
         def _fetch_link() -> dict:
             # build_service may refresh the token and .execute() does blocking
             # HTTPS — run both on a worker thread.
             service = build_service(token_dict)
-            return (
-                service.files()
-                .get(fileId=file_id, fields="webViewLink")
-                .execute()
-            )
+            return service.files().get(fileId=file_id, fields="webViewLink").execute()
 
         file_meta = await asyncio.to_thread(_fetch_link)
         return file_meta.get(
@@ -460,8 +477,12 @@ async def upload_streaming(
 
 
 async def _upload_block(
-    client: httpx.AsyncClient, upload_url: str, block: bytes,
-    start: int, end: int, total: int,
+    client: httpx.AsyncClient,
+    upload_url: str,
+    block: bytes,
+    start: int,
+    end: int,
+    total: int,
 ) -> httpx.Response:
     """Upload a single block with retries.
     Raises TokenExpiredError on HTTP 401 (token revoked mid-upload)."""

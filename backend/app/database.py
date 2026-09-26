@@ -2,6 +2,7 @@
 Database setup with SQLAlchemy async support.
 Supports both SQLite (for development) and PostgreSQL (for production).
 """
+
 import logging
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
@@ -128,6 +129,7 @@ async def init_db():
 
     # Auto-migrate: add columns that exist in models but not in the actual DB
     async with engine.begin() as conn:
+
         def _migrate(sync_conn):
             inspector = sa_inspect(sync_conn)
             for table_name, table in Base.metadata.tables.items():
@@ -135,7 +137,9 @@ async def init_db():
                 for col in table.columns:
                     if col.name not in existing:
                         col_type = col.type.compile(sync_conn.dialect)
-                        sql_parts = [f"ALTER TABLE {table_name} ADD COLUMN {col.name} {col_type}"]
+                        sql_parts = [
+                            f"ALTER TABLE {table_name} ADD COLUMN {col.name} {col_type}"
+                        ]
                         if not col.nullable:
                             sql_parts.append("NOT NULL")
                             # Use server_default or Python default for existing rows
@@ -151,18 +155,33 @@ async def init_db():
                                     default = "0"
                                 elif "BOOL" in type_name:
                                     default = "FALSE"
-                                elif "DATETIME" in type_name or "TIMESTAMP" in type_name:
+                                elif (
+                                    "DATETIME" in type_name or "TIMESTAMP" in type_name
+                                ):
                                     default = "CURRENT_TIMESTAMP"
-                                elif "TEXT" in type_name or "VARCHAR" in type_name or "STRING" in type_name:
+                                elif (
+                                    "TEXT" in type_name
+                                    or "VARCHAR" in type_name
+                                    or "STRING" in type_name
+                                ):
                                     default = "''"
-                                elif "FLOAT" in type_name or "NUMERIC" in type_name or "DECIMAL" in type_name:
+                                elif (
+                                    "FLOAT" in type_name
+                                    or "NUMERIC" in type_name
+                                    or "DECIMAL" in type_name
+                                ):
                                     default = "0"
                                 else:
                                     default = "NULL"
                             sql_parts.append(f"DEFAULT {default}")
                         sql = " ".join(sql_parts)
                         sync_conn.exec_driver_sql(sql)
-                        logger.info("Migrated: added column %s.%s (%s)", table_name, col.name, col_type)
+                        logger.info(
+                            "Migrated: added column %s.%s (%s)",
+                            table_name,
+                            col.name,
+                            col_type,
+                        )
 
             # Auto-migrate: create indexes that exist in models but not in the DB
             for table_name, table in Base.metadata.tables.items():
@@ -176,7 +195,12 @@ async def init_db():
                     unique = "UNIQUE " if idx.unique else ""
                     sql = f"CREATE {unique}INDEX IF NOT EXISTS {idx.name} ON {table_name} ({cols})"
                     sync_conn.exec_driver_sql(sql)
-                    logger.info("Migrated: created index %s on %s (%s)", idx.name, table_name, cols)
+                    logger.info(
+                        "Migrated: created index %s on %s (%s)",
+                        idx.name,
+                        table_name,
+                        cols,
+                    )
 
             # Keep every table (including newly added models) locked down.
             _apply_rls_lockdown(sync_conn)
@@ -192,13 +216,20 @@ async def init_db():
     # library. Files inserted after this fixup are classified at insert time.
     from sqlalchemy import text
     from .media_types import classify_file_type
+
     async with engine.begin() as conn:
-        done = (await conn.execute(
-            text("SELECT value FROM app_meta WHERE key = 'file_type_reclassified'")
-        )).scalar()
+        done = (
+            await conn.execute(
+                text("SELECT value FROM app_meta WHERE key = 'file_type_reclassified'")
+            )
+        ).scalar()
         if done:
             return
-        rows = (await conn.execute(text("SELECT id, file_name, mime_type, file_type FROM files"))).all()
+        rows = (
+            await conn.execute(
+                text("SELECT id, file_name, mime_type, file_type FROM files")
+            )
+        ).all()
         changed = 0
         for fid, fname, mime, ftype in rows:
             effective = classify_file_type(fname, mime)
@@ -210,7 +241,12 @@ async def init_db():
                 changed += 1
                 logger.info("Reclassified file %s: %s -> %s", fid, ftype, effective)
         await conn.execute(
-            text("INSERT INTO app_meta (key, value) VALUES ('file_type_reclassified', '1')")
+            text(
+                "INSERT INTO app_meta (key, value) VALUES ('file_type_reclassified', '1')"
+            )
         )
         if changed:
-            logger.info("Reclassification complete: %d file(s) fixed (will not run again)", changed)
+            logger.info(
+                "Reclassification complete: %d file(s) fixed (will not run again)",
+                changed,
+            )

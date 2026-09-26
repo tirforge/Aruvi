@@ -3,6 +3,7 @@ Grab movies from auto-filter Telegram groups.
 Phase 1: search -> return filtered options (<=15, 1GB-3GB)
 Phase 2: grab selected option -> forward, DB record, stream URL
 """
+
 import asyncio
 import re
 import logging
@@ -21,9 +22,11 @@ _log = logging.getLogger(__name__)
 
 import time  # noqa: E402
 
-_SIZE_RE = re.compile(r'(\d+\.?\d*)\s*(GB|MB)', re.IGNORECASE)
-_DEEP_LINK_RE = re.compile(r'[?&]start=([^&]+)')
-_DEEP_LINK_BOT_RE = re.compile(r'https?://t\.me/([A-Za-z0-9_]{3,64})\?[^&\s]*start=', re.IGNORECASE)
+_SIZE_RE = re.compile(r"(\d+\.?\d*)\s*(GB|MB)", re.IGNORECASE)
+_DEEP_LINK_RE = re.compile(r"[?&]start=([^&]+)")
+_DEEP_LINK_BOT_RE = re.compile(
+    r"https?://t\.me/([A-Za-z0-9_]{3,64})\?[^&\s]*start=", re.IGNORECASE
+)
 
 
 class _GrabError(Exception):
@@ -58,8 +61,12 @@ MIN_SIZE = int(700 * 1024**2)  # 700 MB
 SEARCH_REPLY_WINDOW = 8  # seconds to wait for a group's bot to answer a query
 SEARCH_GROUP_TIMEOUT = 20  # hard cap per group (reply + page-walk)
 SEARCH_GROUP_FAST_TIMEOUT = 8  # per-group cap once a group is suspect (dead/slow)
-PAGE1_MIN_OPTIONS = 5  # if page 1 has at least this many options, skip the slow page-walk
-EARLY_RETURN_OPTIONS = 8  # return as soon as this many options are merged (fast group wins)
+PAGE1_MIN_OPTIONS = (
+    5  # if page 1 has at least this many options, skip the slow page-walk
+)
+EARLY_RETURN_OPTIONS = (
+    8  # return as soon as this many options are merged (fast group wins)
+)
 _BOT_CLICK_SPACING = 3.2  # min gap between callback clicks on the same bot
 GROUP_COOLDOWN_NONE_TTL = 45  # skip groups that returned nothing (short)
 GROUP_COOLDOWN_TIMEOUT_TTL = 120  # skip groups that hard-timed out (long)
@@ -83,6 +90,7 @@ _bot_click_locks_guard = asyncio.Lock()
 # ---------------------------------------------------------------------------
 # Ivy pool — per-session-string slot pool for concurrent operations
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class _IvySlot:
@@ -111,6 +119,7 @@ class _IvyPool:
     in .env. Falls back to GRAB_SESSION_STRING, then
     TELEGRAM_BOT_SESSION_STRINGS.
     """
+
     _slots: list[_IvySlot] = []
     _init_lock = asyncio.Lock()
     _initialized = False
@@ -166,7 +175,11 @@ class _IvyPool:
             finally:
                 async with slot.start_lock:
                     slot.active -= 1
-                    if slot.active == 0 and slot.needs_rebuild and slot.client is not None:
+                    if (
+                        slot.active == 0
+                        and slot.needs_rebuild
+                        and slot.client is not None
+                    ):
                         await _stop_client_safe(slot.client)
                         slot.client = None
                         slot.needs_rebuild = False
@@ -207,9 +220,13 @@ async def _start_client(session_str: str) -> Client:
         raise RuntimeError("empty Ivy session string")
     settings = get_settings()
     ivy = Client(
-        "ivy_grab", session_string=session_str, in_memory=True,
-        api_id=settings.telegram_api_id, api_hash=settings.telegram_api_hash,
-        no_updates=True, sleep_threshold=30,
+        "ivy_grab",
+        session_string=session_str,
+        in_memory=True,
+        api_id=settings.telegram_api_id,
+        api_hash=settings.telegram_api_hash,
+        no_updates=True,
+        sleep_threshold=30,
     )
     _log.info("grabber: ivy client created, starting...")
     try:
@@ -237,6 +254,7 @@ async def _stop_client_safe(client) -> None:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 async def _send_with_retry(client, chat_id, text, max_retries=5, deadline=None):
     for attempt in range(max_retries):
         if deadline is not None and asyncio.get_event_loop().time() >= deadline:
@@ -245,7 +263,7 @@ async def _send_with_retry(client, chat_id, text, max_retries=5, deadline=None):
             return await client.send_message(chat_id, text)
         except Exception as e:
             wait_s = _flood_seconds(e)
-            if 'SLOWMODE' in str(e) and wait_s:
+            if "SLOWMODE" in str(e) and wait_s:
                 if attempt >= max_retries - 1:
                     raise _SlowError(
                         f"send still slowmode-limited after {max_retries} attempts ({wait_s}s)"
@@ -261,7 +279,12 @@ async def _send_with_retry(client, chat_id, text, max_retries=5, deadline=None):
                         raise _SlowError(
                             f"slowmode wait {wait_s}s exceeds search budget ({left:.1f}s left)"
                         ) from e
-                _log.warning("grabber: slowmode on attempt %d/%d, waiting %ds", attempt + 1, max_retries, wait)
+                _log.warning(
+                    "grabber: slowmode on attempt %d/%d, waiting %ds",
+                    attempt + 1,
+                    max_retries,
+                    wait,
+                )
                 await asyncio.sleep(wait)
             else:
                 raise
@@ -318,7 +341,19 @@ async def _collect_bot_replies(
     return collected
 
 
-_NEXT_KEYWORDS = ("next", "»", "➡", ">", "forward", "more", "⬅", "«", "<", "back", "prev")
+_NEXT_KEYWORDS = (
+    "next",
+    "»",
+    "➡",
+    ">",
+    "forward",
+    "more",
+    "⬅",
+    "«",
+    "<",
+    "back",
+    "prev",
+)
 _PAGE_RE = re.compile(r"(next|back|prev|page|»|«|➡|⬅|>|<)", re.IGNORECASE)
 
 
@@ -447,7 +482,9 @@ async def _page_step(ivy: Client, msg, find_fn, timeout: float = 8.0) -> object 
     if nav_btn is None:
         return None
     msg_id = msg.id
-    before = [(b.text or "") for r in (msg.reply_markup.inline_keyboard or []) for b in r]
+    before = [
+        (b.text or "") for r in (msg.reply_markup.inline_keyboard or []) for b in r
+    ]
     bot_id = _bot_key_from_msg(msg)
 
     clicked = False
@@ -470,7 +507,11 @@ async def _page_step(ivy: Client, msg, find_fn, timeout: float = 8.0) -> object 
             try:
                 fresh = await ivy.get_messages(msg.chat.id, msg.id)
                 if fresh and fresh.reply_markup and fresh.reply_markup.inline_keyboard:
-                    after = [(b.text or "") for r in fresh.reply_markup.inline_keyboard for b in r]
+                    after = [
+                        (b.text or "")
+                        for r in fresh.reply_markup.inline_keyboard
+                        for b in r
+                    ]
                     if after and after != before:
                         return fresh
             except Exception:
@@ -489,7 +530,9 @@ async def _page_step(ivy: Client, msg, find_fn, timeout: float = 8.0) -> object 
                 backoff = 2 + attempt
             _log.warning(
                 "grabber: page-nav click attempt %d/3 failed (%s); retrying in %.1fs",
-                attempt, e, backoff,
+                attempt,
+                e,
+                backoff,
             )
             await asyncio.sleep(backoff)
     if not clicked:
@@ -505,7 +548,9 @@ async def _page_step(ivy: Client, msg, find_fn, timeout: float = 8.0) -> object 
         except Exception:
             continue
         if last and last.reply_markup and last.reply_markup.inline_keyboard:
-            after = [(b.text or "") for r in last.reply_markup.inline_keyboard for b in r]
+            after = [
+                (b.text or "") for r in last.reply_markup.inline_keyboard for b in r
+            ]
             if after and after != before:
                 return last
     return None
@@ -532,11 +577,17 @@ async def _rewind_to_first(ivy: Client, msg) -> object | None:
     for _ in range(MAX_PAGES):
         if _find_prev_button(msg) is None:
             return msg
-        before = [(b.text or "") for r in (msg.reply_markup.inline_keyboard or []) for b in r]
+        before = [
+            (b.text or "") for r in (msg.reply_markup.inline_keyboard or []) for b in r
+        ]
         rewound = await _rewind_page(ivy, msg)
         if rewound is None:
             return msg
-        after = [(b.text or "") for r in (rewound.reply_markup.inline_keyboard or []) for b in r]
+        after = [
+            (b.text or "")
+            for r in (rewound.reply_markup.inline_keyboard or [])
+            for b in r
+        ]
         if after == before:
             return msg
         msg = rewound
@@ -564,6 +615,7 @@ async def _rewind_to_first_bg(chat_id: int, msg_id: int) -> None:
     the time the user picks a result, ``grab_selected`` rewinds the message
     itself (or falls back to a fresh query).
     """
+
     async def _run(ivy: Client):
         try:
             msg = await ivy.get_messages(chat_id, msg_id)
@@ -594,12 +646,55 @@ def _parse_size(text: str) -> int | None:
 
 
 _TITLE_STOPWORDS = {
-    "the", "a", "an", "and", "with", "of", "in", "on", "for", "vs", "part",
-    "movie", "film", "english", "hindi", "tamil", "telugu", "malayalam",
-    "korean", "japanese", "chinese", "multi", "audio", "dual", "dubbed",
-    "ac3", "dts", "dd", "web", "hdrip", "bdrip", "bluray", "brrip", "hdtv",
-    "webrip", "webdl", "x264", "x265", "h264", "h265", "hevc",
-    "aac", "mp4", "mkv", "avi", "264", "265", "org", "hd",
+    "the",
+    "a",
+    "an",
+    "and",
+    "with",
+    "of",
+    "in",
+    "on",
+    "for",
+    "vs",
+    "part",
+    "movie",
+    "film",
+    "english",
+    "hindi",
+    "tamil",
+    "telugu",
+    "malayalam",
+    "korean",
+    "japanese",
+    "chinese",
+    "multi",
+    "audio",
+    "dual",
+    "dubbed",
+    "ac3",
+    "dts",
+    "dd",
+    "web",
+    "hdrip",
+    "bdrip",
+    "bluray",
+    "brrip",
+    "hdtv",
+    "webrip",
+    "webdl",
+    "x264",
+    "x265",
+    "h264",
+    "h265",
+    "hevc",
+    "aac",
+    "mp4",
+    "mkv",
+    "avi",
+    "264",
+    "265",
+    "org",
+    "hd",
 }
 _RES_RE = re.compile(r"\b(4k|\d{3,4}p)\b", re.IGNORECASE)
 
@@ -666,7 +761,9 @@ async def _resolve_group(ivy: Client, ref: str) -> int:
         chat_id = getattr(res, "id", None)
         if chat_id is None:
             # Private invite that requires admin approval (ChatJoinResultRequestSent)
-            raise ValueError(f"group invite +{invite_hash} requires admin approval (join request sent)")
+            raise ValueError(
+                f"group invite +{invite_hash} requires admin approval (join request sent)"
+            )
         _log.info("grabber: joined group via invite link, chat_id=%s", chat_id)
         _GROUP_CHAT_ID_CACHE[ref] = chat_id
         return chat_id
@@ -714,7 +811,9 @@ async def _resolve_entity(ivy: Client, ref: str) -> str:
             return "failed"
         status = _join_result(res)
         if status == "requested":
-            _log.warning("grabber: join request sent for +%s — awaiting admin approval", ref)
+            _log.warning(
+                "grabber: join request sent for +%s — awaiting admin approval", ref
+            )
         elif status == "joined":
             _log.info("grabber: joined via invite link +%s", ref)
         return status
@@ -728,7 +827,9 @@ async def _resolve_entity(ivy: Client, ref: str) -> str:
         return "failed"
     status = _join_result(res)
     if status == "requested":
-        _log.warning("grabber: join request sent for @%s — awaiting admin approval", ref)
+        _log.warning(
+            "grabber: join request sent for @%s — awaiting admin approval", ref
+        )
     elif status == "joined":
         _log.info("grabber: joined @%s", ref)
     return status
@@ -746,7 +847,7 @@ def _tme_entity_from_url(url: str) -> str:
         url = "https://" + url
     u = url.replace("https://t.me/", "").replace("http://t.me/", "").split("?")[0]
     if u.startswith("joinchat/"):
-        return "joinchat/" + u[len("joinchat/"):]
+        return "joinchat/" + u[len("joinchat/") :]
     u = u.split("/")[0]
     if u.startswith("+"):
         return "+" + u[1:]
@@ -758,13 +859,13 @@ def _tme_entity_from_url(url: str) -> str:
 def _join_targets_from_message(msg) -> set:
     """Every channel/group referenced by a force-sub message, as entity refs."""
     targets = set()
-    text = (msg.text or msg.caption or "")
+    text = msg.text or msg.caption or ""
     for ref in re.findall(r"@(\w+)", text):
         targets.add(ref)
     if msg.reply_markup:
         for row in msg.reply_markup.inline_keyboard:
             for btn in row:
-                url = (getattr(btn, "url", None) or "")
+                url = getattr(btn, "url", None) or ""
                 if url.startswith("t.me"):
                     url = "https://" + url
                 ref = _tme_entity_from_url(url)
@@ -781,7 +882,7 @@ def _is_join_required(msg) -> bool:
     if msg.reply_markup:
         for row in msg.reply_markup.inline_keyboard:
             for btn in row:
-                url = (getattr(btn, "url", None) or "")
+                url = getattr(btn, "url", None) or ""
                 if url.startswith("t.me"):
                     url = "https://" + url
                 if _tme_entity_from_url(url):
@@ -805,14 +906,22 @@ async def _get_bot_user(ivy: Client, username: str):
     try:
         bot_user = await ivy.get_users(username)
     except Exception as e:
-        _log.warning("grabber: get_users(%s) failed: %s — will auto-detect from replies", username, e)
+        _log.warning(
+            "grabber: get_users(%s) failed: %s — will auto-detect from replies",
+            username,
+            e,
+        )
         return None
     _BOT_USER_CACHE[username] = (now, bot_user)
     # Evict expired entries and cap size — keys can come from arbitrary
     # t.me/<name>?start= URLs inside bot messages, so the dict must not be
     # allowed to grow without bound.
     if len(_BOT_USER_CACHE) > _BOT_USER_CACHE_MAX:
-        for k in [k for k, (ts, _) in _BOT_USER_CACHE.items() if now - ts >= _BOT_USER_CACHE_TTL]:
+        for k in [
+            k
+            for k, (ts, _) in _BOT_USER_CACHE.items()
+            if now - ts >= _BOT_USER_CACHE_TTL
+        ]:
             _BOT_USER_CACHE.pop(k, None)
         while len(_BOT_USER_CACHE) > _BOT_USER_CACHE_MAX:
             _BOT_USER_CACHE.pop(next(iter(_BOT_USER_CACHE)))
@@ -834,7 +943,9 @@ async def _wait_for_file_auto_join(
     # expired has id < attempt-2's /start but is still THIS grab's file.
     first_sent_id = 0
     for attempt in range(max_attempts):
-        sent = await _send_with_retry(ivy, chat_id, start_command, deadline=send_deadline)
+        sent = await _send_with_retry(
+            ivy, chat_id, start_command, deadline=send_deadline
+        )
         if attempt == 0 and sent:
             first_sent_id = sent.id
 
@@ -852,10 +963,16 @@ async def _wait_for_file_auto_join(
             try:
                 async for msg in ivy.get_chat_history(chat_id, limit=15):
                     if msg.media and msg.media in (
-                        MessageMediaType.VIDEO, MessageMediaType.DOCUMENT,
-                        MessageMediaType.AUDIO, MessageMediaType.PHOTO,
+                        MessageMediaType.VIDEO,
+                        MessageMediaType.DOCUMENT,
+                        MessageMediaType.AUDIO,
+                        MessageMediaType.PHOTO,
                     ):
-                        if msg.id > min_msg_id and msg.from_user and msg.from_user.id == chat_id:
+                        if (
+                            msg.id > min_msg_id
+                            and msg.from_user
+                            and msg.from_user.id == chat_id
+                        ):
                             file_msg = msg
                             break
                         # Older media (or echoed forwards) — keep scanning for
@@ -871,7 +988,9 @@ async def _wait_for_file_auto_join(
                             if status == "requested":
                                 pending_approval = True
                         if re_start_after_join:
-                            await _send_with_retry(ivy, chat_id, start_command, deadline=send_deadline)
+                            await _send_with_retry(
+                                ivy, chat_id, start_command, deadline=send_deadline
+                            )
                             re_start_after_join = False
                         found_force_sub = True
                         break
@@ -902,6 +1021,7 @@ async def _wait_for_file_auto_join(
 # ---------------------------------------------------------------------------
 # Phase 1: search
 # ---------------------------------------------------------------------------
+
 
 async def search_results(
     query: str,
@@ -940,8 +1060,15 @@ async def search_results(
             return None
 
         # 2. Wait for bot response(s) with buttons
-        result_msgs = await _collect_bot_replies(ivy, chat_id, sent, bot_user, seconds=SEARCH_REPLY_WINDOW)
-        _log.info("grabber: %s search replied in %.1fs (%d msg(s))", group_username, time.monotonic() - _t, len(result_msgs))
+        result_msgs = await _collect_bot_replies(
+            ivy, chat_id, sent, bot_user, seconds=SEARCH_REPLY_WINDOW
+        )
+        _log.info(
+            "grabber: %s search replied in %.1fs (%d msg(s))",
+            group_username,
+            time.monotonic() - _t,
+            len(result_msgs),
+        )
         if bot_user is None and result_msgs:
             bot_user = result_msgs[0].from_user
 
@@ -967,7 +1094,11 @@ async def search_results(
             for _page in range(2):  # page 1 + at most one more page
                 if len(options) >= MAX_PER_CHANNEL:
                     break
-                if not page_msg or not page_msg.reply_markup or not page_msg.reply_markup.inline_keyboard:
+                if (
+                    not page_msg
+                    or not page_msg.reply_markup
+                    or not page_msg.reply_markup.inline_keyboard
+                ):
                     break
                 for row_idx, row in enumerate(page_msg.reply_markup.inline_keyboard):
                     for col_idx, btn in enumerate(row):
@@ -983,23 +1114,33 @@ async def search_results(
                             continue
 
                         parsed_size = _parse_size(text)
-                        if parsed_size is None or parsed_size < MIN_SIZE or parsed_size > MAX_SIZE:
+                        if (
+                            parsed_size is None
+                            or parsed_size < MIN_SIZE
+                            or parsed_size > MAX_SIZE
+                        ):
                             continue
 
                         if parsed_size:
-                            sz = f"{parsed_size // 1048576}MB" if parsed_size < 1024**3 else f"{parsed_size / 1024**3:.1f}GB"
+                            sz = (
+                                f"{parsed_size // 1048576}MB"
+                                if parsed_size < 1024**3
+                                else f"{parsed_size / 1024**3:.1f}GB"
+                            )
                             label = f"[{sz}] {text[:50]}"
                         else:
                             label = text[:60]
-                        options.append({
-                            "label": label[:60],
-                            "row": row_idx,
-                            "col": col_idx,
-                            "msg_id": page_msg.id,
-                            "depth": _page,
-                            "file_name": text[:200],
-                            "file_size": parsed_size or 0,
-                        })
+                        options.append(
+                            {
+                                "label": label[:60],
+                                "row": row_idx,
+                                "col": col_idx,
+                                "msg_id": page_msg.id,
+                                "depth": _page,
+                                "file_name": text[:200],
+                                "file_size": parsed_size or 0,
+                            }
+                        )
                         if len(options) >= MAX_PER_CHANNEL:
                             break
                     if len(options) >= MAX_PER_CHANNEL:
@@ -1021,7 +1162,11 @@ async def search_results(
                 _cancel_rewind_task(page_msg.chat.id, page_msg.id)
                 t = spawn_background(_rewind_to_first_bg(page_msg.chat.id, page_msg.id))
                 _rewind_tasks[(page_msg.chat.id, page_msg.id)] = t
-                t.add_done_callback(lambda _, k=(page_msg.chat.id, page_msg.id): _rewind_tasks.pop(k, None))
+                t.add_done_callback(
+                    lambda _, k=(page_msg.chat.id, page_msg.id): _rewind_tasks.pop(
+                        k, None
+                    )
+                )
 
         return {
             "results": options,
@@ -1066,13 +1211,18 @@ def _mark_group_result(group: str, ok: bool) -> None:
     n = _GROUP_STRIKES.get(group, 0) + 1
     _GROUP_STRIKES[group] = n
     if n >= 3:
-        _log.warning("grabber: %s failed %d times in a row — treating as dead (cooldown %ds)",
-                     group, n, GROUP_DEAD_COOLDOWN_TTL)
+        _log.warning(
+            "grabber: %s failed %d times in a row — treating as dead (cooldown %ds)",
+            group,
+            n,
+            GROUP_DEAD_COOLDOWN_TTL,
+        )
         _put_group_in_cooldown(group, GROUP_DEAD_COOLDOWN_TTL)
 
 
 async def search_results_multi(
-    query: str,    group_bot_pairs: list[tuple[str, str]],
+    query: str,
+    group_bot_pairs: list[tuple[str, str]],
 ) -> dict | None:
     """Search across multiple groups and merge deduplicated results.
 
@@ -1085,15 +1235,25 @@ async def search_results_multi(
 
     active = [(g, b) for g, b in group_bot_pairs if not _group_in_cooldown(g)]
     if not active:
-        _log.warning("grabber: all %d group(s) in cooldown — skipping live search", len(group_bot_pairs))
+        _log.warning(
+            "grabber: all %d group(s) in cooldown — skipping live search",
+            len(group_bot_pairs),
+        )
         return None
     if len(active) < len(group_bot_pairs):
-        _log.info("grabber: skipping %d cooldown group(s) this search", len(group_bot_pairs) - len(active))
+        _log.info(
+            "grabber: skipping %d cooldown group(s) this search",
+            len(group_bot_pairs) - len(active),
+        )
 
     def _one(group: str, bot: str) -> asyncio.Task:
         # A suspect group (repeated timeouts/no-results) gets a short per-group
         # cap so a dead bot can't stall every search for the full timeout.
-        timeout = SEARCH_GROUP_FAST_TIMEOUT if _group_is_suspect(group) else SEARCH_GROUP_TIMEOUT
+        timeout = (
+            SEARCH_GROUP_FAST_TIMEOUT
+            if _group_is_suspect(group)
+            else SEARCH_GROUP_TIMEOUT
+        )
 
         async def _run():
             try:
@@ -1103,14 +1263,19 @@ async def search_results_multi(
             except _SlowError:
                 # Account is flood-limited — transient, NOT a dead group. Short
                 # cooldown so the next search retries, without a dead-strike.
-                _log.warning("grabber: search in %s slowmode-limited — short cooldown (not dead)", group)
+                _log.warning(
+                    "grabber: search in %s slowmode-limited — short cooldown (not dead)",
+                    group,
+                )
                 _put_group_in_cooldown(group, GROUP_COOLDOWN_NONE_TTL)
                 return None
             except asyncio.TimeoutError:
                 # Strike/cooldown accounting happens ONCE, in the merge loop's
                 # res-is-None branch — marking here too double-counted every
                 # timeout (one timeout == suspect).
-                _log.warning("grabber: search in %s timed out after %ds", group, timeout)
+                _log.warning(
+                    "grabber: search in %s timed out after %ds", group, timeout
+                )
                 return None
             except Exception as e:
                 _log.warning("grabber: search in %s raised: %s", group, e)
@@ -1158,7 +1323,11 @@ async def search_results_multi(
                         # is dead or it has nothing for this query. Cooldown so the
                         # next search skips it too (longer once it looks suspect).
                         _mark_group_result(group, False)
-                        ttl = GROUP_COOLDOWN_TIMEOUT_TTL if _group_is_suspect(group) else GROUP_COOLDOWN_NONE_TTL
+                        ttl = (
+                            GROUP_COOLDOWN_TIMEOUT_TTL
+                            if _group_is_suspect(group)
+                            else GROUP_COOLDOWN_NONE_TTL
+                        )
                         _put_group_in_cooldown(group, ttl)
                         continue
                     any_ok = True
@@ -1197,6 +1366,7 @@ async def search_results_multi(
 # Phase 2: grab
 # ---------------------------------------------------------------------------
 
+
 async def grab_selected(
     query: str,
     row: int,
@@ -1223,6 +1393,7 @@ async def grab_selected(
     and, crucially, does not re-query when the cached message was not rewound
     to page 1 in time. ``None`` (unknown) falls back to the legacy full walk.
     """
+
     async def _run(ivy: Client):
         bot_user = await _get_bot_user(ivy, bot_username)
         try:
@@ -1247,7 +1418,9 @@ async def grab_selected(
             except Exception:
                 pass
             if not result_msg or not result_msg.reply_markup:
-                _log.warning("grabber: msg_id %s not found or stale, re-querying", msg_id)
+                _log.warning(
+                    "grabber: msg_id %s not found or stale, re-querying", msg_id
+                )
                 result_msg = None
 
         # The row/col the user picked is relative to the page the button was
@@ -1263,7 +1436,10 @@ async def grab_selected(
             except Exception:
                 rewound = None
             if rewound is None:
-                _log.warning("grabber: msg_id %s could not be rewound to page 1, re-querying", msg_id)
+                _log.warning(
+                    "grabber: msg_id %s could not be rewound to page 1, re-querying",
+                    msg_id,
+                )
                 result_msg = None
             else:
                 result_msg = rewound
@@ -1271,14 +1447,18 @@ async def grab_selected(
         if result_msg is None:
             try:
                 sent = await _send_with_retry(
-                    ivy, chat_id, query,
+                    ivy,
+                    chat_id,
+                    query,
                     deadline=asyncio.get_event_loop().time() + 60,
                 )
             except Exception as e:
                 _log.warning("grabber: search send failed in %s: %s", group_username, e)
                 return None
 
-            result_msgs = await _collect_bot_replies(ivy, chat_id, sent, bot_user, seconds=15)
+            result_msgs = await _collect_bot_replies(
+                ivy, chat_id, sent, bot_user, seconds=15
+            )
             if bot_user is None and result_msgs:
                 bot_user = result_msgs[0].from_user
             result_msg = result_msgs[0] if result_msgs else None
@@ -1301,9 +1481,14 @@ async def grab_selected(
         for _attempt in range(2):
             page_idx = 0
             while page_msg is not None and page_idx <= walk_limit:
-                if not page_msg.reply_markup or not page_msg.reply_markup.inline_keyboard:
+                if (
+                    not page_msg.reply_markup
+                    or not page_msg.reply_markup.inline_keyboard
+                ):
                     break
-                for row_idx, page_row in enumerate(page_msg.reply_markup.inline_keyboard):
+                for row_idx, page_row in enumerate(
+                    page_msg.reply_markup.inline_keyboard
+                ):
                     for col_idx, page_btn in enumerate(page_row):
                         if _is_nav_button(page_btn.text):
                             continue
@@ -1333,7 +1518,9 @@ async def grab_selected(
             if sent is not None:
                 # Already used a fresh query — nothing left to retry.
                 break
-            _log.warning("grabber: button not found on reused msg %s, re-querying", msg_id)
+            _log.warning(
+                "grabber: button not found on reused msg %s, re-querying", msg_id
+            )
             if result_msg is not None:
                 try:
                     if not get_settings().grab_keep_messages:
@@ -1343,13 +1530,17 @@ async def grab_selected(
             result_msg = None
             try:
                 sent = await _send_with_retry(
-                    ivy, chat_id, query,
+                    ivy,
+                    chat_id,
+                    query,
                     deadline=asyncio.get_event_loop().time() + 60,
                 )
             except Exception as e:
                 _log.warning("grabber: search send failed in %s: %s", group_username, e)
                 return None
-            result_msgs = await _collect_bot_replies(ivy, chat_id, sent, bot_user, seconds=15)
+            result_msgs = await _collect_bot_replies(
+                ivy, chat_id, sent, bot_user, seconds=15
+            )
             if bot_user is None and result_msgs:
                 bot_user = result_msgs[0].from_user
             result_msg = result_msgs[0] if result_msgs else None
@@ -1363,8 +1554,12 @@ async def grab_selected(
             page_msg = result_msg
 
         if btn is None:
-            _log.error("grabber: button [%s][%s]%s not found",
-                       row, col, f" ({target_file_name!r})" if target_file_name else "")
+            _log.error(
+                "grabber: button [%s][%s]%s not found",
+                row,
+                col,
+                f" ({target_file_name!r})" if target_file_name else "",
+            )
             to_del_ids = [m.id for m in (sent, result_msg) if m]
             try:
                 if not get_settings().grab_keep_messages:
@@ -1395,7 +1590,9 @@ async def grab_selected(
                         asyncio.get_event_loop().time() + flood + 0.5,
                     )
                     if attempt < 2:
-                        _log.warning("grabber: click flood wait %ds, retrying once", flood)
+                        _log.warning(
+                            "grabber: click flood wait %ds, retrying once", flood
+                        )
                         await asyncio.sleep(flood + 0.5)
                         continue
                 _log.warning("grabber: click failed: %s", e)
@@ -1410,7 +1607,11 @@ async def grab_selected(
             except Exception:
                 pass
             return None
-        _log.warning("grabber: clicked type=%s val=%s", type(clicked).__name__, str(clicked)[:200])
+        _log.warning(
+            "grabber: clicked type=%s val=%s",
+            type(clicked).__name__,
+            str(clicked)[:200],
+        )
 
         # 3. Extract deep-link param + owning bot from click response.
         # The file bot named in the deep-link URL (e.g. t.me/MagicMovies1Bot)
@@ -1480,7 +1681,10 @@ async def grab_selected(
                 start_bot = file_bot
                 _log.info("grabber: /start targeting file bot @%s", file_bot_username)
             else:
-                _log.warning("grabber: could not resolve deep-link bot @%s — using group bot", file_bot_username)
+                _log.warning(
+                    "grabber: could not resolve deep-link bot @%s — using group bot",
+                    file_bot_username,
+                )
         if start_bot is None:
             _log.error("grabber: could not determine bot user for /start")
             to_del_ids = [m.id for m in (sent, result_msg) if m]
@@ -1531,7 +1735,9 @@ async def grab_selected(
         if target_file_name:
             ok, warning = _label_file_check(target_file_name, file_name)
             if not ok:
-                _log.warning("grabber: label/file mismatch for %r: %s", file_name, warning)
+                _log.warning(
+                    "grabber: label/file mismatch for %r: %s", file_name, warning
+                )
                 to_del_ids = [m.id for m in (sent, result_msg) if m]
                 try:
                     if not get_settings().grab_keep_messages:
@@ -1540,26 +1746,42 @@ async def grab_selected(
                     pass
                 raise _GrabError(warning)
             elif warning:
-                _log.warning("grabber: label/file soft mismatch for %r: %s", file_name, warning)
+                _log.warning(
+                    "grabber: label/file soft mismatch for %r: %s", file_name, warning
+                )
 
         # 5. Dedup: re-grabbing the same option must not create a second
         # storage-channel copy + library row. The SOURCE message carries the
         # same file_unique_id, so this runs BEFORE the forward.
-        _src_obj = file_msg.video or file_msg.document or file_msg.audio or file_msg.photo
+        _src_obj = (
+            file_msg.video or file_msg.document or file_msg.audio or file_msg.photo
+        )
         if _src_obj is not None:
             async with async_session() as db:
                 from sqlalchemy import select
-                u = (await db.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+
+                u = (
+                    await db.execute(
+                        select(User).where(User.telegram_id == telegram_id)
+                    )
+                ).scalar_one_or_none()
                 if u is not None:
-                    dup = (await db.execute(
-                        select(File).where(
-                            File.user_id == u.id,
-                            File.file_unique_id == _src_obj.file_unique_id,
+                    dup = (
+                        await db.execute(
+                            select(File).where(
+                                File.user_id == u.id,
+                                File.file_unique_id == _src_obj.file_unique_id,
+                            )
                         )
-                    )).scalar_one_or_none()
+                    ).scalar_one_or_none()
                     if dup is not None:
-                        _log.info("grabber: %r already in library (file id %s) — reusing", file_name, dup.id)
+                        _log.info(
+                            "grabber: %r already in library (file id %s) — reusing",
+                            file_name,
+                            dup.id,
+                        )
                         from .auth import create_download_token as _cdt
+
                         _s = get_settings()
                         _tok = _cdt(str(telegram_id), dup.id, version=u.auth_version)
                         return {
@@ -1574,6 +1796,7 @@ async def grab_selected(
 
         # 6. Forward to storage channel
         from .telegram import forward_to_storage_channel
+
         try:
             fwd = await forward_to_storage_channel(file_msg)
         except Exception as e:
@@ -1596,7 +1819,10 @@ async def grab_selected(
         # same option used to duplicate the storage-channel copy + library row)
         async with async_session() as db:
             from sqlalchemy import select
-            result = await db.execute(select(User).where(User.telegram_id == telegram_id))
+
+            result = await db.execute(
+                select(User).where(User.telegram_id == telegram_id)
+            )
             db_user = result.scalar_one_or_none()
             if not db_user:
                 _log.warning("grabber: user %s not found in DB", telegram_id)
@@ -1620,9 +1846,14 @@ async def grab_selected(
             db_file_id = file_record.id
 
         from .auth import create_download_token
-        token = create_download_token(str(telegram_id), db_file_id, version=auth_version)
+
+        token = create_download_token(
+            str(telegram_id), db_file_id, version=auth_version
+        )
         s = get_settings()
-        stream_url = f"{s.web_base_url.rstrip('/')}/api/stream/{db_file_id}?token={token}"
+        stream_url = (
+            f"{s.web_base_url.rstrip('/')}/api/stream/{db_file_id}?token={token}"
+        )
 
         return {
             "name": file_name,

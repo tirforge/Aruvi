@@ -8,6 +8,7 @@ Policy:  directories expire DISK_CACHE_TTL seconds after the LAST ACTIVITY
          DISK_CACHE_MAX_BYTES the oldest dirs (LRU by last activity) are removed.
          Set DISK_CACHE_ENABLED=0 to disable (all methods become no-ops).
 """
+
 import os
 import tempfile
 import threading
@@ -16,8 +17,12 @@ from pathlib import Path
 
 CACHE_DIR = Path(os.environ.get("DISK_CACHE_DIR", "./data/vcache"))
 DISK_CACHE_TTL = int(os.environ.get("DISK_CACHE_TTL", "1800"))  # 30 minutes
-DISK_CACHE_MAX_BYTES = int(os.environ.get("DISK_CACHE_MAX_BYTES", str(8 * 1024**3)))  # 8 GB total
-DISK_CACHE_PER_VIDEO_BYTES = int(os.environ.get("DISK_CACHE_PER_VIDEO_BYTES", str(2 * 1024**3)))  # 2 GB per video
+DISK_CACHE_MAX_BYTES = int(
+    os.environ.get("DISK_CACHE_MAX_BYTES", str(8 * 1024**3))
+)  # 8 GB total
+DISK_CACHE_PER_VIDEO_BYTES = int(
+    os.environ.get("DISK_CACHE_PER_VIDEO_BYTES", str(2 * 1024**3))
+)  # 2 GB per video
 ENABLED = os.environ.get("DISK_CACHE_ENABLED", "1") == "1"
 
 
@@ -214,7 +219,11 @@ class DiskChunkCache:
         for _, d, _ in list(entries):
             try:
                 files = sorted(
-                    (f for f in d.iterdir() if f.is_file() and not f.name.endswith(".tmp")),
+                    (
+                        f
+                        for f in d.iterdir()
+                        if f.is_file() and not f.name.endswith(".tmp")
+                    ),
                     key=lambda p: p.stat().st_mtime,
                 )
                 size = sum(f.stat().st_size for f in files)
@@ -242,9 +251,7 @@ class DiskChunkCache:
             try:
                 dir_files = [f for f in d.iterdir() if f.is_file()]
                 size = sum(
-                    f.stat().st_size
-                    for f in dir_files
-                    if not f.name.endswith(".tmp")
+                    f.stat().st_size for f in dir_files if not f.name.endswith(".tmp")
                 )
             except OSError:
                 continue

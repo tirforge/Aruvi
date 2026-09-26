@@ -1,4 +1,5 @@
 """Bootstrap for uvicorn with capture_signals disabled (Python 3.13 workaround)."""
+
 import asyncio
 import contextlib
 import gc
@@ -20,11 +21,18 @@ uvs.Server.capture_signals = lambda self: contextlib.nullcontext()
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 from app.main import app
-from app.streaming import _cache_manager, _forward_streams, _cache_finished_at, CACHE_TTL
+from app.streaming import (
+    _cache_manager,
+    _forward_streams,
+    _cache_finished_at,
+    CACHE_TTL,
+)
 from app.telegram import _prune_msg_cache
+
 
 async def _periodic_housekeeping():
     """Every 60s: release free memory, evict stale stream caches, prune msg cache."""
+
     def _gc_and_trim():
         gc.collect()
         _libc.malloc_trim(0)
@@ -46,7 +54,9 @@ async def _periodic_housekeeping():
                     _cache_finished_at.pop(key, None)
             freed = _cache_manager.clear_all(exclude_keys=active)
             if freed:
-                _log.info("Housekeeping: freed %.1f MB from stale caches", freed / 1024 / 1024)
+                _log.info(
+                    "Housekeeping: freed %.1f MB from stale caches", freed / 1024 / 1024
+                )
         except Exception as e:
             _log.warning("Housekeeping cache eviction error: %s", e)
         try:
@@ -54,16 +64,27 @@ async def _periodic_housekeeping():
         except Exception as e:
             _log.warning("Housekeeping msg cache prune error: %s", e)
 
-config = uvicorn.Config(app, host="0.0.0.0", port=int(os.environ.get("SERVER_PORT", "7680")), log_level="info", access_log=False)
+
+config = uvicorn.Config(
+    app,
+    host="0.0.0.0",
+    port=int(os.environ.get("SERVER_PORT", "7680")),
+    log_level="info",
+    access_log=False,
+)
 server = uvs.Server(config)
+
 
 async def run():
     from app.utils import spawn_background
+
     spawn_background(_periodic_housekeeping())
     await server.serve()
 
+
 try:
     import uvloop
+
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 except ImportError:
     pass

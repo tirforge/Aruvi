@@ -11,17 +11,21 @@ def _ffprobe(audio_langs, sub_codec=None, duration="60.0"):
     """Build a minimal ffprobe JSON dict for testing."""
     streams = []
     for i, lang in enumerate(audio_langs):
-        streams.append({
-            "index": i,
-            "codec_type": "audio",
-            "tags": {"language": lang},
-        })
+        streams.append(
+            {
+                "index": i,
+                "codec_type": "audio",
+                "tags": {"language": lang},
+            }
+        )
     if sub_codec:
-        streams.append({
-            "index": len(streams),
-            "codec_type": "subtitle",
-            "codec_name": sub_codec,
-        })
+        streams.append(
+            {
+                "index": len(streams),
+                "codec_type": "subtitle",
+                "codec_name": sub_codec,
+            }
+        )
     return {"streams": streams, "format": {"duration": duration}}
 
 
@@ -44,8 +48,15 @@ def test_parse_cast_probe_keeps_ass_and_webvtt():
 def test_parse_cast_probe_skips_bitmap_subtitles():
     # Bitmap subs cannot be carried into MP4 via -c:s mov_text; they must be skipped
     # (not mapped) so they don't break the whole remux.
-    for codec in ("hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle",
-                  "dvb_teletext", "eia_608", "eia_708", "arib_caption"):
+    for codec in (
+        "hdmv_pgs_subtitle",
+        "dvd_subtitle",
+        "dvb_subtitle",
+        "dvb_teletext",
+        "eia_608",
+        "eia_708",
+        "arib_caption",
+    ):
         probe = _parse_cast_probe(_ffprobe(["eng"], sub_codec=codec))
         assert probe["has_text_subs"] is False, codec
 

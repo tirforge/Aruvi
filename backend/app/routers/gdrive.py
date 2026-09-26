@@ -75,7 +75,9 @@ DRIVE_SVG = """\
 </svg>"""
 
 
-def _page(icon_svg: str, title: str, body: str, extra: str = "", is_error: bool = False) -> str:
+def _page(
+    icon_svg: str, title: str, body: str, extra: str = "", is_error: bool = False
+) -> str:
     cls = " error" if is_error else ""
     home = settings.web_base_url
     title = html_escape(title)
@@ -111,9 +113,7 @@ async def _resolve_user(request: Request):
     except (TypeError, ValueError):
         return None
     async with async_session() as db:
-        result = await db.execute(
-            select(User).where(User.telegram_id == telegram_id)
-        )
+        result = await db.execute(select(User).where(User.telegram_id == telegram_id))
         user = result.scalar_one_or_none()
         if not user:
             return None
@@ -132,18 +132,24 @@ async def gdrive_auth(request: Request):
     user = await _resolve_user(request)
     if not user:
         return HTMLResponse(
-            _page(CROSS_SVG, "Authentication required",
-                  "Please login via Telegram first.",
-                  '<p class="sub">Use /web in the bot to get a login link.</p>',
-                  is_error=True),
+            _page(
+                CROSS_SVG,
+                "Authentication required",
+                "Please login via Telegram first.",
+                '<p class="sub">Use /web in the bot to get a login link.</p>',
+                is_error=True,
+            ),
             status_code=401,
         )
 
     if user.gdrive_token:
         return HTMLResponse(
-            _page(CHECK_SVG, "Already connected",
-                  "Your Google Drive is already linked to Aruvi.",
-                  '<div class="badge">' + DRIVE_SVG + ' Google Drive · Connected</div>')
+            _page(
+                CHECK_SVG,
+                "Already connected",
+                "Your Google Drive is already linked to Aruvi.",
+                '<div class="badge">' + DRIVE_SVG + " Google Drive · Connected</div>",
+            )
         )
 
     auth_url = generate_auth_url(user.telegram_id)
@@ -158,18 +164,24 @@ async def gdrive_auth_callback(request: Request):
 
     if error:
         return HTMLResponse(
-            _page(CROSS_SVG, "Authorization denied",
-                  "You denied the Google Drive connection request.",
-                  f"<p class=\"sub\">{html_escape(error)}</p>",
-                  is_error=True),
+            _page(
+                CROSS_SVG,
+                "Authorization denied",
+                "You denied the Google Drive connection request.",
+                f'<p class="sub">{html_escape(error)}</p>',
+                is_error=True,
+            ),
             status_code=400,
         )
 
     if not code or not state:
         return HTMLResponse(
-            _page(CROSS_SVG, "Missing parameters",
-                  "The callback URL is missing required parameters.",
-                  is_error=True),
+            _page(
+                CROSS_SVG,
+                "Missing parameters",
+                "The callback URL is missing required parameters.",
+                is_error=True,
+            ),
             status_code=400,
         )
 
@@ -177,10 +189,13 @@ async def gdrive_auth_callback(request: Request):
         telegram_id, code_verifier = consume_state(state)
     except ValueError as e:
         return HTMLResponse(
-            _page(CROSS_SVG, "Session expired",
-                  str(e),
-                  '<p class="sub">Please tap "Save to Drive" again in Telegram.</p>',
-                  is_error=True),
+            _page(
+                CROSS_SVG,
+                "Session expired",
+                str(e),
+                '<p class="sub">Please tap "Save to Drive" again in Telegram.</p>',
+                is_error=True,
+            ),
             status_code=400,
         )
 
@@ -189,18 +204,19 @@ async def gdrive_auth_callback(request: Request):
     except Exception as e:
         _log.exception("GDrive token exchange failed for user %s", telegram_id)
         return HTMLResponse(
-            _page(CROSS_SVG, "Token exchange failed",
-                  str(e),
-                  '<p class="sub">Please try again.</p>',
-                  is_error=True),
+            _page(
+                CROSS_SVG,
+                "Token exchange failed",
+                str(e),
+                '<p class="sub">Please try again.</p>',
+                is_error=True,
+            ),
             status_code=500,
         )
 
     # Store token on user record
     async with async_session() as db:
-        result = await db.execute(
-            select(User).where(User.telegram_id == telegram_id)
-        )
+        result = await db.execute(select(User).where(User.telegram_id == telegram_id))
         user = result.scalar_one_or_none()
         if user:
             user.gdrive_token = json.dumps(token_dict)
@@ -209,6 +225,7 @@ async def gdrive_auth_callback(request: Request):
     # Notify user via Telegram bot
     try:
         from ..telegram import tg_client
+
         await tg_client.send_message(
             telegram_id,
             "✅ **Google Drive connected!**\n\n"
@@ -220,8 +237,11 @@ async def gdrive_auth_callback(request: Request):
         _log.warning("Could not notify user %s: %s", telegram_id, e)
 
     return HTMLResponse(
-        _page(CHECK_SVG, "Connected",
-              "Your Google Drive is now linked to Aruvi.",
-              '<div class="badge">' + DRIVE_SVG + ' Google Drive · Connected</div>'
-              '<p class="sub">You can close this tab.</p>')
+        _page(
+            CHECK_SVG,
+            "Connected",
+            "Your Google Drive is now linked to Aruvi.",
+            '<div class="badge">' + DRIVE_SVG + " Google Drive · Connected</div>"
+            '<p class="sub">You can close this tab.</p>',
+        )
     )

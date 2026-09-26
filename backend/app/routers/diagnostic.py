@@ -6,7 +6,12 @@ from fastapi.responses import StreamingResponse
 from ..config import get_settings
 from ..utils import bearer_token_matches, spawn_background
 from ..telegram import tg_client
-from ..streaming import stream_file as stream_file_chunks, prefetch_first_batch_safe, _fetch_message, _cache_manager
+from ..streaming import (
+    stream_file as stream_file_chunks,
+    prefetch_first_batch_safe,
+    _fetch_message,
+    _cache_manager,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -25,11 +30,23 @@ def _get_file_attrs(message) -> tuple[int, str, str] | None:
     if not media:
         return None
     if message.video:
-        return message.video.file_size, message.video.mime_type or "video/mp4", getattr(message.video, "file_name", "video.mp4")
+        return (
+            message.video.file_size,
+            message.video.mime_type or "video/mp4",
+            getattr(message.video, "file_name", "video.mp4"),
+        )
     if message.document:
-        return message.document.file_size, message.document.mime_type or "application/octet-stream", getattr(message.document, "file_name", "file.bin")
+        return (
+            message.document.file_size,
+            message.document.mime_type or "application/octet-stream",
+            getattr(message.document, "file_name", "file.bin"),
+        )
     if message.audio:
-        return message.audio.file_size, message.audio.mime_type or "audio/mpeg", getattr(message.audio, "file_name", "audio.mp3")
+        return (
+            message.audio.file_size,
+            message.audio.mime_type or "audio/mpeg",
+            getattr(message.audio, "file_name", "audio.mp3"),
+        )
     if message.photo:
         return message.photo.file_size, "image/jpeg", "photo.jpg"
     return None
@@ -61,7 +78,7 @@ async def diag_bandwidth(
             "Content-Length": str(total_bytes),
             "X-Test-Size-Bytes": str(total_bytes),
             "X-Test-Chunk-Size": str(chunk),
-            "Server-Timing": f"setup;dur={int(elapsed*1000)}",
+            "Server-Timing": f"setup;dur={int(elapsed * 1000)}",
             "Cache-Control": "no-store",
         },
     )
@@ -83,9 +100,11 @@ async def diag_clear_cache(request: Request):
     and freed automatically by the OS under memory pressure."""
     _check_auth(request)
     from ..status import _forward_streams
+
     active = set(_forward_streams.keys())  # keys are (chat_id, message_id)
     freed = _cache_manager.clear_all(exclude_keys=active)
     import gc
+
     freed_gc = gc.collect(2)
     return {
         "status": "ok",
@@ -95,7 +114,9 @@ async def diag_clear_cache(request: Request):
     }
 
 
-async def _diag_media_response(request: Request, msg: int, chat: int | None, head: bool = False) -> StreamingResponse:
+async def _diag_media_response(
+    request: Request, msg: int, chat: int | None, head: bool = False
+) -> StreamingResponse:
     """Shared GET/HEAD handler. HEAD is required by Range-based clients
     (e.g. movi-player's HttpSource) that probe file size first."""
     _check_auth(request)
@@ -105,11 +126,16 @@ async def _diag_media_response(request: Request, msg: int, chat: int | None, hea
     t0 = time.perf_counter()
     message = await _fetch_message(tg_client, chat_id, msg)
     if not message:
-        raise HTTPException(status_code=404, detail=f"Message {msg} not found in chat {chat_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Message {msg} not found in chat {chat_id}"
+        )
 
     attrs = _get_file_attrs(message)
     if not attrs:
-        raise HTTPException(status_code=400, detail="Message has no streamable media (video/document/audio/photo)")
+        raise HTTPException(
+            status_code=400,
+            detail="Message has no streamable media (video/document/audio/photo)",
+        )
 
     file_size, mime_type, file_name = attrs
     ttfb_ms = round((time.perf_counter() - t0) * 1000, 1)
@@ -121,7 +147,8 @@ async def _diag_media_response(request: Request, msg: int, chat: int | None, hea
     has_range = False
     if range_header:
         import re
-        match = re.match(r'bytes=(\d+)-(\d*)', range_header)
+
+        match = re.match(r"bytes=(\d+)-(\d*)", range_header)
         if match:
             from_bytes = int(match.group(1))
             end_str = match.group(2)
@@ -143,7 +170,9 @@ async def _diag_media_response(request: Request, msg: int, chat: int | None, hea
 
     async def _stream():
         try:
-            async for chunk in stream_file_chunks(tg_client, message, from_bytes, until_bytes, request=request):
+            async for chunk in stream_file_chunks(
+                tg_client, message, from_bytes, until_bytes, request=request
+            ):
                 yield chunk
         except asyncio.TimeoutError:
             logger.warning("Diag stream timed out for chat=%s msg=%d", chat_id, msg)
@@ -153,11 +182,12 @@ async def _diag_media_response(request: Request, msg: int, chat: int | None, hea
             raise
 
     from urllib.parse import quote
+
     encoded_name = quote(file_name)
 
     headers = {
         "Content-Type": mime_type,
-        "Content-Disposition": f'inline; filename*=utf-8\'\'{encoded_name}',
+        "Content-Disposition": f"inline; filename*=utf-8''{encoded_name}",
         "Accept-Ranges": "bytes",
         "Cache-Control": "public, max-age=86400",
         "X-Diag-Ttfb-Ms": str(ttfb_ms),
