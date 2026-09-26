@@ -16,13 +16,23 @@ permissions:
 
 jobs:
   scan:
-    # No token yet = skip cleanly instead of failing red.
-    if: ${{ secrets.SONAR_TOKEN != '' }}
     runs-on: ubuntu-latest
     steps:
+      # Job-level `if:` cannot read `secrets` (invalid workflow = 0-job
+      # instant fail), so gate at step level instead. No token = clean
+      # skip; token present = real scan.
+      - name: Check for SONAR_TOKEN
+        id: gate
+        run: |
+          if [ -z "${{ secrets.SONAR_TOKEN }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "No SONAR_TOKEN secret — skipping SonarCloud scan."
+          fi
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.skip != 'true'
         with:
           fetch-depth: 0
       - uses: SonarSource/sonarqube-scan-action@v4
+        if: steps.gate.outputs.skip != 'true'
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
