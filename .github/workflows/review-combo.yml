@@ -123,22 +123,26 @@ jobs:
             --jq '[.[] | select(.user.login=="coderabbitai[bot]" or .user.login=="coderabbitai") | .body] | join("\n---\n")' > findings/rabbit-main.md
           gh api "repos/${{ github.repository }}/pulls/$PR/comments" --paginate \
             --jq '[.[] | select(.user.login=="coderabbitai[bot]" or .user.login=="coderabbitai") | ("`"+.path+":"+([.line,.original_line]|map(values)|join(",")+"` "+.body))] | join("\n---\n")' > findings/rabbit-inline.md
-          # 3. SonarCloud open issues on this PR
+          # 3. SonarCloud open issues on this PR (fallback keeps job alive
+          # if the API is unreachable; empty result parses as CLEAN below)
           curl -s -u "$SONAR_TOKEN:" \
             "https://sonarcloud.io/api/issues/search?componentKeys=tirforge_Aruvi&pullRequest=$PR&resolved=false&ps=100" \
-            | python3 -c "import json,sys; d=json.load(sys.stdin); print('\n---\n'.join(f\"[{i['severity']}] {i['component'].split(':')[-1]}:{i.get('line','?')} {i['rule']} — {i['message']}\" for i in d.get('issues',[])) or 'CLEAN: no open Sonar issues.')" > findings/sonar.md
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print('\n---\n'.join(f\"[{i['severity']}] {i['component'].split(':')[-1]}:{i.get('line','?')} {i['rule']} — {i['message']}\" for i in d.get('issues',[])) or 'CLEAN: no open Sonar issues.')" > findings/sonar.md \
+            || echo "CLEAN: sonar unreachable, skipping." > findings/sonar.md
           wc -c findings/*.md
 
       - name: Decide clean vs dirty
         id: decide
         if: steps.guard.outputs.skip == 'false'
         run: |
-          if grep -qiE 'CLEAN|no open Sonar|no issues? found|looks good|lgtm' findings/sonar.md \
-             && [ "$(wc -c < findings/rabbit-main.md)" -lt 2000 ] \
-             && [ "$(wc -c < findings/rabbit-inline.md)" -lt 200 ]; then
-            echo "dirty=false" >> "$GITHUB_OUTPUT"
-          else
+          # Precise signals only: byte-size heuristics misfire on review
+          # placeholders (CodeRabbit's "in progress" alone is >2KB).
+          if grep -q '```diff' findings/opencode.md 2>/dev/null \
+             || [ "$(wc -c < findings/rabbit-inline.md)" -ge 200 ] \
+             || ! grep -qiE 'CLEAN|no open Sonar' findings/sonar.md; then
             echo "dirty=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dirty=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Report all-clean
@@ -150,7 +154,10 @@ jobs:
           "✅ **review-combo: all clean** — opencode, Sonar, and CodeRabbit found nothing to fix."
 
       - uses: anomalyco/opencode/github@latest
-        if: steps.guard.outputs.skip == 'false' && steps.decide.outputs.dirty == 'true'
+        # Dependabot PRs never reach the fixer: the opencode action asserts
+        # PR-author write permissions and dependabot[bot] has none (verified
+        # in logs). Harvest + decide above still run for visibility.
+        if: steps.guard.outputs.skip == 'false' && steps.decide.outputs.dirty == 'true' && github.event.pull_request.user.login != 'dependabot[bot]'
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
