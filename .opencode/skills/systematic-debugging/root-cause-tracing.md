@@ -8,19 +8,17 @@ Bugs often manifest deep in the call stack (git init in wrong directory, file cr
 
 ## When to Use
 
-```dot
-digraph when_to_use {
-    "Bug appears deep in stack?" [shape=diamond];
-    "Can trace backwards?" [shape=diamond];
-    "Fix at symptom point" [shape=box];
-    "Trace to original trigger" [shape=box];
-    "BETTER: Also add defense-in-depth" [shape=box];
-
-    "Bug appears deep in stack?" -> "Can trace backwards?" [label="yes"];
-    "Can trace backwards?" -> "Trace to original trigger" [label="yes"];
-    "Can trace backwards?" -> "Fix at symptom point" [label="no - dead end"];
-    "Trace to original trigger" -> "BETTER: Also add defense-in-depth";
-}
+```mermaid
+flowchart TD
+    N1{"Bug appears deep in stack?"}
+    N2{"Can trace backwards?"}
+    N3["Fix at symptom point"]
+    N4["Trace to original trigger"]
+    N5["BETTER: Also add defense-in-depth"]
+    N1 -->|"yes"| N2
+    N2 -->|"yes"| N4
+    N2 -->|"no - dead end"| N3
+    N4 --> N5
 ```
 
 **Use when:**
@@ -129,26 +127,25 @@ Runs tests one-by-one, stops at first polluter. See script for usage.
 
 ## Key Principle
 
-```dot
-digraph principle {
-    "Found immediate cause" [shape=ellipse];
-    "Can trace one level up?" [shape=diamond];
-    "Trace backwards" [shape=box];
-    "Is this the source?" [shape=diamond];
-    "Fix at source" [shape=box];
-    "Add validation at each layer" [shape=box];
-    "Bug impossible" [shape=doublecircle];
-    "NEVER fix just the symptom" [shape=octagon, style=filled, fillcolor=red, fontcolor=white];
-
-    "Found immediate cause" -> "Can trace one level up?";
-    "Can trace one level up?" -> "Trace backwards" [label="yes"];
-    "Can trace one level up?" -> "NEVER fix just the symptom" [label="no"];
-    "Trace backwards" -> "Is this the source?";
-    "Is this the source?" -> "Trace backwards" [label="no - keeps going"];
-    "Is this the source?" -> "Fix at source" [label="yes"];
-    "Fix at source" -> "Add validation at each layer";
-    "Add validation at each layer" -> "Bug impossible";
-}
+```mermaid
+flowchart TD
+    N1(["Found immediate cause"])
+    N2{"Can trace one level up?"}
+    N3["Trace backwards"]
+    N4{"Is this the source?"}
+    N5["Fix at source"]
+    N6["Add validation at each layer"]
+    N7(("Bug impossible"))
+    N8{{"NEVER fix just the symptom"}}
+    style N8 fill:red
+    N1 --> N2
+    N2 -->|"yes"| N3
+    N2 -->|"no"| N8
+    N3 --> N4
+    N4 -->|"no - keeps going"| N3
+    N4 -->|"yes"| N5
+    N5 --> N6
+    N6 --> N7
 ```
 
 **NEVER fix just where the error appears.** Trace back to find the original trigger.

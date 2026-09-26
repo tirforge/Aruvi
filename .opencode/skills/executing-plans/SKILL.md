@@ -65,44 +65,39 @@ last tasks get the least of you.
 
 ## The Process
 
-```dot
-digraph process {
-    rankdir=TB;
-
-    subgraph cluster_per_task {
-        label="Per Task";
-        "task-start: brief + BASE; read the brief" [shape=box];
-        "Work the steps in order: TDD, run every verification, read every output" [shape=box];
-        "Step output matches plan's Expected?" [shape=diamond];
-        "Plan wrong? Rule and ledger. Code wrong? systematic-debugging" [shape=box];
-        "Commit as the plan's commit steps say" [shape=box];
-        "Completion contract met?" [shape=diamond];
-        "task-done: run tests, ledger the result; mark todo complete" [shape=box];
-    }
-
-    "Setup: worktree, workspace + ledger, read plan + spec, pre-flight scan" [shape=box];
-    "More tasks remain?" [shape=diamond];
-    "Final whole-branch review (fresh reviewer if you have one)" [shape=box];
-    "Re-grade, then: Critical/Important → ONE fix pass, each fix RED→GREEN + green suite; Minor → ledger" [shape=box];
-    "Final review clean: delete this plan's workspace" [shape=box];
-    "Use superpowers:finishing-a-development-branch" [shape=box style=filled fillcolor=lightgreen];
-
-    "Setup: worktree, workspace + ledger, read plan + spec, pre-flight scan" -> "task-start: brief + BASE; read the brief";
-    "task-start: brief + BASE; read the brief" -> "Work the steps in order: TDD, run every verification, read every output";
-    "Work the steps in order: TDD, run every verification, read every output" -> "Step output matches plan's Expected?";
-    "Step output matches plan's Expected?" -> "Plan wrong? Rule and ledger. Code wrong? systematic-debugging" [label="no"];
-    "Plan wrong? Rule and ledger. Code wrong? systematic-debugging" -> "Work the steps in order: TDD, run every verification, read every output";
-    "Step output matches plan's Expected?" -> "Commit as the plan's commit steps say" [label="yes, last step"];
-    "Commit as the plan's commit steps say" -> "Completion contract met?";
-    "Completion contract met?" -> "Work the steps in order: TDD, run every verification, read every output" [label="no - finish the task"];
-    "Completion contract met?" -> "task-done: run tests, ledger the result; mark todo complete" [label="yes"];
-    "task-done: run tests, ledger the result; mark todo complete" -> "More tasks remain?";
-    "More tasks remain?" -> "task-start: brief + BASE; read the brief" [label="yes"];
-    "More tasks remain?" -> "Final whole-branch review (fresh reviewer if you have one)" [label="no"];
-    "Final whole-branch review (fresh reviewer if you have one)" -> "Re-grade, then: Critical/Important → ONE fix pass, each fix RED→GREEN + green suite; Minor → ledger";
-    "Re-grade, then: Critical/Important → ONE fix pass, each fix RED→GREEN + green suite; Minor → ledger" -> "Final review clean: delete this plan's workspace";
-    "Final review clean: delete this plan's workspace" -> "Use superpowers:finishing-a-development-branch";
-}
+```mermaid
+flowchart TD
+    subgraph "Per Task"
+    N1["task-start: brief + BASE; read the brief"]
+    N2["Work the steps in order: TDD, run every verification, read every output"]
+    N3{"Step output matches plan's Expected?"}
+    N4["Plan wrong? Rule and ledger. Code wrong? systematic-debugging"]
+    N5["Commit as the plan's commit steps say"]
+    N6{"Completion contract met?"}
+    N7["task-done: run tests, ledger the result; mark todo complete"]
+    end
+    N8["Setup: worktree, workspace + ledger, read plan + spec, pre-flight scan"]
+    N9{"More tasks remain?"}
+    N10["Final whole-branch review (fresh reviewer if you have one)"]
+    N11["Re-grade, then: Critical/Important → ONE fix pass, each fix RED→GREEN + green suite; Minor → ledger"]
+    N12["Final review clean: delete this plan's workspace"]
+    N13["Use superpowers:finishing-a-development-branch"]
+    style N13 fill:lightgreen
+    N8 --> N1
+    N1 --> N2
+    N2 --> N3
+    N3 -->|"no"| N4
+    N4 --> N2
+    N3 -->|"yes, last step"| N5
+    N5 --> N6
+    N6 -->|"no - finish the task"| N2
+    N6 -->|"yes"| N7
+    N7 --> N9
+    N9 -->|"yes"| N1
+    N9 -->|"no"| N10
+    N10 --> N11
+    N11 --> N12
+    N12 --> N13
 ```
 
 ## Setup

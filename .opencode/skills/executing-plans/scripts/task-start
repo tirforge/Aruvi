@@ -21,7 +21,7 @@ n=$2
 sdd="$(cd "$(dirname "$0")/../../subagent-driven-development/scripts" && pwd)"
 
 out=$("$sdd/task-brief" "$plan" "$n")
-brief=$(printf '%s\n' "$out" | sed -n 's/^wrote \(.*\): [0-9][0-9]* lines$/\1/p')
+brief=$(printf '%s\n' "$out" | sed -n 's/^wrote \(.*\): [0-9][0-9]* lines$/\1/p' | tail -n 1)
 [ -n "$brief" ] || { echo "task-brief did not report a path: $out" >&2; exit 1; }
 
 echo "brief: $brief"

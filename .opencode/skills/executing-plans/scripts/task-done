@@ -27,11 +27,15 @@ log="$dir/task-${n}-tests.log"
 ledger="$dir/progress.md"
 
 # Render the command the way a person would type it, for the ledger line.
+# Single-quote every argument containing anything outside a safe whitelist,
+# escaping embedded single quotes as '\'' — the old space/quote-only class
+# let $, backticks, !, *, ?, and parens through unquoted (M11).
 cmd=""
 for a in "$@"; do
-  case "$a" in
-    *[[:space:]\"\;\|\&]*) cmd="$cmd '$a'" ;;
-    *) cmd="$cmd $a" ;;
+  esc=${a//\'/\'\\\'\'}
+  case "$esc" in
+    *[!a-zA-Z0-9_@%+=:,./-]*) cmd="$cmd '$esc'" ;;
+    *) cmd="$cmd $esc" ;;
   esac
 done
 cmd=${cmd# }
@@ -46,7 +50,12 @@ if [ "$rc" -ne 0 ]; then
 fi
 
 last=$(grep -v '^[[:space:]]*$' "$log" | tail -n 1)
+# An all-blank log leaves $last empty and the ledger line dangling on '→'.
+[ -n "$last" ] || last='(no output)'
 [ -f "$ledger" ] || printf '# SDD ledger — plan: %s\n' "$plan" > "$ledger"
-line="Task $n: complete (commits $(git rev-parse --short=7 "$base")..$(git rev-parse --short=7 HEAD), tests: $cmd → $last)"
+# Full SHAs cut to a fixed 12 chars: --short varies in length and can
+# ambiguate across repos, while a fixed width keeps ledger lines greppable.
+base_full=$(git rev-parse "$base" | cut -c1-12); head_full=$(git rev-parse HEAD | cut -c1-12)
+line="Task $n: complete (commits ${base_full}..${head_full}, tests: $cmd → $last)"
 printf '%s\n' "$line" >> "$ledger"
 echo "ledger: $line"

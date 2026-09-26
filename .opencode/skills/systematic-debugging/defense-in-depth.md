@@ -23,14 +23,21 @@ Different layers catch different cases:
 **Purpose:** Reject obviously invalid input at API boundary
 
 ```typescript
+import { statSync } from 'fs';
+
 function createProject(name: string, workingDirectory: string) {
   if (!workingDirectory || workingDirectory.trim() === '') {
     throw new Error('workingDirectory cannot be empty');
   }
-  if (!existsSync(workingDirectory)) {
+  // Single statSync instead of existsSync + statSync: the two-call version
+  // has a TOCTOU gap (deleted/replaced between checks) and doubles syscalls.
+  let isDir: boolean;
+  try {
+    isDir = statSync(workingDirectory).isDirectory();
+  } catch {
     throw new Error(`workingDirectory does not exist: ${workingDirectory}`);
   }
-  if (!statSync(workingDirectory).isDirectory()) {
+  if (!isDir) {
     throw new Error(`workingDirectory is not a directory: ${workingDirectory}`);
   }
   // ... proceed
@@ -53,13 +60,19 @@ function initializeWorkspace(projectDir: string, sessionId: string) {
 **Purpose:** Prevent dangerous operations in specific contexts
 
 ```typescript
+import { normalize, resolve, sep } from 'path';
+import { realpathSync } from 'fs';
+import { tmpdir } from 'os';
+
 async function gitInit(directory: string) {
   // In tests, refuse git init outside temp directories
   if (process.env.NODE_ENV === 'test') {
-    const normalized = normalize(resolve(directory));
-    const tmpDir = normalize(resolve(tmpdir()));
+    // realpathSync defeats symlink escapes; the +sep defeats
+    // prefix-sibling bypasses like /tmp-evil matching /tmp.
+    const normalized = normalize(realpathSync(resolve(directory)));
+    const tmpDir = normalize(realpathSync(tmpdir()));
 
-    if (!normalized.startsWith(tmpDir)) {
+    if (normalized !== tmpDir && !normalized.startsWith(tmpDir + sep)) {
       throw new Error(
         `Refusing git init outside temp dir during tests: ${directory}`
       );

@@ -23,11 +23,20 @@ export function waitForEvent(
   eventType: LaceEventType,
   timeoutMs = 5000
 ): Promise<LaceEvent> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new RangeError(`timeoutMs must be a positive finite number, got ${timeoutMs}`);
+  }
   return new Promise((resolve, reject) => {
     const startTime = Date.now();
 
     const check = () => {
-      const events = threadManager.getEvents(threadId);
+      let events;
+      try {
+        events = threadManager.getEvents(threadId);
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+        return;
+      }
       const event = events.find((e) => e.type === eventType);
 
       if (event) {
@@ -64,11 +73,23 @@ export function waitForEventCount(
   count: number,
   timeoutMs = 5000
 ): Promise<LaceEvent[]> {
+  if (!Number.isInteger(count) || count < 1) {
+    throw new RangeError(`count must be a positive integer, got ${count}`);
+  }
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new RangeError(`timeoutMs must be a positive finite number, got ${timeoutMs}`);
+  }
   return new Promise((resolve, reject) => {
     const startTime = Date.now();
 
     const check = () => {
-      const events = threadManager.getEvents(threadId);
+      let events;
+      try {
+        events = threadManager.getEvents(threadId);
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+        return;
+      }
       const matchingEvents = events.filter((e) => e.type === eventType);
 
       if (matchingEvents.length >= count) {
@@ -115,11 +136,20 @@ export function waitForEventMatch(
   description: string,
   timeoutMs = 5000
 ): Promise<LaceEvent> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new RangeError(`timeoutMs must be a positive finite number, got ${timeoutMs}`);
+  }
   return new Promise((resolve, reject) => {
     const startTime = Date.now();
 
     const check = () => {
-      const events = threadManager.getEvents(threadId);
+      let events;
+      try {
+        events = threadManager.getEvents(threadId);
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+        return;
+      }
       const event = events.find(predicate);
 
       if (event) {

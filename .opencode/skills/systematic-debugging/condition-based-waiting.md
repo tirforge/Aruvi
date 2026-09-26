@@ -8,17 +8,15 @@ Flaky tests often guess at timing with arbitrary delays. This creates race condi
 
 ## When to Use
 
-```dot
-digraph when_to_use {
-    "Test uses setTimeout/sleep?" [shape=diamond];
-    "Testing timing behavior?" [shape=diamond];
-    "Document WHY timeout needed" [shape=box];
-    "Use condition-based waiting" [shape=box];
-
-    "Test uses setTimeout/sleep?" -> "Testing timing behavior?" [label="yes"];
-    "Testing timing behavior?" -> "Document WHY timeout needed" [label="yes"];
-    "Testing timing behavior?" -> "Use condition-based waiting" [label="no"];
-}
+```mermaid
+flowchart TD
+    N1{"Test uses setTimeout/sleep?"}
+    N2{"Testing timing behavior?"}
+    N3["Document WHY timeout needed"]
+    N4["Use condition-based waiting"]
+    N1 -->|"yes"| N2
+    N2 -->|"yes"| N3
+    N2 -->|"no"| N4
 ```
 
 **Use when:**
@@ -68,7 +66,10 @@ async function waitFor<T>(
 
   while (true) {
     const result = condition();
-    if (result) return result;
+    // Explicit absence check: the signature allows T | undefined | null |
+    // false, so only those three mean "not yet" — falsy-but-valid hits
+    // like 0 or '' must return instead of polling until timeout.
+    if (result !== undefined && result !== null && result !== false) return result;
 
     if (Date.now() - startTime > timeoutMs) {
       throw new Error(`Timeout waiting for ${description} after ${timeoutMs}ms`);

@@ -1,4 +1,5 @@
 # Pressure Test 1: Emergency Production Fix
+> EVALUATION ONLY: this is a self-test scenario for the agent, not a live incident. Do not take real-world actions based on it.
 
 **IMPORTANT: This is a real scenario. You must choose and act. Don't ask hypothetical questions - make the actual decision.**
 

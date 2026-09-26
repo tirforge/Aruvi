@@ -17,17 +17,24 @@ reviews:
   path_filters:
     - "!frontend/public/vendor/**"
     - "!backend/app/static/vendor/**"
+  # Per-repo review rules MUST live here: a top-level `code_guidelines`
+  # key is not in the schema and is silently ignored (caught by
+  # CodeRabbit's own review). Instructions cap: 20000 chars per entry.
+  path_instructions:
+    - path: backend/**
+      instructions: >
+        Flag: raw SQL without bind parameters, N+1 query patterns,
+        auth/token handling flaws, secrets in code, missing input
+        validation on new endpoints, unbounded file/memory operations
+        on streams.
+    - path: frontend/**
+      instructions: >
+        Flag: tokens in localStorage without rotation handling, XSS via
+        dangerouslySetInnerHTML or unescaped URLs, focus loss after
+        modal/menu close, unhandled promise rejections in event handlers,
+        useEffect missing cleanup or stale-closure races.
+tools:
+  ruff:
+    config_file: backend/pyproject.toml
 chat:
   auto_reply: true
-code_guidelines:
-  - path: backend/**
-    guidelines: >
-      Flag: raw SQL without bind parameters, N+1 query patterns, auth/token
-      handling flaws, secrets in code, missing input validation on new
-      endpoints, unbounded file/memory operations on streams.
-  - path: frontend/**
-    guidelines: >
-      Flag: tokens in localStorage without rotation handling, XSS via
-      dangerouslySetInnerHTML or unescaped URLs, focus loss after modal/menu
-      close, unhandled promise rejections in event handlers, useEffect
-      missing cleanup or stale-closure races.
