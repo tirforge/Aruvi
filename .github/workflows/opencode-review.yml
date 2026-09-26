@@ -40,4 +40,7 @@ jobs:
             - Look for potential bugs
             - Suggest improvements
             - Flag security issues (auth, tokens, injection)
+            For EVERY issue found, return the fixed code: a unified diff
+            hunk or a complete replacement code block the author can apply
+            directly. Do not describe fixes in prose alone.
             Keep it short. Only comment on changed lines.
