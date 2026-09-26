@@ -164,7 +164,20 @@ jobs:
             Follow .opencode/skills/systematic-debugging/SKILL.md (fix root
             causes) and .opencode/skills/verification-before-completion/SKILL.md
             (verify each fix: build/lint/test what you touched).
-            Apply every valid finding to the code. Then commit (message must
-            contain [combo-fix]) and push to the current branch.
+            Apply every valid finding to the code. Then fix YOUR OWN fallout too —
+            bounded loop, max 3 rounds. Round 1: apply all findings. Then verify
+            (ruff check backend/, tsc --noEmit + vite build in frontend/, backend
+            compileall). Rounds 2-3 ONLY if verification surfaced NEW issues your
+            edits introduced — fix those, re-verify. Stop early when fully clean.
+            Convergence gate: total error count (ruff + tsc) MUST be strictly lower
+            than the previous round; otherwise STOP, revert that round, report it.
+            Anti-sloppy rules (revert + report instead of violating): never delete
+            or weaken tests to pass; never add noqa/type-ignore or comment-out code
+            to silence a finding; never loosen tsconfig/ruff/eslint strictness;
+            never change public API signatures to dodge a bug — fix callers.
+            No placeholders, no TODOs, no dead code left behind.
+            Commit each round separately (message must contain [combo-fix]) and push
+            to the current branch. Post a short final report as a PR comment: rounds
+            used, what got fixed, anything that resisted (needs human).
             Do not open new PRs. Do not touch .github/ unless a finding is
             about CI itself.
