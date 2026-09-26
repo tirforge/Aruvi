@@ -204,8 +204,11 @@ export default function AdminPanel({ onBack }: { onBack: () => void }) {
                                     user={u}
                                     onToggleAdmin={() => handleToggleAdmin(u)}
                                     onDelete={() => handleDeleteUser(u)}
-                                    togglePending={toggleAdmin.isPending}
-                                    deletePending={deleteUser.isPending}
+                                    // Per-row pending: the old shared booleans
+                                    // disabled EVERY row while one acted.
+                                    // mutation.variables holds the in-flight id.
+                                    togglePending={toggleAdmin.isPending && toggleAdmin.variables === u.id}
+                                    deletePending={deleteUser.isPending && deleteUser.variables === u.id}
                                 />
                             ))}
                         </div>

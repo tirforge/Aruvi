@@ -206,7 +206,13 @@ export const useAppStore = create<AppState>((set) => ({
     toasts: [],
     addToast: (message, type = 'success') => set((state) => {
         const id = Math.random().toString(36).substring(2, 9);
-        return { toasts: [...state.toasts, { id, message, type }] };
+        const last = state.toasts[state.toasts.length - 1];
+        // Drop consecutive duplicates (error storms from failing beats would
+        // flood the stack) and cap at 5 — expiry relies on each item's timer.
+        const next = (last && last.message === message && last.type === type)
+            ? state.toasts
+            : [...state.toasts, { id, message, type }];
+        return { toasts: next.slice(-5) };
     }),
     removeToast: (id) => set((state) => ({
         toasts: state.toasts.filter((t) => t.id !== id),

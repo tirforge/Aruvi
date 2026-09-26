@@ -1,10 +1,11 @@
 /**
  * MoveFileModal - modal for selecting a destination folder
  */
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, Folder as FolderIcon, ChevronRight, Home } from 'lucide-react';
 import { useFolderTree, TelegramFile, Folder, useMoveFiles, useMoveFolders } from '../lib/api';
 import { useAppStore } from '../lib/store';
+import { useFocusReturn } from '../lib/useFocusReturn';
 
 interface MoveFileModalProps {
     items: { files: TelegramFile[]; folders: Folder[] };
@@ -18,9 +19,29 @@ export default function MoveFileModal({ items, onClose }: MoveFileModalProps) {
     const { mutateAsync: moveFolders, isPending: isFoldersPending } = useMoveFolders();
     const addToast = useAppStore((s) => s.addToast);
 const clearSelection = useAppStore((s) => s.clearSelection);
+    // Return focus to the opener (Move menu item) on close.
+    useFocusReturn();
 
     const isPending = isFilesPending || isFoldersPending;
     const totalItems = items.files.length + items.folders.length;
+
+    // Guarded close while a move POST is in flight + own Escape listener so
+    // FileBrowser's unguarded global handler can't bypass the guard.
+    const pendingRef = useRef(isPending);
+    pendingRef.current = isPending;
+    const onCloseRef = useRef(onClose);
+    onCloseRef.current = onClose;
+    const safeClose = () => { if (!pendingRef.current) onCloseRef.current(); };
+    useEffect(() => {
+        const handleEscape = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                e.stopPropagation();
+                safeClose();
+            }
+        };
+        document.addEventListener('keydown', handleEscape);
+        return () => document.removeEventListener('keydown', handleEscape);
+    }, []);
 
     const handleMove = async () => {
         try {
@@ -71,11 +92,13 @@ const clearSelection = useAppStore((s) => s.clearSelection);
     };
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+        <div
+            onClick={(e) => { if (e.target === e.currentTarget) safeClose(); }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
             <div className="glass-card w-full max-w-md p-6 animate-scale-in">
                 <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-semibold">Move {totalItems} Item{totalItems !== 1 ? 's' : ''}</h2>
-                    <button onClick={onClose} className="p-1 hover:bg-dark-700 rounded">
+                    <button onClick={safeClose} className="p-1 hover:bg-dark-700 rounded">
                         <X className="w-5 h-5" />
                     </button>
                 </div>
@@ -112,7 +135,7 @@ const clearSelection = useAppStore((s) => s.clearSelection);
 
                 <div className="flex justify-end gap-3">
                     <button
-                        onClick={onClose}
+                        onClick={safeClose}
                         className="px-4 py-2 text-dark-400 hover:text-white transition-colors"
                     >
                         Cancel

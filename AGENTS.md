@@ -12,9 +12,8 @@ Aruvi = Telegram-backed media streaming platform. Files live in a Telegram chann
 ## Critical Rules
 
 1. **Never combine kill + start in one command** — `setsid` holds the shell pipe
-2. **Push before 3:30 AM IST** — daily re-clone wipes uncommitted changes
-3. **Test locally first** — `compileall -q app`, `tsc --noEmit`, `vite build`
-4. **Don't commit secrets** — `.env` has PAT in git remote URL already
+2. **Test locally first** — `compileall -q app`, `tsc --noEmit`, `vite build`
+3. **Don't commit secrets** — `.env` has PAT in git remote URL already
 
 ---
 

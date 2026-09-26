@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useCurrentUser, useLoginWithCode, useBotInfo, useGenerateLoginCode, useVerifyLoginCode } from './lib/api';
+import { useCurrentUser, useLoginWithCode, useBotInfo, useGenerateLoginCode, useVerifyLoginCode, useAccessToken } from './lib/api';
 import { getStoredLoginCode, storeLoginCode, clearStoredLoginCode, parseExpiry } from './lib/loginCode';
 import FileBrowser from './components/FileBrowser';
 import GlobalContextMenu from './components/GlobalContextMenu';
@@ -20,9 +20,11 @@ const [saved, setSaved] = useState(false);
             try {
                 localStorage.setItem('access_token', token);
                 const check = localStorage.getItem('access_token');
-        if (check === token) {
+                if (check === token) {
 setSaved(true);
 setStatus('Token saved! Redirecting...');
+// Actually redirect — without this the page sat on the spinner forever.
+navigate('/', { replace: true });
                 } else {
                     setStatus('Failed to save token to localStorage');
                 }
@@ -87,6 +89,11 @@ function LoginPage() {
     const [expiresAt, setExpiresAt] = useState(0);
     const generationRef = useRef(false);
     const resendNoticeRef = useRef(false);
+    // Snapshot of the code the server-side poll loop verifies. The textbox
+    // shares the `code` state, so polling `code` directly meant every
+    // keystroke cancelled the long-poll and fired /auth/verify-code with a
+    // half-typed code (invalid-code spam eating into 429 limits).
+    const pollCodeRef = useRef('');
 
     // Restore saved code (survives reload) or generate exactly once per page load
     const requestNewCode = useCallback(() => {
@@ -100,6 +107,7 @@ function LoginPage() {
         generateCode(undefined, {
             onSuccess: (data) => {
                 setCode(data.code);
+                pollCodeRef.current = data.code;
                 setExpiresAt(parseExpiry(data.expires_at));
                 storeLoginCode(data.code, data.expires_at);
                 setIsPolling(true);
@@ -114,6 +122,7 @@ function LoginPage() {
         const saved = getStoredLoginCode();
         if (saved) {
             setCode(saved.code);
+            pollCodeRef.current = saved.code;
             setExpiresAt(parseExpiry(saved.expires_at));
             setIsPolling(true);
             return;
@@ -128,7 +137,10 @@ function LoginPage() {
     useEffect(() => {
         let cancelled = false;
         let timer: any;
-        if (isPolling && code) {
+        // Poll the generated-code snapshot, NOT the textbox state — typing
+        // must never disturb the long-poll loop (see pollCodeRef).
+        const pollCode = pollCodeRef.current;
+        if (isPolling && pollCode) {
             const poll = () => {
                 if (cancelled) return;
                 if (expiresAt > 0 && Date.now() >= expiresAt) {
@@ -136,7 +148,7 @@ function LoginPage() {
                     setIsPolling(false);
                     return;
                 }
-                verifyCode(code, {
+                verifyCode(pollCode, {
                     onSuccess: (data) => {
                         if (cancelled) return;
                         // 202 "pending" responses carry no access_token — go again
@@ -173,7 +185,7 @@ function LoginPage() {
             cancelled = true;
             if (timer) clearTimeout(timer);
         };
-    }, [isPolling, code, expiresAt, verifyCode]);
+    }, [isPolling, expiresAt, verifyCode]);
 
     const handleManualLogin = (e: React.FormEvent) => {
         e.preventDefault();
@@ -209,7 +221,7 @@ if (!('access_token' in data)) {
 
             <div className="glass-panel p-8 max-w-md w-full text-center animate-scale-in relative z-10">
                 {/* Logo */}
-                <div className="w-28 h-28 mx-auto mb-6 rounded-2xl overflow-hidden bg-dark-900 p-2 shadow-2xl flex items-center justify-center">
+                <div className="w-28 h-28 mx-auto mb-6 rounded-3xl overflow-hidden bg-gradient-to-br from-primary-600/40 via-dark-900 to-dark-900 p-2 ring-1 ring-primary-500/40 shadow-glow-lg flex items-center justify-center">
                     <img src={logo} alt="Aruvi" className="w-full h-full object-contain" />
                 </div>
 
@@ -337,7 +349,10 @@ function BotLink({ code }: { code?: string }) {
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
     const { isLoading, error, refetch } = useCurrentUser();
-    const token = localStorage.getItem('access_token');
+    // Reactive token: re-renders when another tab rotates/clears it. A bare
+    // localStorage.getItem() here never re-rendered, so a logged-out tab kept
+    // showing the app on a dead token until hard reload.
+    const token = useAccessToken();
 
     if (!token) {
         return <Navigate to="/login" replace />;

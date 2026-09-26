@@ -186,7 +186,7 @@ function FileCardImpl({
                 {file.last_pos && file.duration && (file.last_pos / file.duration > 0.05) && (
                     <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/40">
                         <div 
-                            className="h-full bg-primary-500" 
+                            className="h-full bg-gradient-to-r from-primary-600 via-primary-500 to-fuchsia-400 shadow-[0_0_8px_rgba(168,85,247,0.7)]" 
                             style={{ width: `${Math.min(100, (file.last_pos / file.duration) * 100)}%` }}
                         />
                     </div>
@@ -202,7 +202,7 @@ function FileCardImpl({
                 {/* Play overlay for video/audio/image */}
                 {(file.file_type === 'video' || file.file_type === 'audio' || file.file_type === 'image') && (
                     <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300">
-                        <div className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center shadow-lg border border-white/20 hover:scale-110 transition-transform">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary-500 to-primary-700 backdrop-blur-md flex items-center justify-center shadow-lg shadow-primary-500/40 border border-white/25 hover:scale-110 transition-transform">
                             <Play className="w-4 h-4 text-white ml-0.5" fill="currentColor" />
                         </div>
                     </div>
@@ -229,7 +229,9 @@ function FileCardImpl({
                     </div>
                 </div>
 
-                <div className={`${showMenu ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
+                {/* Hover-only hides this on touch (no hover) — show it on
+                    touch devices and keyboard focus so the menu is reachable. */}
+                <div className={`${showMenu ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100'} transition-opacity`}>
                    <button
                         onClick={(e) => {
                             e.stopPropagation();

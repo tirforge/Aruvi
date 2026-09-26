@@ -1,0 +1,68 @@
+name: opencode-fullscan
+
+# Full-repo audit per area: each job scans its whole tree with opencode
+# (muse-spark-1.3 xhigh) and opens a SEPARATE fix PR for backend, frontend,
+# and android. Fix PRs then get the normal treatment: CI + CodeQL +
+# opencode-review + CodeRabbit + Sonar.
+# Runs weekly + on demand (Actions tab -> Run workflow).
+# Heavy on xhigh: lower `variant` or narrow scope if runs get slow/pricey.
+on:
+  workflow_dispatch:
+  schedule:
+    # Sundays 3am UTC
+    - cron: "0 3 * * 0"
+
+jobs:
+  scan:
+    strategy:
+      fail-fast: false
+      matrix:
+        area: [backend, frontend, android]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      id-token: write
+      contents: write
+      pull-requests: write
+      issues: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: anomalyco/opencode/github@latest
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          model: opencode/muse-spark-1.3-contributor-free
+          variant: xhigh
+          use_github_token: true
+          prompt: |
+            Full-repo audit and fix for the `${{ matrix.area }}` codebase.
+
+            SCOPE (strict): only touch files under `${{ matrix.area }}/`.
+            Never touch other top-level dirs, `.github/`, or vendored/build
+            output (backend: `app/static/vendor/`, `app/static/assets/`;
+            frontend: `public/vendor/`; android: `build/`, `.gradle/`).
+
+            TASK:
+            - Scan the ENTIRE `${{ matrix.area }}` tree for bugs, security
+              issues (auth, tokens, injection, secrets), dead code, race
+              conditions, and error-handling gaps.
+            - Apply safe, minimal fixes directly in the code. No refactors,
+              no dependency changes, no UI redesigns.
+            - Verify what you can (typecheck/lint/build if the toolchain
+              exists in the runner).
+
+            DELIVERY:
+            - If you fixed anything: create branch
+              `opencode/fullscan-${{ matrix.area }}-${{ github.run_number }}`,
+              commit with `git -c user.name="Aruvi" -c
+              user.email="aruvi@users.noreply.github.com"`, push, and open
+              a PR titled `opencode fullscan: ${{ matrix.area }} fixes`
+              listing every bug found + fixed (file:line for each).
+            - If nothing worth fixing: do NOT open a PR. Just log a short
+              "clean" summary.
+            - If a fix PR for this area is already open, add to it instead
+              of opening a duplicate.

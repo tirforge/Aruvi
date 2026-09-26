@@ -26,8 +26,27 @@ export default function GlobalContextMenu() {
     const selectedFolders = folders?.filter(f => selectedFolderIds.has(f.id)) || [];
     const menuRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
+    // In-flight guard for the async share/link actions. Without it the menu
+    // stays open during the POST and rapid clicks mint duplicate share links
+    // (or duplicate revokes). The menu intentionally stays open for the
+    // "✓ Copied!" feedback — so the buttons disable instead of closing.
+    const [busyId, setBusyId] = useState<string | null>(null);
+    // Sync guard alongside the state above: state updates lag a render, so a
+    // fast double-click could pass the `busyId` check twice and mint
+    // duplicate links. The ref is checked synchronously (same fix class as
+    // GrabSearch's grabbingRef); the state still drives button disabling.
+    const busyRef = useRef(false);
+    const runBusy = async (id: string, fn: () => Promise<void>) => {
+        if (busyRef.current) return;
+        busyRef.current = true;
+        setBusyId(id);
+        try { await fn(); } finally { busyRef.current = false; setBusyId(null); }
+    };
 
-    // Close menu on escape
+    // Close menu on escape; restore focus to the opener (card button) so
+    // keyboard users don't drop to <body> after every menu action. The menu
+    // is permanently mounted, so capture on open, restore on close-cleanup.
+    const menuOpenerRef = useRef<HTMLElement | null>(null);
     useEffect(() => {
         const handleEscape = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
@@ -36,9 +55,16 @@ export default function GlobalContextMenu() {
             }
         };
         if (activeContextMenu) {
+            menuOpenerRef.current = document.activeElement as HTMLElement | null;
             document.addEventListener('keydown', handleEscape);
         }
-        return () => document.removeEventListener('keydown', handleEscape);
+        return () => {
+            document.removeEventListener('keydown', handleEscape);
+            if (menuOpenerRef.current) {
+                try { menuOpenerRef.current.focus?.({ preventScroll: true }); } catch { /* noop */ }
+                menuOpenerRef.current = null;
+            }
+        };
     }, [activeContextMenu, setActiveContextMenu]);
 
     if (!activeContextMenu) return null;
@@ -237,10 +263,10 @@ export default function GlobalContextMenu() {
                                 
                                 <hr className="border-white/[0.08] my-1" />
 
-                                <button className="context-menu-item w-full text-left" onClick={async () => {
+                                <button className="context-menu-item w-full text-left disabled:opacity-50" disabled={busyId !== null} onClick={() => runBusy('download', async () => {
                                     const url = await ensurePublicLink(activeContextMenu.item as TelegramFile);
                                     if (url) handleCopy(url + (url.includes('?') ? '&' : '?') + 'download=1', 'download');
-                                }}>
+                                })}>
                                     <HardDriveDownload className="w-4 h-4" />
                                     {copiedId === 'download' ? '✓ Copied!' : 'Copy Download URL'}
                                 </button>
@@ -252,14 +278,14 @@ export default function GlobalContextMenu() {
                                     if (f.public_stream_url) {
                                         return (
                                             <>
-                                                <button className="context-menu-item w-full text-left" onClick={async () => {
+                                                <button className="context-menu-item w-full text-left disabled:opacity-50" disabled={busyId !== null} onClick={() => runBusy('public', async () => {
                                                     const url = await ensurePublicLink(f);
                                                     if (url) handleCopy(url, 'public');
-                                                }}>
+                                                })}>
                                                     <Globe className="w-4 h-4 text-emerald-400" />
                                                     {copiedId === 'public' ? '✓ Copied!' : 'Copy Public Link'}
                                                 </button>
-                                                <button className="context-menu-item w-full text-left text-orange-400 hover:bg-orange-500/10" onClick={() => handleRevokeShare(f)}>
+                                                <button className="context-menu-item w-full text-left text-orange-400 hover:bg-orange-500/10 disabled:opacity-50" disabled={busyId !== null} onClick={() => runBusy('revoke', async () => handleRevokeShare(f))}>
                                                     <ShieldOff className="w-4 h-4" />
                                                     Revoke Public Link
                                                 </button>
@@ -267,10 +293,10 @@ export default function GlobalContextMenu() {
                                         );
                                     }
                                     return (
-                                        <button className="context-menu-item w-full text-left" onClick={async () => {
+                                        <button className="context-menu-item w-full text-left disabled:opacity-50" disabled={busyId !== null} onClick={() => runBusy('public', async () => {
                                             const url = await ensurePublicLink(f);
                                             if (url) handleCopy(url, 'public');
-                                        }}>
+                                        })}>
                                             <Globe className="w-4 h-4" />
                                             {copiedId === 'public' ? '✓ Copied!' : 'Copy Public Link'}
                                         </button>

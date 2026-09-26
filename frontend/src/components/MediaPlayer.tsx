@@ -447,6 +447,12 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         el.setAttribute('fastseek', '');
         el.setAttribute('noerrorscreen', '');
         el.setAttribute('sw', 'auto');
+        // Client-side buffer cap in MB (engine default when unset). The server
+        // prefetches ~192MB ahead from Telegram, so a 128MB engine buffer
+        // absorbs chunk-pipeline jitter without stalling on jitter spikes —
+        // the "sometimes buffering" stall. Higher values smooth high-bitrate
+        // files further but cost browser RAM (matters on low-end TVs).
+        el.setAttribute('buffersize', '128');
         hasPlayedRef.current = false;
         passedResumeRef.current = false;
         sessionSeekCountRef.current = 0;
@@ -616,6 +622,29 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         el.currentTime = (el.currentTime || 0) + seconds;
     }, []);
 
+    // Root cause of the "clicked a button, controls go dead" reports: after
+    // clicking any overlay-chrome button, focus parks ON that <button>. The
+    // window keydown forwarder deliberately skips BUTTON targets (Space must
+    // activate buttons, not toggle play), so every player hotkey silently
+    // dies until the user clicks the video again. The engine refocuses itself
+    // on pointerdown inside its own host, but clicks on OUR overlay never
+    // reach it — so every overlay action must hand focus back explicitly.
+    const focusPlayer = useCallback(() => {
+        const el = elRef.current;
+        if (!el) return;
+        try { (document.activeElement as HTMLElement)?.blur?.(); } catch { /* noop */ }
+        try { el.focus({ preventScroll: true }); } catch { /* noop */ }
+    }, []);
+
+    // Subtitle picker modal: while open, focus belongs to the modal. Hand it
+    // back to the player only on the true→false transition — the mount run
+    // (false initially, no element yet) must not steal focus.
+    const prevPickerRef = useRef(showSubPicker);
+    useEffect(() => {
+        if (prevPickerRef.current && !showSubPicker) focusPlayer();
+        prevPickerRef.current = showSubPicker;
+    }, [showSubPicker, focusPlayer]);
+
     // Declare the attached external subtitle tracks on the element. This reloads
     // the source (movi-player's documented way to attach external subs); the
     // previous playhead position is restored once the media is loaded again.
@@ -775,7 +804,10 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
             {(isImage || moviStatus === 'ready') && !error && !isMinimized && (
                 <div
                     className={`absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/80 to-transparent flex items-start justify-between z-40 transition-opacity duration-300 pointer-events-none ${
-                        showControls ? 'opacity-100' : 'opacity-0'
+                        // `invisible` (visibility:hidden) pulls the buttons out
+                        // of the tab order while faded — without it, Tab lands
+                        // on invisible controls and Space fires unseen buttons.
+                        showControls ? 'opacity-100' : 'opacity-0 invisible'
                     }`}
                 >
                     <div>
@@ -844,7 +876,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
                     </div>
 
                     <div className="flex items-center gap-2 border-l border-white/10 pl-4">
-                        <button onClick={() => setMinimized(false)} className="p-2 text-dark-400 hover:text-white" title="Maximize">
+                        <button onClick={() => { setMinimized(false); focusPlayer(); }} className="p-2 text-dark-400 hover:text-white" title="Maximize">
                             <ChevronUp className="w-5 h-5" />
                         </button>
                         <button onClick={onClose} className="p-2 text-dark-400 hover:text-red-400" title="Close">

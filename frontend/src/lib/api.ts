@@ -126,8 +126,9 @@ status: string;
 }
 export type CodeVerificationResponse = AuthResponse | PendingCodeResponse;
 
-// API client — use runtime config (set by index.html) or fallback to /api
-const API_BASE = (window as any).__BACKEND_URL__ || '';
+// API client — use runtime config (set by index.html) or fallback to /api.
+// Exported so thumbnail/image URL builders share the same origin logic.
+export const API_BASE = (window as any).__BACKEND_URL__ || '';
 export const api = axios.create({
 baseURL: API_BASE + '/api',
 });
@@ -142,6 +143,9 @@ return config;
 });
 
 // Queue for failed requests during token refresh
+// The refresh POST itself gets a timeout: without it a stalled backend leaves
+// `isRefreshing` true forever and every queued 401 request hangs unsettled.
+const REFRESH_TIMEOUT_MS = 10000;
 let isRefreshing = false;
 let failedQueue: Array<{
 resolve: (token: string) => void;
@@ -165,6 +169,12 @@ api.interceptors.response.use(
 (response) => response,
 async (error) => {
 const originalRequest = error.config;
+// Setup/abort errors carry no request config (offline, cancelled before
+// send) — without this guard the lines below throw a TypeError inside the
+// interceptor, masking the real error with an unhandled rejection.
+if (!originalRequest?.url) {
+return Promise.reject(error);
+}
 
 if (error.response?.status === 401 && !originalRequest._retry) {
 if (originalRequest.url.includes('/auth/refresh')) {
@@ -185,6 +195,7 @@ if (isRefreshing) {
     // Mark the retry so a second 401 (e.g. authz denial) can't kick off
     // another refresh and rotate the refresh token in a loop.
     originalRequest._retry = true;
+    originalRequest.headers = originalRequest.headers || {};
     originalRequest.headers['Authorization'] = 'Bearer ' + token;
     return api(originalRequest);
   })
@@ -206,7 +217,7 @@ throw new Error('No refresh token available');
 
 const { data } = await axios.post(API_BASE + '/api/auth/refresh', {
 refresh_token: refreshToken,
-});
+}, { timeout: REFRESH_TIMEOUT_MS });
 
 const { access_token, refresh_token } = data;
 
@@ -214,6 +225,7 @@ setStoredAccessToken(access_token);
 localStorage.setItem('refresh_token', refresh_token);
 
 api.defaults.headers.common['Authorization'] = 'Bearer ' + access_token;
+originalRequest.headers = originalRequest.headers || {};
 originalRequest.headers['Authorization'] = 'Bearer ' + access_token;
 
 processQueue(null, access_token);
@@ -227,20 +239,43 @@ originalRequest._retryRefresh = true;
 try {
 const { data } = await axios.post(API_BASE + '/api/auth/refresh', {
 refresh_token: currentRefreshToken,
-});
+}, { timeout: REFRESH_TIMEOUT_MS });
 const { access_token, refresh_token: rotatedToken } = data;
 setStoredAccessToken(access_token);
 localStorage.setItem('refresh_token', rotatedToken);
 api.defaults.headers.common['Authorization'] = 'Bearer ' + access_token;
+originalRequest.headers = originalRequest.headers || {};
 originalRequest.headers['Authorization'] = 'Bearer ' + access_token;
 processQueue(null, access_token);
 return api(originalRequest);
 } catch {
-// Retry also failed - fall through to hard logout below.
-}
-}
+ // Retry also failed - fall through to the session checks below.
+ }
+ }
 
-processQueue(err, null);
+ // Another tab may have recovered the session while we were failing (it
+ // rotated and stored a fresh access token). Adopt it instead of nuking a
+ // valid session with a hard logout.
+ const sentAuth = (originalRequest.headers?.['Authorization'] as string) || '';
+ const latestAccess = localStorage.getItem('access_token');
+ if (latestAccess && `Bearer ${latestAccess}` !== sentAuth) {
+  originalRequest.headers = originalRequest.headers || {};
+  originalRequest.headers['Authorization'] = `Bearer ${latestAccess}`;
+  // Explicit: a second 401 on this retried request must not start another
+  // refresh (safe today only because _retry happens to be set upstream).
+  originalRequest._retry = true;
+  processQueue(null, latestAccess);
+  return api(originalRequest);
+ }
+
+ // Pure network failure (backend unreachable, timeout) says nothing about
+ // token validity — reject retryably and stay logged in instead of wiping.
+ if (!(err as any)?.response && localStorage.getItem('refresh_token')) {
+ processQueue(err, null);
+ return Promise.reject(err);
+ }
+
+ processQueue(err, null);
 delete api.defaults.headers.common['Authorization'];
 localStorage.removeItem('access_token');
 localStorage.removeItem('refresh_token');
@@ -268,7 +303,15 @@ queryFn: async () => {
 const { data } = await api.get<User>('/auth/me');
 return data;
 },
-retry: 2,
+// Retry only retryable failures. Blind `retry: 2` refired /auth/me on
+// 401/403 (racing the refresh interceptor) and on 429 (tripling the
+// rate-limit burn) — those can never succeed by repeating.
+retry: (failureCount, error: any) => {
+const status = error?.response?.status;
+if (status === 429) return failureCount < 3;
+if (!error?.response) return failureCount < 2; // network blip
+return (status >= 500 && failureCount < 2);
+},
 retryDelay: 1000,
 });
 };

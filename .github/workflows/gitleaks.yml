@@ -1,0 +1,23 @@
+name: Gitleaks
+
+# Free secret-leak scanner: fails the run if a commit introduces
+# tokens, keys, or passwords. Scans new commits only (fast).
+# If it flags a historic secret, add a fingerprint to
+# .gitleaksignore after rotating the secret — never to hide it.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

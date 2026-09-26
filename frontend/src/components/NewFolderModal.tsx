@@ -1,10 +1,11 @@
 /**
  * NewFolderModal - modal for creating a new folder
  */
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, FolderPlus } from 'lucide-react';
 import { useCreateFolder } from '../lib/api';
 import { useAppStore } from '../lib/store';
+import { useFocusReturn } from '../lib/useFocusReturn';
 
 interface NewFolderModalProps {
     parentId: number | null;
@@ -21,6 +22,27 @@ export default function NewFolderModal({ parentId, onClose }: NewFolderModalProp
     const [name, setName] = useState('');
     const createFolder = useCreateFolder();
     const addToast = useAppStore((s) => s.addToast);
+    // Return focus to the opener (New Folder button) on close.
+    useFocusReturn();
+
+    // Guarded close: creating is fast, but backdrop/Escape/X/Cancel during
+    // the POST must not fake a cancel (the create still completes + toasts).
+    // Own Escape listener (not FileBrowser's) so the guard can't be bypassed.
+    const pendingRef = useRef(createFolder.isPending);
+    pendingRef.current = createFolder.isPending;
+    const onCloseRef = useRef(onClose);
+    onCloseRef.current = onClose;
+    const safeClose = () => { if (!pendingRef.current) onCloseRef.current(); };
+    useEffect(() => {
+        const handleEscape = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                e.stopPropagation();
+                safeClose();
+            }
+        };
+        document.addEventListener('keydown', handleEscape);
+        return () => document.removeEventListener('keydown', handleEscape);
+    }, []);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -38,14 +60,16 @@ export default function NewFolderModal({ parentId, onClose }: NewFolderModalProp
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <div
+            onClick={(e) => { if (e.target === e.currentTarget) safeClose(); }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <div className="glass-card w-full max-w-md p-6 animate-slide-up">
                 <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-semibold flex items-center gap-2">
                         <FolderPlus className="w-5 h-5 text-primary-400" />
                         New Folder
                     </h2>
-                    <button onClick={onClose} className="p-1 hover:bg-dark-700 rounded">
+                    <button onClick={safeClose} className="p-1 hover:bg-dark-700 rounded">
                         <X className="w-5 h-5" />
                     </button>
                 </div>
@@ -63,7 +87,7 @@ export default function NewFolderModal({ parentId, onClose }: NewFolderModalProp
                     <div className="flex justify-end gap-3">
                         <button
                             type="button"
-                            onClick={onClose}
+                            onClick={safeClose}
                             className="px-4 py-2 text-dark-400 hover:text-white transition-colors"
                         >
                             Cancel
