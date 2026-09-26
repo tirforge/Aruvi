@@ -16,7 +16,11 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import AsyncGenerator
 from contextlib import asynccontextmanager
 
-_libc = ctypes.CDLL("libc.so.6")
+try:
+    _libc = ctypes.CDLL("libc.so.6")
+except OSError:
+    # Non-glibc platform (Alpine/musl, macOS): no malloc_trim available.
+    _libc = None
 
 
 class CappedSemaphore(asyncio.Semaphore):
@@ -224,6 +228,10 @@ def _cancel_restart():
 def _do_restart():
     global _pending_restart
     _pending_restart = None
+    if _forward_streams:
+        # A new stream started as the timer fired (cancel/fire race) —
+        # never wipe a live stream's registration and caches.
+        return
     _forward_streams.clear()
     _cache_finished_at.clear()
     _prefetch_size.clear()
@@ -1541,7 +1549,10 @@ async def parallel_stream_generator(
         if cidx in disk_resident and not results[cidx].done():
             ddata = await asyncio.to_thread(_disk_cache.get, chat_id, message_id, cidx)
             if ddata is not None:
-                results[cidx].set_result(ddata)
+                try:
+                    results[cidx].set_result(ddata)
+                except asyncio.InvalidStateError:
+                    pass  # a worker resolved it concurrently — already satisfied
                 return
         try:
             async with asyncio.timeout(_YIELD_CHUNK_TIMEOUT):
@@ -1550,7 +1561,10 @@ async def parallel_stream_generator(
             data = await _fetch_chunk_now(cidx)
             if data is not None:
                 if not results[cidx].done():
-                    results[cidx].set_result(data)
+                    try:
+                        results[cidx].set_result(data)
+                    except asyncio.InvalidStateError:
+                        pass  # resolved concurrently between the check and here
                 return
             logger.error("Prebuffer chunk %d unrecoverable — aborting stream %d", cidx, message_id)
             raise asyncio.TimeoutError(f"Prebuffer chunk {cidx} unrecoverable")
@@ -1682,7 +1696,8 @@ async def parallel_stream_generator(
             # growth of _prefetch_size across distinct movies streamed this boot.
             _prefetch_size.pop((chat_id, message_id), None)
         gced = gc.collect()
-        _libc.malloc_trim(0)
+        if _libc is not None:
+            _libc.malloc_trim(0)
         if gced > 10000:
             logger.info("Stream cleanup: gc %d objs, malloc_trim", gced)
         # Keep cache alive for CACHE_TTL (30min) — resume after network drop

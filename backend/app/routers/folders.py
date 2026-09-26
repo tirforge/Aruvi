@@ -13,6 +13,7 @@ from ..models import Folder, File, User
 from ..schemas import FolderResponse, FolderCreate, FolderUpdate, FolderWithChildren, BatchMoveRequest
 from ..auth import get_current_user
 from ..telegram import delete_from_storage_channel, invalidate_message_cache_batch
+from ..utils import sanitize_filename
 
 
 router = APIRouter(prefix="/folders", tags=["Folders"])
@@ -161,15 +162,15 @@ async def create_folder(
         select(Folder).where(
             Folder.user_id == current_user.id,
             Folder.parent_id == folder_data.parent_id,
-            Folder.name == folder_data.name
+            Folder.name == sanitize_filename(folder_data.name)
         )
     )
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Folder with this name already exists")
-    
+
     folder = Folder(
         user_id=current_user.id,
-        name=folder_data.name,
+        name=sanitize_filename(folder_data.name),
         parent_id=folder_data.parent_id,
     )
     db.add(folder)
@@ -205,7 +206,7 @@ async def update_folder(
     
     # Update fields
     if update_data.name is not None:
-        folder.name = update_data.name
+        folder.name = sanitize_filename(update_data.name)
     if update_data.parent_id is not None:
         # Prevent moving folder into itself
         if update_data.parent_id == folder_id:

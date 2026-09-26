@@ -98,9 +98,15 @@ def verify_token(token: str, token_type: str = "access") -> Optional[int]:
     payload = verify_token_payload(token, token_type)
     if not payload:
         return None
-    
+
     sub = payload.get("sub")
-    return int(sub) if sub is not None else None
+    if sub is None:
+        return None
+    try:
+        return int(sub)
+    except (TypeError, ValueError):
+        # Forged/malformed token with a non-numeric subject — invalid, not fatal.
+        return None
 
 
 

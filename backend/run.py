@@ -13,7 +13,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-_libc = ctypes.CDLL("libc.so.6")
+try:
+    _libc = ctypes.CDLL("libc.so.6")
+except OSError:
+    # Non-glibc platform (Alpine/musl, macOS): no malloc_trim available.
+    _libc = None
 _log = logging.getLogger("run")
 
 uvs.Server.capture_signals = lambda self: contextlib.nullcontext()
@@ -27,7 +31,8 @@ async def _periodic_housekeeping():
     """Every 60s: release free memory, evict stale stream caches, prune msg cache."""
     def _gc_and_trim():
         gc.collect()
-        _libc.malloc_trim(0)
+        if _libc is not None:
+            _libc.malloc_trim(0)
 
     while True:
         await asyncio.sleep(60)

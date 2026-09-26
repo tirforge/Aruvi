@@ -8,7 +8,11 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-_libc = ctypes.CDLL("libc.so.6")
+try:
+    _libc = ctypes.CDLL("libc.so.6")
+except OSError:
+    # Non-glibc platform (Alpine/musl, macOS): no malloc_trim available.
+    _libc = None
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -104,7 +108,8 @@ async def _oom_guard_loop():
     """Check memory every 15s and clear caches if above 65%."""
     def _gc_and_trim():
         gc.collect()
-        _libc.malloc_trim(0)
+        if _libc is not None:
+            _libc.malloc_trim(0)
 
     while True:
         try:
@@ -376,6 +381,12 @@ async def serve_spa(request: Request, full_path: str):
     import mimetypes
 
     def _resolve():
+        # Containment check: symlinks or odd segments must never escape
+        # app/static (the ".." guard above is only a first filter).
+        base = os.path.realpath("app/static")
+        target = os.path.realpath(static_file_path)
+        if target != base and not target.startswith(base + os.sep):
+            return None, None
         if os.path.isfile(static_file_path):
             gz = static_file_path + ".gz"
             if os.path.isfile(gz):

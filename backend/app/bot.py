@@ -405,7 +405,7 @@ async def newfolder_command(client, message: Message):
         await message.reply("Usage: /newfolder <folder_name>")
         return
     
-    folder_name = " ".join(message.command[1:]).strip()[:255]
+    folder_name = sanitize_filename(" ".join(message.command[1:]).strip()[:255])
     
     async with async_session() as db:
         # Get user
@@ -449,7 +449,8 @@ async def web_command(client, message: Message):
     )
     
     token = create_access_token(message.from_user.id, version=user.auth_version)
-    web_url = f"{settings.web_base_url}/auth?token={token}"
+    from urllib.parse import quote as _quote
+    web_url = f"{settings.web_base_url}/auth?token={_quote(token, safe='')}"
 
     await message.reply(
         "🌐 **Web Interface**\n\n"
@@ -854,22 +855,23 @@ async def handle_callback(client, callback: CallbackQuery):
                 return
             
             folder_name = (reply.text or "").strip()[:255]
-            
+
             if not folder_name:
                 await reply.reply("❌ Invalid folder name.")
                 return
-            
+            folder_name = sanitize_filename(folder_name)
+
             # Create folder
             async with async_session() as db:
                 user_result = await db.execute(
                     select(User).where(User.telegram_id == callback.from_user.id)
                 )
                 user = user_result.scalar_one_or_none()
-                
+
                 if not user:
                     await reply.reply("Please use /start first.")
                     return
-                
+
                 # Check if exists
                 existing = await db.execute(
                     select(Folder).where(
@@ -879,14 +881,14 @@ async def handle_callback(client, callback: CallbackQuery):
                     )
                 )
                 if existing.scalar_one_or_none():
-                    await reply.reply(f"❌ Folder **{folder_name}** already exists.")
+                    await reply.reply(f"❌ Folder **{md_safe(folder_name)}** already exists.")
                     return
-                
+
                 folder = Folder(user_id=user.id, name=folder_name)
                 db.add(folder)
                 await db.commit()
             
-            await reply.reply(f"✅ Folder **{folder_name}** created!")
+            await reply.reply(f"✅ Folder **{md_safe(folder_name)}** created!")
             
         except asyncio.TimeoutError:
             await callback.message.reply("⏱ Timed out. Please try again.")
@@ -1209,9 +1211,9 @@ async def handle_callback(client, callback: CallbackQuery):
                 folder = result.scalar_one_or_none()
                 
                 if folder:
-                    folder.name = new_name
+                    folder.name = sanitize_filename(new_name)
                     await db.commit()
-                    await reply.reply(f"✅ Folder renamed to **{new_name}**")
+                    await reply.reply(f"✅ Folder renamed to **{md_safe(folder.name)}**")
                 else:
                     await reply.reply("❌ Folder not found.")
                     
@@ -1493,6 +1495,7 @@ async def handle_callback(client, callback: CallbackQuery):
             if not folder_name:
                 await reply.reply("❌ Invalid folder name.")
                 return
+            folder_name = sanitize_filename(folder_name)
 
             async with async_session() as db:
                 # The flow initiator, not whoever's text resolved the listener
@@ -1513,7 +1516,7 @@ async def handle_callback(client, callback: CallbackQuery):
                     )
                 )
                 if existing.scalar_one_or_none():
-                    await reply.reply(f"❌ Folder **{folder_name}** already exists.")
+                    await reply.reply(f"❌ Folder **{md_safe(folder_name)}** already exists.")
                     return
 
                 folder = Folder(user_id=user.id, name=folder_name)
@@ -1529,7 +1532,7 @@ async def handle_callback(client, callback: CallbackQuery):
                     file.folder_id = folder.id
                     await db.commit()
 
-            await reply.reply(f"✅ Folder **{folder_name}** created and file moved!")
+            await reply.reply(f"✅ Folder **{md_safe(folder_name)}** created and file moved!")
 
         except asyncio.TimeoutError:
             await callback.message.reply("⏱ Timed out. Please try again.")
@@ -1618,7 +1621,7 @@ async def handle_callback(client, callback: CallbackQuery):
 
         await callback.message.edit(
             f"☁️ **Uploading to Google Drive...**\n\n"
-            f"📄 `{file_name}`\n"
+            f"📄 `{md_safe(file_name)}`\n"
             f"📦 {format_size(file_size)}\n\n"
             "⏳ Connecting to Google Drive..."
         )
@@ -1662,7 +1665,7 @@ async def handle_callback(client, callback: CallbackQuery):
                 try:
                     await callback.message.edit(
                         f"☁️ **Uploading to Google Drive...**\n\n"
-                        f"📄 `{file_name}`\n"
+                        f"📄 `{md_safe(file_name)}`\n"
                         f"📦 {format_size(file_size)}\n\n"
                         "📤 Streaming to Drive..."
                     )
@@ -1675,7 +1678,7 @@ async def handle_callback(client, callback: CallbackQuery):
                     try:
                         await callback.message.edit(
                             f"☁️ **{phase}...**\n\n"
-                            f"📄 `{file_name}`\n"
+                            f"📄 `{md_safe(file_name)}`\n"
                             f"📦 {format_size(file_size)}\n\n"
                             f"`[{bars}] {pct}%`\n"
                             f"📤 {format_size(uploaded)} / {format_size(total)}"
@@ -1709,7 +1712,7 @@ async def handle_callback(client, callback: CallbackQuery):
                 try:
                     await callback.message.edit(
                         f"✅ **Uploaded to Google Drive!**\n\n"
-                        f"📄 `{file_name}`\n"
+                        f"📄 `{md_safe(file_name)}`\n"
                         f"📁 Folder: **Aruvi**\n\n"
                         f"🔗 [Open in Drive]({link})",
                         disable_web_page_preview=True,
@@ -1749,7 +1752,7 @@ async def handle_callback(client, callback: CallbackQuery):
                 try:
                     await callback.message.edit(
                         f"❌ **Upload failed.**\n\n"
-                        f"File: `{file_name}`\n"
+                        f"File: `{md_safe(file_name)}`\n"
                         f"Error: {str(e)}\n\n"
                         "Please try again later."
                     )

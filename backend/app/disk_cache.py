@@ -265,7 +265,11 @@ class DiskChunkCache:
 
     @staticmethod
     def _remove_dir(d: Path):
-        for f in d.iterdir():
+        try:
+            files = list(d.iterdir())
+        except OSError:
+            return  # already gone (concurrent sweep) — nothing to do
+        for f in files:
             try:
                 f.unlink()
             except OSError:

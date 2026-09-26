@@ -1561,7 +1561,7 @@ async def grab_selected(
                         _log.info("grabber: %r already in library (file id %s) — reusing", file_name, dup.id)
                         from .auth import create_download_token as _cdt
                         _s = get_settings()
-                        _tok = _cdt(str(telegram_id), dup.id, version=u.auth_version)
+                        _tok = _cdt(telegram_id, dup.id, version=u.auth_version)
                         return {
                             "name": dup.file_name,
                             "size": dup.file_size,
@@ -1620,7 +1620,7 @@ async def grab_selected(
             db_file_id = file_record.id
 
         from .auth import create_download_token
-        token = create_download_token(str(telegram_id), db_file_id, version=auth_version)
+        token = create_download_token(telegram_id, db_file_id, version=auth_version)
         s = get_settings()
         stream_url = f"{s.web_base_url.rstrip('/')}/api/stream/{db_file_id}?token={token}"
 

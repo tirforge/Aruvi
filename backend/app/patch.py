@@ -238,7 +238,15 @@ async def resolve_listener(
         if not await entry["filters"](client, update):
             update.continue_propagation()
             return
-    entry["future"].set_result(update)  # type: ignore
+    try:
+        entry["future"].set_result(update)  # type: ignore
+    except asyncio.InvalidStateError:
+        # An async filter awaited above, so a concurrent update may have
+        # resolved (or cancelled) this future first — let this update flow
+        # to normal handlers instead of erroring the dispatcher.
+        client._forget_listener(key, entry)
+        update.continue_propagation()
+        return
     update.stop_propagation()
 
 
