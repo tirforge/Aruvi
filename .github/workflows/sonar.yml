@@ -6,7 +6,7 @@ name: SonarCloud
 #     (project key must be tirforge_Aruvi, org tirforge)
 #  2. My Account -> Security -> Generate Token -> repo Settings ->
 #     Secrets -> Actions -> New secret named SONAR_TOKEN
-# Until then this job fails safely (does NOT block: no required check).
+# Until then this job is skipped entirely (shows SKIP, blocks nothing).
 on:
   push:
   pull_request:
@@ -16,8 +16,9 @@ permissions:
 
 jobs:
   scan:
+    # No token yet = skip cleanly instead of failing red.
+    if: ${{ secrets.SONAR_TOKEN != '' }}
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
