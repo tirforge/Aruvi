@@ -66,7 +66,6 @@ async def temp_db():
     importlib.reload(app.models)
 
     from app.database import init_db, async_session
-    from app.models import Base
 
     await init_db()
 
@@ -108,10 +107,8 @@ class TestAuthRotation:
     async def test_refresh_token_rotation_rejects_replay(self, temp_db):
         """Rotated refresh token cannot be reused."""
         from app.auth import (
-            create_access_token,
             create_refresh_token,
             REFRESH_TOKEN_DURATION,
-            verify_token_payload,
         )
         from app.routers.auth import refresh_token
         from app.models import User, RefreshSession
