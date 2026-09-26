@@ -125,7 +125,9 @@ class DetailsViewModel @Inject constructor(
                 val downloadsDir = Environment.getExternalStoragePublicDirectory(
                     Environment.DIRECTORY_DOWNLOADS
                 )
-                File(downloadsDir, fileName).takeIf { it.exists() && it.length() > 0 }
+                // fileName is server-controlled — strip any path segments so
+                // "../" cannot escape the Downloads directory.
+                File(downloadsDir, File(fileName).name).takeIf { it.exists() && it.length() > 0 }
             }
             if (localFile != null) {
                 _uiState.value = _uiState.value.copy(

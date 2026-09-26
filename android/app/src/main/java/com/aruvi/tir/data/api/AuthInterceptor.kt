@@ -18,11 +18,12 @@ class AuthInterceptor @Inject constructor(
     override fun intercept(chain: Interceptor.Chain): Response {
         val originalRequest = chain.request()
 
-        // Skip auth for login endpoints
+        // Skip auth for login endpoints. endsWith (not contains) so unrelated
+        // paths that merely embed these substrings still get authenticated.
         val path = originalRequest.url.encodedPath
-        if (path.contains("/auth/generate-code") ||
-            path.contains("/auth/verify-code") ||
-            path.contains("/auth/refresh")) {
+        if (path.endsWith("/auth/generate-code") ||
+            path.endsWith("/auth/verify-code") ||
+            path.endsWith("/auth/refresh")) {
             return chain.proceed(originalRequest)
         }
 
@@ -53,10 +54,15 @@ class AuthInterceptor @Inject constructor(
                     .build()
                 response = chain.proceed(retryRequest)
             } else {
-                // Refresh failed — return a FRESH unauthenticated response.
-                // Returning the closed one would make Retrofit throw
-                // "IllegalStateException: closed" instead of a clean 401.
-                response = chain.proceed(originalRequest)
+                // Refresh failed — don't re-send the original request
+                // unauthenticated (a second network call guaranteed to 401).
+                // Synthesize the 401 so callers see one clean failure.
+                response = Response.Builder()
+                    .request(originalRequest)
+                    .protocol(okhttp3.Protocol.HTTP_1_1)
+                    .code(401)
+                    .message("Unauthorized")
+                    .build()
             }
         }
 

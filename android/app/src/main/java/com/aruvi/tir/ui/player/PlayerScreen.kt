@@ -247,6 +247,12 @@ fun PlayerScreen(
                     )
                 }
             },
+            // Detach the surface when the view leaves composition — otherwise
+            // it stays bound to the shared singleton player (black frame/leak).
+            onRelease = { playerView ->
+                playerView.player = null
+                playerView.keepScreenOn = false
+            },
             modifier = Modifier.fillMaxSize()
         )
 
@@ -1707,7 +1713,7 @@ private fun SettingsSectionLabel(title: String, icon: ImageVector) {
         )
         Spacer(modifier = Modifier.width(8.dp))
         Text(
-            text = title.uppercase(),
+            text = title.uppercase(java.util.Locale.ROOT),
             style = MaterialTheme.typography.labelMedium,
             color = TVPrimary,
             fontWeight = FontWeight.Bold,
@@ -1869,7 +1875,7 @@ private fun FocusableSizeOption(
             modifier = Modifier.padding(vertical = 14.dp, horizontal = 8.dp)
         ) {
             Text(
-                text = label.take(1).uppercase(),
+                text = label.take(1).uppercase(java.util.Locale.ROOT),
                 style = MaterialTheme.typography.titleMedium,
                 color = if (isFocused || isSelected) Color.White else TVTextSecondary,
                 fontWeight = FontWeight.Bold,

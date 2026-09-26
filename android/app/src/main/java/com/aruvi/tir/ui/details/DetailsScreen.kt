@@ -176,7 +176,7 @@ fun DetailsScreen(
                                 GlassMetadataChip(
                                     icon = Icons.Default.Description,
                                     label = "Type",
-                                    value = file.fileType.uppercase()
+                                    value = file.fileType.uppercase(java.util.Locale.ROOT)
                                 )
                             }
                         }

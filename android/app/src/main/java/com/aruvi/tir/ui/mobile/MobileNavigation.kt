@@ -124,7 +124,10 @@ GlassmorphismBottomNavigation(tabNavController, currentRoute)
 // Inner NavHost for Tabs
 NavHost(
 navController = tabNavController,
-startDestination = BottomNavItem.Home.route + "?folderId={folderId}&folderName={folderName}",
+// Concrete start destination: placeholder patterns ("home?folderId={folderId}…")
+// are not valid start destinations and mismatch on some navigation versions.
+// -1 is the declared default meaning root (same as the navArgument default).
+startDestination = BottomNavItem.Home.route + "?folderId=-1",
 modifier = Modifier
 .padding(innerPadding)
 .consumeWindowInsets(innerPadding)

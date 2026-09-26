@@ -107,7 +107,9 @@ fun FolderOptionsButton(onDelete: () -> Unit, onMove: () -> Unit) {
 
 @Composable
 fun InputDialog(title: String, initialValue: String = "", onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
-    var text by remember { mutableStateOf(initialValue) }
+    // Key on initialValue: reopening the dialog for a different file must
+    // not reuse the previous file's text.
+    var text by remember(initialValue) { mutableStateOf(initialValue) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },

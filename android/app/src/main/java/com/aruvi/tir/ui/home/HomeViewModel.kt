@@ -64,7 +64,17 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
 
-            val serverUrl = settingsRepository.getServerUrl()
+            // getServerUrl() reads DataStore and can throw — without this the
+            // coroutine dies leaving isLoading=true forever.
+            val serverUrl = try {
+                settingsRepository.getServerUrl()
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    error = e.message ?: "Failed to load settings"
+                )
+                return@launch
+            }
             _uiState.value = _uiState.value.copy(serverUrl = serverUrl)
 
             // Try to load TV browse data (combined endpoint)

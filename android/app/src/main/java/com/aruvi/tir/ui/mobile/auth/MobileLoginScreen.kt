@@ -239,10 +239,19 @@ fun MobileLoginScreen(
                 // Deep Link Button
                 Button(
                     onClick = {
+                        // botUsername/loginCode originate from the server — validate
+                        // before handing them to an external app via ACTION_VIEW.
                         val bot = uiState.botUsername.ifBlank { "telegram" }
+                        val code = uiState.loginCode.orEmpty()
+                        if (!bot.matches(Regex("[A-Za-z0-9_]{5,32}")) ||
+                            !code.matches(Regex("[A-Za-z0-9-]{4,64}"))
+                        ) {
+                            android.widget.Toast.makeText(context, "Invalid login link", android.widget.Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
                         val intent = android.content.Intent(
                             android.content.Intent.ACTION_VIEW,
-                            android.net.Uri.parse("https://t.me/$bot?start=${uiState.loginCode}")
+                            android.net.Uri.parse("https://t.me/$bot?start=$code")
                         )
                         try {
                             context.startActivity(intent)

@@ -104,6 +104,9 @@ fun MobilePlayerScreen(
     DisposableEffect(Unit) {
         val originalOrientation = activity?.requestedOrientation
         val window = activity?.window
+        // Gesture brightness mutates window.attributes — capture so it can be
+        // restored on leave instead of leaking into other screens.
+        val originalBrightness = window?.attributes?.screenBrightness
 
         if (activity != null && window != null) {
             WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -131,6 +134,11 @@ fun MobilePlayerScreen(
                 window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 val insetsController = WindowCompat.getInsetsController(window, window.decorView)
                 insetsController.show(WindowInsetsCompat.Type.systemBars())
+                if (originalBrightness != null) {
+                    val attrs = window.attributes
+                    attrs.screenBrightness = originalBrightness
+                    window.attributes = attrs
+                }
             }
             viewModel.onLeavePlayer()
         }

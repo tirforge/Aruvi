@@ -44,15 +44,23 @@ class SettingsViewModel @Inject constructor(
      */
     private fun loadSettings() {
         viewModelScope.launch {
-            val autoPlayNext = settingsRepository.autoPlayNext.first()
-            val preferredQuality = settingsRepository.preferredQuality.first()
-            val userName = authRepository.userName.first()
+            // DataStore reads can throw on IO/corruption — don't let the
+            // screen sit in a blank default state with a dead coroutine.
+            try {
+                val autoPlayNext = settingsRepository.autoPlayNext.first()
+                val preferredQuality = settingsRepository.preferredQuality.first()
+                val userName = authRepository.userName.first()
 
-            _uiState.value = _uiState.value.copy(
-                autoPlayNext = autoPlayNext,
-                preferredQuality = preferredQuality,
-                userName = userName
-            )
+                _uiState.value = _uiState.value.copy(
+                    autoPlayNext = autoPlayNext,
+                    preferredQuality = preferredQuality,
+                    userName = userName
+                )
+            } catch (e: Exception) {
+                // Keep built-in defaults; a DataStore IO failure must not
+                // kill the screen's coroutine scope.
+                android.util.Log.w("SettingsViewModel", "loadSettings failed, using defaults", e)
+            }
         }
     }
 

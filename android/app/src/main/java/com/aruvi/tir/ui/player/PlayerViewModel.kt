@@ -163,12 +163,14 @@ data class PlayerUiState(
  * • Text tracks (subtitles/captions): castToDevice() captures local TEXT groups
  *   and publishes as MediaTracks (TYPE_TEXT, SUBTYPE_CAPTIONS) via
  *   MediaInfo.setMediaTracks(). Per docs only TEXT works on Default/Styled;
- *   setActiveTrackIds() + setTextTrackStyle(fontScale) now enable subtitle
- *   switching + size on Default (CORS now fixed in backend/main.py).
+ *   in-place reload with active ids (MediaLoadRequestData.setActiveTrackIds,
+ *   the v21 replacement for removed RemoteMediaClient.setActiveTrackIds())
+ *   + setTextTrackStyle(fontScale) now enable subtitle switching + size on
+ *   Default (CORS now fixed in backend/main.py).
  * • Audio/Video tracks: Same MediaTracks publishing kept for AUDIO but per docs
  *   Default/Styled ignore AUDIO (needs Custom/HLS). MKV-remuxed MP4 will play
  *   video on Default; multi-audio MKV defaults to first track until Custom/HLS.
- *   selectAudioTrack() still tries RemoteMediaClient.setActiveTrackIds() and logs
+ *   selectAudioTrack() still tries the in-place active-track reload first and logs
  *   rejection gracefully, then falls back to CastPlayer.
  * • Containers: Verified Supported Media lists MP4/WebM/MP2T – no MKV. MKV now
  *   handled via /cast remux; original video/x-matroska mapping kept only for
@@ -257,6 +259,32 @@ class PlayerViewModel @Inject constructor(
         } catch (e: Throwable) {
             android.util.Log.w("PlayerViewModel", "loadCastMediaWithTracks failed", e)
         }
+    }
+
+    /**
+     * v21 replacement for the removed RemoteMediaClient.setActiveTrackIds():
+     * reload the CURRENT item in place with the new active track ids, resuming
+     * at the current position. Returns true if the reload was issued.
+     * Best-effort — callers already fall back (remux reload / CastPlayer).
+     */
+    private fun switchCastTracksInPlace(
+        remote: com.google.android.gms.cast.framework.media.RemoteMediaClient,
+        newIds: LongArray
+    ): Boolean {
+        val mediaInfo = remote.mediaStatus?.mediaInfo ?: return false
+        val positionMs = try {
+            remote.approximateStreamPosition
+        } catch (_: Throwable) {
+            return false
+        }
+        val request = com.google.android.gms.cast.MediaLoadRequestData.Builder()
+            .setMediaInfo(mediaInfo)
+            .setActiveTrackIds(newIds)
+            .setAutoplay(true)
+            .setCurrentTime(positionMs.coerceAtLeast(0))
+            .build()
+        remote.load(request)
+        return true
     }
 
     private fun reloadCastForDisplay() {
@@ -352,7 +380,6 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
     // must be removable or each playback session leaks one listener (and the
     // ViewModel it captures) into the shared player forever.
     private var exoPlayerListener: Player.Listener? = null
-    private var castExecutor: java.util.concurrent.ExecutorService? = null
 
     private val castPlayerListener = object : Player.Listener {
         override fun onDeviceInfoChanged(deviceInfo: DeviceInfo) {
@@ -736,7 +763,12 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
             _uiState.value = _uiState.value.copy(
                 audioTracks = _uiState.value.audioTracks.map { it.copy(isSelected = it.groupIndex == trackInfo.groupIndex && it.index == trackInfo.index) }
             )
-            // Try Custom Receiver path first (fast, no reload)
+            // Try Custom Receiver path first (fast, no full remux reload).
+            // RemoteMediaClient.setActiveTrackIds() was removed in cast-framework
+            // v21, so this re-issues the CURRENT item with the new active ids
+            // via MediaLoadRequestData (Google's migration path), resuming in
+            // place. For Default this is ignored for AUDIO – we still reload
+            // via remux below to make it effective.
             var handled = false
             try {
                 val remote = castContext?.sessionManager?.currentCastSession?.remoteMediaClient
@@ -747,9 +779,8 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                         _uiState.value.subtitleTracks.any { castTrackId(it.groupIndex, it.index) == id }
                     }
                     val newIds = (listOf(audioId) + textIds).toLongArray()
-                    remote.setActiveTrackIds(newIds)
-                    android.util.Log.i("PlayerViewModel", "Cast setActiveTrackIds audio=$audioId -> ${newIds.contentToString()} (Custom path)")
-                    handled = true
+                    handled = switchCastTracksInPlace(remote, newIds)
+                    android.util.Log.i("PlayerViewModel", "Cast switchCastTracksInPlace audio=$audioId -> ${newIds.contentToString()} (issued=$handled)")
                     // For Default this will be ignored – we still reload via remux below to make it effective
                 }
             } catch (e: Throwable) {
@@ -820,11 +851,15 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                         val textId = castTrackId(trackInfo.groupIndex, trackInfo.index)
                         (audioIds + textId).toLongArray()
                     }
-                    remote.setActiveTrackIds(newIds)
-                    android.util.Log.i("PlayerViewModel", "Cast setActiveTrackIds subtitles=${trackInfo?.let { castTrackId(it.groupIndex, it.index) } ?: "off"} -> ${newIds.contentToString()}")
-                    _uiState.value = _uiState.value.copy(subtitlesEnabled = trackInfo != null,
-                        subtitleTracks = _uiState.value.subtitleTracks.map { it.copy(isSelected = trackInfo != null && it.groupIndex == trackInfo.groupIndex && it.index == trackInfo.index) })
-                    return
+                    // setActiveTrackIds() was removed in cast-framework v21 — re-issue
+                    // the current item with the new active ids (same migration helper
+                    // as the audio path). On failure, fall through to CastPlayer below.
+                    if (switchCastTracksInPlace(remote, newIds)) {
+                        android.util.Log.i("PlayerViewModel", "Cast switchCastTracksInPlace subtitles=${trackInfo?.let { castTrackId(it.groupIndex, it.index) } ?: "off"} -> ${newIds.contentToString()}")
+                        _uiState.value = _uiState.value.copy(subtitlesEnabled = trackInfo != null,
+                            subtitleTracks = _uiState.value.subtitleTracks.map { it.copy(isSelected = trackInfo != null && it.groupIndex == trackInfo.groupIndex && it.index == trackInfo.index) })
+                        return
+                    }
                 }
             } catch (e: Throwable) {
                 android.util.Log.w("PlayerViewModel", "Cast subtitle select via RemoteMediaClient failed, falling back to CastPlayer", e)
@@ -874,8 +909,10 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
             val style = com.google.android.gms.cast.TextTrackStyle().apply {
                 fontScale = size.scale
                 // Optional: keep white on black shadow for readability on Default Receiver
-                foregroundColor = com.google.android.gms.cast.TextTrackStyle.COLOR_WHITE
-                backgroundColor = com.google.android.gms.cast.TextTrackStyle.COLOR_NONE
+                // (TextTrackStyle has no COLOR_* constants besides COLOR_UNSPECIFIED —
+                // colors are plain ARGB ints).
+                foregroundColor = android.graphics.Color.WHITE
+                backgroundColor = android.graphics.Color.TRANSPARENT
                 edgeType = com.google.android.gms.cast.TextTrackStyle.EDGE_TYPE_DROP_SHADOW
             }
             client.setTextTrackStyle(style)
@@ -972,14 +1009,19 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                         null
                     }
                     var foundUri: Uri? = null
-                    val legacyFile = downloadsDir?.let { File(it, file.fileName) }
+                    // fileName is server-controlled — reduce to a bare name so
+                    // "../" cannot escape Downloads (legacy path) or match an
+                    // unintended MediaStore row (scoped storage).
+                    val safeName = file.fileName.substringAfterLast('/').substringAfterLast('\\')
+                        .trim().ifEmpty { "download" }
+                    val legacyFile = downloadsDir?.let { File(it, safeName) }
                     if (legacyFile != null && legacyFile.exists() && legacyFile.length() > 0) {
                         foundUri = Uri.fromFile(legacyFile)
                     } else if (Build.VERSION.SDK_INT >= 29) {
                         // Scoped storage: downloads are stored as MediaStore.Downloads rows,
                         // not raw files at the public Downloads path.
                         val selection = "${MediaStore.Downloads.DISPLAY_NAME} = ?"
-                        val selectionArgs = arrayOf(file.fileName)
+                        val selectionArgs = arrayOf(safeName)
                         context.contentResolver.query(
                             MediaStore.Downloads.EXTERNAL_CONTENT_URI,
                             arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.IS_PENDING),
@@ -1113,11 +1155,11 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
 
-            if (context.packageManager.resolveActivity(intent, 0) == null) {
-                Toast.makeText(context, "No external player found", Toast.LENGTH_SHORT).show()
-                return@launch
-            }
-
+            // No resolveActivity() pre-check: it is deprecated and always
+            // returns null on Android 11+ without a <queries> declaration,
+            // which would falsely report "No external player found". The
+            // ActivityNotFoundException catch below already handles the
+            // genuinely-missing case.
             try {
                 context.startActivity(intent)
             } catch (e: android.content.ActivityNotFoundException) {
@@ -1154,6 +1196,7 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
             // the same MKV library plays on Default Receiver without re-encode
             // when codecs are already H264/AAC (HEVC/VP9/AV1 still play on
             // capable Cast devices like Ultra/Google TV).
+            val file = _uiState.value.file
             val isMkvSource = file?.fileName?.lowercase()?.endsWith(".mkv") == true ||
                 (file?.mimeType?.lowercase() == "video/x-matroska")
             // Mobile's selected audio → TV's default: Default Receiver ignores AUDIO
@@ -1179,7 +1222,6 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 }
             }
 
-            val file = _uiState.value.file
             val title = file?.fileName ?: "Aruvi"
 
             // Thumbnails are also fetched by the receiver, so pass the token as
@@ -1225,8 +1267,8 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 // Default Receiver expose switching for MP4/WebM files without a
                 // Custom Receiver. We translate every local audio/text TrackGroup
                 // into a Cast MediaTrack with a stable id (castTrackId). The
-                // Default Receiver's Shaka demuxer will then allow
-                // RemoteMediaClient.setActiveTrackIds() to switch. MKV embedded
+                // Default Receiver's Shaka demuxer will then allow switching
+                // via an in-place reload carrying the active ids. MKV embedded
                 // tracks still won't demux on Default Receiver (format limit),
                 // but MP4 multi-audio / WebVTT side-loaded now works. Also
                 // includes internet subtitles (if any were fetched) as TEXT tracks
@@ -1298,7 +1340,7 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                     if (remoteClient != null && castTracks.isNotEmpty()) {
                         val castMetadata = com.google.android.gms.cast.MediaMetadata(com.google.android.gms.cast.MediaMetadata.MEDIA_TYPE_MOVIE).apply {
                             putString(com.google.android.gms.cast.MediaMetadata.KEY_TITLE, title)
-                            thumbnailUrl?.let { addImage(com.google.android.gms.cast.WebImage(Uri.parse(it))) }
+                            thumbnailUrl?.let { addImage(com.google.android.gms.common.images.WebImage(Uri.parse(it))) }
                         }
                         val customData = org.json.JSONObject().apply {
                             put("ar_mode", when (_uiState.value.toggleResizeMode) {
@@ -1353,8 +1395,9 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
             } catch (e: Throwable) {
                 // Never swallow cast-load failures silently: a rejected load
                 // leaves the receiver idle ("no media selected") with no clue
-                // why. Surface it in logcat under the cast tag.
-                android.util.Log.w("PlayerViewModel", "castToDevice load failed url=$url", e)
+                // why. Surface it in logcat under the cast tag (token redacted).
+                val safeUrl = url.replace(Regex("token=[^&]*"), "token=REDACTED")
+                android.util.Log.w("PlayerViewModel", "castToDevice load failed url=$safeUrl", e)
             }
         }
     }
@@ -1653,10 +1696,6 @@ while (isActive) {
             try { exoPlayer.removeListener(it) } catch (_: Throwable) {}
         }
         exoPlayerListener = null
-        castExecutor?.let {
-            try { it.shutdown() } catch (_: Throwable) {}
-        }
-        castExecutor = null
         castPlayer?.let {
             try { it.removeListener(castPlayerListener) } catch (_: Throwable) {}
             try { it.release() } catch (_: Throwable) {}

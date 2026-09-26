@@ -148,9 +148,13 @@ class LoginViewModel @Inject constructor(
                         // The code response carries the bot username/name from the
                         // backend, so the login button/deep link always reflect the
                         // live server (no hardcoded bot, no race with a separate fetch).
-                        val bot =
-                            response.botUsername?.takeIf { it.isNotBlank() }
-                                ?: _uiState.value.botUsername.ifBlank { "telegram" }
+                        // Bot username comes from the server — validate the shape
+                        // before interpolating it into the t.me deep link / QR.
+                        val bot = response.botUsername
+                            ?.takeIf { it.matches(Regex("[A-Za-z0-9_]{5,32}")) }
+                            ?: _uiState.value.botUsername
+                                .takeIf { it.matches(Regex("[A-Za-z0-9_]{5,32}")) }
+                            ?: "telegram"
                         if (response.botUsername?.isNotBlank() == true) {
                             settingsRepository.setBotUsername(response.botUsername)
                             settingsRepository.setBotName(response.botName.orEmpty())
@@ -169,7 +173,8 @@ class LoginViewModel @Inject constructor(
                             qrCodeBitmap = qrBitmap,
                             expiresAt = response.expiresAt,
                             isLoading = false,
-                            debugLog = _uiState.value.debugLog + "Success! Code: ${response.code}\n"
+                            // Never log the single-use login code itself.
+                            debugLog = _uiState.value.debugLog + "Login code generated (expires ${response.expiresAt}).\n"
                         )
                         startPolling(response.code)
                     },

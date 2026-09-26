@@ -100,7 +100,26 @@ class FileDownloader(
         updateTask(task)
 
         scope.launch(Dispatchers.IO) {
-            val ready = task.copy(localPath = createDestination(fileName, mimeType))
+            val destination = try {
+                createDestination(fileName, mimeType)
+            } catch (e: Exception) {
+                // MediaStore insert / path failure must not leave the task
+                // stuck in PENDING forever.
+                updateTask(task.copy(
+                    status = DownloadStatus.FAILED,
+                    error = e.message ?: "Download failed"
+                ))
+                return@launch
+            }
+            // pause()/cancel() may have run while the destination was being
+            // reserved — don't start a download the user already stopped.
+            val current = _tasks.value[id]
+            if (current == null) {
+                deleteDestination(task.copy(localPath = destination))
+                return@launch
+            }
+            if (current.status == DownloadStatus.PAUSED) return@launch
+            val ready = task.copy(localPath = destination)
             updateTask(ready)
             // Start foreground service to keep downloads alive in background
             try { DownloadService.start(context) } catch (_: Exception) {}
@@ -114,11 +133,22 @@ class FileDownloader(
      * Reserve a destination for the download. On API 29+ a MediaStore.Downloads row is
      * created (scoped storage forbids raw writes to public Downloads); below that the
      * legacy raw file path is used.
+     *
+     * fileName is server-controlled, so it is reduced to a bare file name first:
+     * otherwise "../" or "/" segments would escape the Downloads directory
+     * (MediaStore DISPLAY_NAME) or write outside it (legacy raw path).
      */
+    private fun safeFileName(fileName: String): String {
+        val base = fileName.substringAfterLast('/').substringAfterLast('\\').trim()
+        if (base.isEmpty() || base == "." || base == "..") return "download"
+        return base
+    }
+
     private fun createDestination(fileName: String, mimeType: String?): String {
+        val safeName = safeFileName(fileName)
         if (Build.VERSION.SDK_INT >= 29) {
             val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                put(MediaStore.Downloads.DISPLAY_NAME, safeName)
                 put(MediaStore.Downloads.MIME_TYPE, mimeType)
                 put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                 put(MediaStore.Downloads.IS_PENDING, 1)
@@ -128,11 +158,11 @@ class FileDownloader(
             )
             if (uri != null) return uri.toString()
         }
-        return legacyPath(fileName)
+        return legacyPath(safeName)
     }
 
     private fun legacyPath(fileName: String): String =
-        File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), fileName).absolutePath
+        File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), safeFileName(fileName)).absolutePath
 
     private fun isContentUri(task: DownloadTask): Boolean =
         task.localPath?.startsWith("content://") == true
@@ -247,6 +277,8 @@ class FileDownloader(
      * connection keeps making progress instead of dying after a few MB.
      */
     private fun startDownload(task: DownloadTask) {
+        // Never run two writers for the same task (corrupt file + orphan job).
+        activeJobs[task.id]?.cancel()
         val job = scope.launch(Dispatchers.IO) {
             try {
                 var attempt = 0
@@ -325,6 +357,7 @@ class FileDownloader(
             }
 
             val body = response.body ?: run {
+                response.close()
                 updateTask(task.copy(
                     status = DownloadStatus.FAILED,
                     error = "Empty response body"
@@ -355,10 +388,10 @@ class FileDownloader(
             val output: java.nio.channels.FileChannel = if (contentUri != null) {
                 val pfd = context.contentResolver.openFileDescriptor(
                     Uri.parse(contentUri), if (startOffset > 0) "rw" else "w"
-                ) ?: return false
+                ) ?: run { response.close(); return false }
                 java.io.FileOutputStream(pfd.fileDescriptor).channel
             } else {
-                val file = File(task.localPath ?: return false)
+                val file = File(task.localPath ?: run { response.close(); return false })
                 file.parentFile?.mkdirs()
                 val channel = RandomAccessFile(file, "rw").channel
                 // A full 200 response overwrites from the start - truncate any stale

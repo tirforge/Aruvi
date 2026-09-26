@@ -171,7 +171,7 @@ private fun SettingsSection(
             modifier = Modifier.padding(bottom = 12.dp)
         ) {
             Text(
-                text = title.uppercase(),
+                text = title.uppercase(java.util.Locale.ROOT),
                 style = MaterialTheme.typography.labelMedium,
                 color = TVPrimary,
                 fontWeight = FontWeight.Bold,

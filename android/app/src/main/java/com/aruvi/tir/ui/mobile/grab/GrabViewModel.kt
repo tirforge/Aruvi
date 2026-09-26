@@ -136,7 +136,10 @@ fun clearGrabResult() { _state.value = _state.value.copy(grabResult = null) }
 fun clearError() { _state.value = _state.value.copy(error = null) }
 
 fun download(result: GrabSelectResponse) {
-downloader.enqueue(result.id ?: 0, result.name, result.streamUrl, "video/*")
+    // id is null until the grab is persisted server-side — enqueuing 0
+    // would collide with the player sentinel and download the wrong item.
+    val id = result.id ?: return
+    downloader.enqueue(id, result.name, result.streamUrl, "video/*")
 }
 
 }
