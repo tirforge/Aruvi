@@ -14,6 +14,7 @@ import time
 from base64 import urlsafe_b64encode
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 from google.auth.exceptions import RefreshError
@@ -25,6 +26,9 @@ from googleapiclient.discovery import build
 from .config import get_settings
 from .streaming import _byte_accurate_file_stream, get_client_semaphore
 from .telegram import clients
+
+if TYPE_CHECKING:
+    from pyrogram.types import Message
 
 _log = logging.getLogger(__name__)
 settings = get_settings()

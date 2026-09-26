@@ -264,8 +264,7 @@ async def diag_bot_test(request: Request):
     auth = request.headers.get("Authorization", "")
     if not bearer_token_matches(auth, settings.debug_password):
         raise HTTPException(status_code=401, detail="Invalid debug token")
-    from .telegram import tg_client, clients
-    from pyrogram import handlers
+    from .telegram import tg_client
     import inspect
     result = {
         "client_connected": tg_client.is_connected if tg_client else False,

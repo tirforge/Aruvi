@@ -1036,7 +1036,7 @@ async def search_results(
     except RuntimeError as e:
         _log.error("grabber: %s", e)
         return None
-    except Exception as e:
+    except Exception:
         _log.exception("grabber: unexpected search error")
         return None
 
@@ -1644,6 +1644,6 @@ async def grab_selected(
     except RuntimeError as e:
         _log.error("grabber: %s", e)
         return None
-    except Exception as e:
+    except Exception:
         _log.exception("grabber: unexpected grab error")
         return None
