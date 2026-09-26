@@ -126,8 +126,8 @@ function UserRow({ user, onToggleAdmin, onDelete, togglePending, deletePending }
 }
 
 export default function AdminPanel({ onBack }: { onBack: () => void }) {
-    const { data: stats, isLoading: statsLoading } = useAdminStats();
-    const { data: users, isLoading: usersLoading } = useAdminUsers();
+    const { data: stats, isLoading: statsLoading, isError: statsError } = useAdminStats();
+    const { data: users, isLoading: usersLoading, isError: usersError } = useAdminUsers();
     const toggleAdmin = useToggleAdmin();
     const deleteUser = useDeleteUser();
     const addToast = useAppStore((s) => s.addToast);
@@ -175,6 +175,8 @@ export default function AdminPanel({ onBack }: { onBack: () => void }) {
                             <div key={i} className="glass-card p-4 h-24 animate-pulse" />
                         ))}
                     </div>
+                ) : statsError ? (
+                    <p className="text-red-400 text-sm mb-8">Failed to load stats — check your connection and reopen the panel.</p>
                 ) : stats ? (
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
                         <StatCard icon={Users} label="Total Users" value={String(stats.total_users)} />
@@ -196,6 +198,8 @@ export default function AdminPanel({ onBack }: { onBack: () => void }) {
                                 <div key={i} className="h-20 bg-dark-800/50 rounded-xl animate-pulse" />
                             ))}
                         </div>
+                    ) : usersError ? (
+                        <p className="text-red-400 text-center py-8">Failed to load users — check your connection and reopen the panel.</p>
                     ) : users && users.length > 0 ? (
                         <div className="space-y-2">
                             {users.map(u => (

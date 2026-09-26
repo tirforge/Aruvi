@@ -7,7 +7,7 @@ export default function Toasts() {
     const removeToast = useAppStore((s) => s.removeToast);
 
     return (
-        <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
+        <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none" aria-live="polite">
             {toasts.map((toast) => (
                 <ToastItem key={toast.id} toast={toast} onDismiss={() => removeToast(toast.id)} />
             ))}

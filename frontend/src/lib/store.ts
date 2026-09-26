@@ -43,7 +43,6 @@ interface AppState {
 
     moveItems: { files: TelegramFile[], folders: Folder[] } | null;
     setMoveItems: (items: { files: TelegramFile[], folders: Folder[] } | null) => void;
-    setMoveFiles: (files: TelegramFile[]) => void;
 
     showNewFolder: boolean;
     setShowNewFolder: (show: boolean) => void;
@@ -172,7 +171,6 @@ export const useAppStore = create<AppState>((set) => ({
 
     moveItems: null,
     setMoveItems: (items) => set({ moveItems: items }),
-    setMoveFiles: (files) => set({ moveItems: { files, folders: [] } }),
     selectedFiles: [],
     setSelectedFiles: (files) => set({ selectedFiles: files }),
 

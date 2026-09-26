@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMemo, useRef, useEffect, useCallback } from 'react';
 import { X, Play, Pause, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, Music, Film, ChevronDown, ChevronUp, Subtitles, Search, Loader2 } from 'lucide-react';
-import { TelegramFile, formatDuration, useUpdateProgress, useFile, getFileDownloadToken, useAccessToken, searchInternetSubtitles, fetchSubtitleContent, SubtitleCandidate } from '../lib/api';
+import { TelegramFile, formatDuration, useUpdateProgress, useFile, getFileDownloadToken, useAccessToken, searchInternetSubtitles, fetchSubtitleContent, SubtitleCandidate, API_BASE } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import AuthImage from './AuthImage';
 
@@ -168,11 +168,16 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         if (!file) return;
         // MicroDVD (.sub) is not supported — the SRT→VTT converter would mangle it
         if (file.name.toLowerCase().endsWith('.sub')) return;
+        // Cap the upload: readAsText holds the whole file in memory, so a
+        // multi-hundred-MB mis-pick would freeze the tab for no benefit.
+        const MAX_SUBTITLE_BYTES = 5 * 1024 * 1024;
+        if (file.size > MAX_SUBTITLE_BYTES) return;
         const reader = new FileReader();
         reader.onload = () => {
             let text = reader.result as string;
-            // Convert SRT to VTT if needed
-            if (file.name.endsWith('.srt')) {
+            // Convert SRT to VTT if needed (case-insensitive: .SRT from
+            // cameras/Windows would otherwise skip conversion and break)
+            if (file.name.toLowerCase().endsWith('.srt')) {
                 text = srtToVtt(text);
             }
             const blob = new Blob([text], { type: 'text/vtt' });
@@ -262,20 +267,36 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
 
     const getAbsoluteUrl = (url: string) => {
         if (!url) return '';
-        if (url.startsWith('http')) return url;
-        return `${window.location.origin}${url}`;
+        // Respect split frontend/backend deploys (__BACKEND_URL__) and tolerate
+        // relative paths missing the leading slash (which naive concatenation
+        // mangles into https://hostapi/...). Falls back to origin-joined.
+        try {
+            return new URL(url, API_BASE || window.location.origin).href;
+        } catch {
+            return `${window.location.origin}/${url.replace(/^\/+/, '')}`;
+        }
+    };
+
+    // Append an auth token to a stream URL — but never duplicate it. Grabbed
+    // files already arrive with a `?token=` download token in stream_url, so a
+    // second `token=` would swallow both into one malformed query value (or
+    // leak the account JWT alongside a scoped token). Missing tokens return
+    // the base unchanged instead of a `token=null` URL that 401s confusingly.
+    const withToken = (base: string, token: string | null) => {
+        if (!base || !token || /[?&]token=/.test(base)) return base;
+        const sep = base.includes('?') ? '&' : '?';
+        return `${base}${sep}token=${encodeURIComponent(token)}`;
     };
 
     // Capture the authorized stream URL once per file so a token refresh
     // doesn't change the src and restart playback. Appends the access token
-    // with the right separator: grabbed files arrive with a `?token=` download
-    // link already in stream_url, so a second `?` would swallow both tokens
-    // into one malformed query value and the stream comes back "not authed".
+    // with the right separator (see withToken: grabbed files already carry a
+    // `?token=` download token, so a second `?` would swallow both tokens
+    // into one malformed query value and the stream comes back "not authed").
     const authorizedStreamUrl = useMemo(() => {
         const token = localStorage.getItem('access_token');
         const base = getAbsoluteUrl(file.stream_url || '');
-        const sep = base.includes('?') ? '&' : '?';
-        return `${base}${sep}token=${token}`;
+        return withToken(base, token);
     }, [file.id, file.stream_url]);
     // Still images don't risk restarting playback, so use the reactive token:
     // if it rotates mid-viewing, the <img> re-renders with a fresh token instead
@@ -284,11 +305,44 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
     const imageUrl = useMemo(() => {
         if (!isImage) return authorizedStreamUrl;
         const base = getAbsoluteUrl(file.stream_url || '');
-        const sep = base.includes('?') ? '&' : '?';
-        return `${base}${sep}token=${reactiveToken}`;
+        return withToken(base, reactiveToken);
     }, [file.stream_url, file.id, isImage, reactiveToken, authorizedStreamUrl]);
     const externalUrl = getAbsoluteUrl((extendedFile || file).public_stream_url || '') || authorizedStreamUrl;
-    const vlcUrl = `vlc://${externalUrl}`;
+
+    // Error-panel share actions mint a short-lived file-bound token instead of
+    // exposing the account-wide JWT baked into externalUrl (clipboard contents
+    // land in logs/chat history; vlc:// URLs in shell/app history). Same
+    // pattern as GlobalContextMenu's VLC/copy handlers.
+    const buildFileBoundUrl = async (): Promise<string> => {
+        const baseUrl = `${window.location.protocol}//${window.location.host}`;
+        const publicUrl = (extendedFile || file).public_stream_url;
+        if (publicUrl) return `${baseUrl}${publicUrl}`;
+        const sep = file.stream_url.includes('?') ? '&' : '?';
+        const token = await getFileDownloadToken(file.id);
+        return `${baseUrl}${file.stream_url}${sep}token=${encodeURIComponent(token)}`;
+    };
+
+    const handleCopyExternalUrl = async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        try {
+            await navigator.clipboard.writeText(await buildFileBoundUrl());
+        } catch {
+            // Token mint failed — fall back to the session URL rather than
+            // leaving the button dead (matches handleDownload's fallback).
+            try { await navigator.clipboard.writeText(externalUrl); } catch { /* noop */ }
+        }
+    };
+
+    const handleOpenVlc = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        (async () => {
+            try {
+                window.open(`vlc://${await buildFileBoundUrl()}`, '_blank', 'noopener,noreferrer');
+            } catch (err) {
+                console.error('Failed to mint stream token:', err);
+            }
+        })();
+    };
 
     // If the access token rotates mid-playback (refresh interceptor), the
     // frozen authorizedStreamUrl would 401 on the next request with no way to
@@ -309,9 +363,9 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         // Build the URL from the CURRENT token — authorizedStreamUrl is
         // deliberately frozen at mount (stable src); re-sourcing with it
         // would replay the stale token the rotation just invalidated.
+        // withToken skips URLs that already carry a token (grab flow).
         const base = getAbsoluteUrl(file.stream_url || '');
-        const sep = base.includes('?') ? '&' : '?';
-        const freshUrl = `${base}${sep}token=${reactiveToken}`;
+        const freshUrl = withToken(base, reactiveToken);
         el.source({
             video: { src: freshUrl, type: 'video/mp4' },
         });
@@ -331,8 +385,10 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         // Open the target tab synchronously (still inside the click gesture) so
         // browsers don't block it as a popup, then point it at the download page
         // once the token arrives. Falls back to same-tab navigation when a popup
-        // was blocked (win === null).
+        // was blocked (win === null). Sever the opener so the download page
+        // can't reach back into this window (reverse tabnabbing).
         const win = window.open('', '_blank');
+        if (win) win.opener = null;
         try {
             const token = await getFileDownloadToken(file.id);
             const dlUrl = `${window.location.protocol}//${window.location.host}/api/stream/dl?id=${file.id}&token=${encodeURIComponent(token)}`;
@@ -748,16 +804,16 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
                         <p className="text-dark-300 mb-6">{error}</p>
 
                         <div className="flex flex-col gap-3">
-                            <a
-                                href={vlcUrl}
+                            <button
+                                onClick={handleOpenVlc}
                                 className="btn-primary flex items-center justify-center gap-2"
                             >
                                 <ExternalLink className="w-4 h-4" />
                                 Open in VLC
-                            </a>
+                            </button>
                             <div className="flex gap-3">
                                 <Button
-                                    onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(externalUrl); }}
+                                    onClick={handleCopyExternalUrl}
                                     className="flex-1 btn-secondary flex items-center justify-center gap-2"
                                 >
                                     <Copy className="w-4 h-4" />

@@ -257,12 +257,14 @@ export default function FileBrowser() {
                 }
                 setClipboard(null);
             } else if (clipboard.mode === 'copy') {
-                alert("Copying files is not yet supported. Only Move (Cut) is supported.");
+                // No blocking alert(): it freezes the UI thread and traps
+                // focus — a toast conveys the same info without hijacking.
+                addToast('Copying files is not yet supported — use Cut (move) instead', 'info');
             }
         } catch (error) {
             console.error('Paste failed:', error);
         }
-    }, [clipboard, currentFolderId, moveFilesMutation, moveFoldersMutation, setClipboard]);
+    }, [clipboard, currentFolderId, moveFilesMutation, moveFoldersMutation, setClipboard, addToast]);
 
 
     // Selection Box Logic

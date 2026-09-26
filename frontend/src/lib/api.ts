@@ -128,7 +128,9 @@ export type CodeVerificationResponse = AuthResponse | PendingCodeResponse;
 
 // API client — use runtime config (set by index.html) or fallback to /api.
 // Exported so thumbnail/image URL builders share the same origin logic.
-export const API_BASE = (window as any).__BACKEND_URL__ || '';
+// Trailing slashes are stripped so a configured 'https://host/' doesn't
+// produce a '//api' baseURL (split-deploy 404s on every request).
+export const API_BASE = ((window as any).__BACKEND_URL__ || '').replace(/\/+$/, '');
 export const api = axios.create({
 baseURL: API_BASE + '/api',
 });
@@ -802,14 +804,4 @@ if (hours > 0) {
 return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 return `${minutes}:${secs.toString().padStart(2, '0')}`;
-};
-
-export const getFileIcon = (fileType: string): string => {
-switch (fileType) {
-case 'video': return '🎬';
-case 'audio': return '🎵';
-case 'image': return '🖼️';
-case 'document': return '📄';
-default: return '📎';
-}
 };
