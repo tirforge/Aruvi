@@ -32,7 +32,7 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         with:
           fetch-depth: 0
-      - uses: SonarSource/sonarqube-scan-action@v4
+      - uses: SonarSource/sonarqube-scan-action@v6
         if: steps.gate.outputs.skip != 'true'
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
