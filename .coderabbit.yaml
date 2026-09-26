@@ -13,5 +13,9 @@ reviews:
     enabled: true
   finishing_touches:
     enabled: false
+  # Skip 11MB vendored player bundles (third-party code + chokes reviewers)
+  path_filters:
+    - "!frontend/public/vendor/**"
+    - "!backend/app/static/vendor/**"
 chat:
   auto_reply: true
