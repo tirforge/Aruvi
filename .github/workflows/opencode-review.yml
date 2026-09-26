@@ -1,0 +1,39 @@
+name: opencode-review
+
+# Free AI review on every PR using opencode's zero-key free model tier.
+# Public repo, so free-model data logging is a non-issue here.
+# Non-blocking by design (CodeRabbit + CI are the gates); flip
+# continue-on-error to false once the free model proves stable.
+# Fallback: add GEMINI_API_KEY repo secret (free from Google AI Studio)
+# and switch `model` to google/gemini-2.5-flash.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+      issues: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: anomalyco/opencode/github@latest
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          model: opencode/deepseek-v4-flash-free
+          use_github_token: true
+          prompt: |
+            Review this pull request:
+            - Check for code quality issues
+            - Look for potential bugs
+            - Suggest improvements
+            - Flag security issues (auth, tokens, injection)
+            Keep it short. Only comment on changed lines.

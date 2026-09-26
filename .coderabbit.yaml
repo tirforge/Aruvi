@@ -1,0 +1,17 @@
+# CodeRabbit config for tirforge/Aruvi (public repo = free OSS plan).
+# NOTE: the CodeRabbit GitHub App must still be installed on the repo
+# (coderabbit.ai -> sign up with GitHub -> add tirforge/Aruvi).
+# This file pre-configures its behavior once installed.
+language: en-US
+tone_instructions: >
+  Be concise and direct. This is a solo-dev Telegram media streaming app
+  (FastAPI backend, React+Vite frontend). Prioritize real bugs, auth/token
+  issues, and performance over style nits.
+reviews:
+  profile: assertive
+  auto_review:
+    enabled: true
+  finishing_touches:
+    enabled: false
+chat:
+  auto_reply: true
