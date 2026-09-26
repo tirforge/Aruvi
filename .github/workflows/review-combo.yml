@@ -45,7 +45,7 @@ jobs:
           gh pr comment ${{ github.event.pull_request.number }}
           --body "@coderabbitai review" || true
 
-      - uses: anomalyco/opencode/github@latest
+      - uses: anomalyco/opencode/github@545f51d26cc39a907d2867492d498d9607ea5fa4 # v1.18.32
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -123,12 +123,14 @@ jobs:
             --jq '[.[] | select(.user.login=="coderabbitai[bot]" or .user.login=="coderabbitai") | .body] | join("\n---\n")' > findings/rabbit-main.md
           gh api "repos/${{ github.repository }}/pulls/$PR/comments" --paginate \
             --jq '[.[] | select(.user.login=="coderabbitai[bot]" or .user.login=="coderabbitai") | ("`"+.path+":"+([.line,.original_line]|map(values)|join(",")+"` "+.body))] | join("\n---\n")' > findings/rabbit-inline.md
-          # 3. SonarCloud open issues on this PR (fallback keeps job alive
-          # if the API is unreachable; empty result parses as CLEAN below)
-          curl -s -u "$SONAR_TOKEN:" \
+          # 3. SonarCloud open issues on this PR. Download to a file first,
+          # then parse — never pipe a download straight into an interpreter.
+          # Fallback keeps the job alive if the API is unreachable; empty
+          # result parses as CLEAN below.
+          curl -s -u "$SONAR_TOKEN:" -o findings/sonar.json \
             "https://sonarcloud.io/api/issues/search?componentKeys=tirforge_Aruvi&pullRequest=$PR&resolved=false&ps=100" \
-            | python3 -c "import json,sys; d=json.load(sys.stdin); print('\n---\n'.join(f\"[{i['severity']}] {i['component'].split(':')[-1]}:{i.get('line','?')} {i['rule']} — {i['message']}\" for i in d.get('issues',[])) or 'CLEAN: no open Sonar issues.')" > findings/sonar.md \
-            || echo "CLEAN: sonar unreachable, skipping." > findings/sonar.md
+            || echo '{"issues":[]}' > findings/sonar.json
+          python3 -c "import json; d=json.load(open('findings/sonar.json')); print('\n---\n'.join(f\"[{i['severity']}] {i['component'].split(':')[-1]}:{i.get('line','?')} {i['rule']} — {i['message']}\" for i in d.get('issues',[])) or 'CLEAN: no open Sonar issues.')" > findings/sonar.md
           wc -c findings/*.md
 
       - name: Decide clean vs dirty
@@ -153,7 +155,7 @@ jobs:
           gh pr comment ${{ github.event.pull_request.number }} --body
           "✅ **review-combo: all clean** — opencode, Sonar, and CodeRabbit found nothing to fix."
 
-      - uses: anomalyco/opencode/github@latest
+      - uses: anomalyco/opencode/github@545f51d26cc39a907d2867492d498d9607ea5fa4 # v1.18.32
         # Dependabot PRs never reach the fixer: the opencode action asserts
         # PR-author write permissions and dependabot[bot] has none (verified
         # in logs). Harvest + decide above still run for visibility.
