@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { X, Folder as FolderIcon, ChevronRight, Home } from 'lucide-react';
 import { useFolderTree, TelegramFile, Folder, useMoveFiles, useMoveFolders } from '../lib/api';
 import { useAppStore } from '../lib/store';
+import { useFocusReturn } from '../lib/useFocusReturn';
 
 interface MoveFileModalProps {
     items: { files: TelegramFile[]; folders: Folder[] };
@@ -18,6 +19,8 @@ export default function MoveFileModal({ items, onClose }: MoveFileModalProps) {
     const { mutateAsync: moveFolders, isPending: isFoldersPending } = useMoveFolders();
     const addToast = useAppStore((s) => s.addToast);
 const clearSelection = useAppStore((s) => s.clearSelection);
+    // Return focus to the opener (Move menu item) on close.
+    useFocusReturn();
 
     const isPending = isFilesPending || isFoldersPending;
     const totalItems = items.files.length + items.folders.length;
@@ -71,7 +74,9 @@ const clearSelection = useAppStore((s) => s.clearSelection);
     };
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+        <div
+            onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
             <div className="glass-card w-full max-w-md p-6 animate-scale-in">
                 <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-semibold">Move {totalItems} Item{totalItems !== 1 ? 's' : ''}</h2>

@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { X, FolderPlus } from 'lucide-react';
 import { useCreateFolder } from '../lib/api';
 import { useAppStore } from '../lib/store';
+import { useFocusReturn } from '../lib/useFocusReturn';
 
 interface NewFolderModalProps {
     parentId: number | null;
@@ -21,6 +22,8 @@ export default function NewFolderModal({ parentId, onClose }: NewFolderModalProp
     const [name, setName] = useState('');
     const createFolder = useCreateFolder();
     const addToast = useAppStore((s) => s.addToast);
+    // Return focus to the opener (New Folder button) on close.
+    useFocusReturn();
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -38,7 +41,9 @@ export default function NewFolderModal({ parentId, onClose }: NewFolderModalProp
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <div
+            onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <div className="glass-card w-full max-w-md p-6 animate-slide-up">
                 <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-semibold flex items-center gap-2">

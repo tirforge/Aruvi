@@ -32,6 +32,10 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
   // Pairs the displayed results with the query + chat that produced them.
   const lastSearchRef = useRef<{ query: string; chatId?: number } | null>(null);
   const copyTimerRef = useRef<number | null>(null);
+  // Synchronous in-flight guard. `grabbingIds` state lags a render behind,
+  // so a rapid double-click slipped past the `.has()` check and fired the
+  // select mutation twice — the ref is checked/updated in the same tick.
+  const grabbingRef = useRef<Set<string>>(new Set());
 
   const searchMutation = useGrabSearch();
   const selectMutation = useGrabSelect();
@@ -88,9 +92,10 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
 
   const handleSelect = useCallback(async (item: GrabSearchResult) => {
     const itemId = `${item.group_username || ''}-${item.msg_id}-${item.row}-${item.col}`;
-    if (grabbingIds.has(itemId)) return;
+    if (grabbingRef.current.has(itemId)) return;
+    grabbingRef.current.add(itemId);
     const last = lastSearchRef.current;
-    if (!last) return;
+    if (!last) { grabbingRef.current.delete(itemId); return; }
     setGrabbingIds((prev) => new Set(prev).add(itemId));
     try {
       const result = await selectMutation.mutateAsync({
@@ -110,13 +115,14 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
     } catch (err: any) {
       addToast(errorMessage(err, 'Failed to grab'), 'error');
     } finally {
+      grabbingRef.current.delete(itemId);
       setGrabbingIds((prev) => {
         const next = new Set(prev);
         next.delete(itemId);
         return next;
       });
     }
-  }, [grabbingIds, selectMutation, queryClient, addToast]);
+  }, [selectMutation, queryClient, addToast]);
 
   const handleCopyUrl = useCallback(async () => {
     if (!grabbed) return;
@@ -258,7 +264,7 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
       {!searchMutation.isPending && !searched && results.length === 0 && (
         <div className="max-w-2xl">
           <div className="glass-card p-8 text-center">
-            <div className="w-14 h-14 rounded-2xl bg-primary-500/10 flex items-center justify-center mx-auto mb-4">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary-500/25 to-primary-500/5 border border-primary-500/20 ring-1 ring-primary-500/25 shadow-glow flex items-center justify-center mx-auto mb-4">
               <Film className="w-7 h-7 text-primary-400" />
             </div>
             <h3 className="text-lg font-semibold text-white mb-1">Find something to watch</h3>
@@ -273,7 +279,7 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
       {/* Empty state */}
       {!searchMutation.isPending && searched && results.length === 0 && (
         <div className="text-center py-16 glass-card max-w-md mx-auto">
-          <div className="w-16 h-16 rounded-2xl bg-dark-800 flex items-center justify-center mx-auto mb-5">
+          <div className="w-16 h-16 rounded-2xl bg-dark-800/80 border border-white/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] flex items-center justify-center mx-auto mb-5">
             <Search className="w-8 h-8 text-dark-500" />
           </div>
           <h3 className="text-lg font-semibold text-white mb-1">No results for “{query.trim()}”</h3>
@@ -285,7 +291,7 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
       {results.length > 0 && (
         <div className="space-y-2 max-w-2xl">
           <div className="flex items-center gap-2 mb-4">
-            <span className="badge">
+            <span className="badge badge-primary">
               {results.length} result{results.length > 1 ? 's' : ''}
             </span>
             <span className="text-xs text-dark-500">Click any result to grab it</span>
@@ -300,7 +306,7 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
                 }`}
                 onClick={() => !grabbing && handleSelect(item)}
               >
-                <div className="w-12 h-12 rounded-xl bg-primary-500/10 flex items-center justify-center shrink-0 group-hover:bg-primary-500/20 transition-colors">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary-500/25 to-primary-500/5 border border-primary-500/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] flex items-center justify-center shrink-0 group-hover:shadow-glow transition-shadow">
                   {grabbing ? (
                     <Loader2 className="w-6 h-6 animate-spin text-primary-400" />
                   ) : (

@@ -54,7 +54,7 @@ function Sidebar({ isOpen, onClose }: SidebarProps) {
             />
 
             <aside className={`
-                w-64 bg-dark-900 border-r border-white/[0.06] flex flex-col shrink-0
+                w-64 bg-gradient-to-b from-dark-900 via-dark-900 to-primary-950/40 border-r border-white/[0.06] flex flex-col shrink-0
                 fixed inset-y-0 left-0 z-40
                 transition-transform duration-300 ease-in-out shadow-2xl
                 ${isOpen ? 'translate-x-0' : '-translate-x-full'}
@@ -62,14 +62,14 @@ function Sidebar({ isOpen, onClose }: SidebarProps) {
                 {/* Logo Area */}
                 <div className="p-6 flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl overflow-hidden bg-dark-900 p-1 shadow-lg shadow-primary-500/20 flex items-center justify-center shrink-0">
+                        <div className="w-10 h-10 rounded-xl overflow-hidden bg-gradient-to-br from-primary-600/40 via-dark-900 to-dark-900 p-1 ring-1 ring-primary-500/40 shadow-lg shadow-primary-500/30 flex items-center justify-center shrink-0">
                             <img 
                                 src={logo} 
                                 alt="Aruvi" 
                                 className="w-full h-full object-contain" 
                             />
                         </div>
-                        <span className="text-lg font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">
+                        <span className="text-lg font-bold bg-clip-text text-transparent bg-gradient-to-r from-white via-primary-200 to-primary-400">
                             Aruvi
                         </span>
                     </div>
@@ -90,7 +90,7 @@ function Sidebar({ isOpen, onClose }: SidebarProps) {
 <NavItem section="grab" icon={Search} label="Search Movies" active={activeSection === 'grab'} onClick={handleNavClick} />
                     {user?.is_admin && (
                         <button
-                            onClick={() => { setShowAdminPanel(true); onClose(); }}
+                            onClick={() => { setShowAdminPanel(true); if (window.innerWidth < 768) onClose(); }}
                             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-dark-400 hover:text-white hover:bg-white/[0.05] transition-colors"
                         >
                             <Shield className="w-5 h-5" />
@@ -100,7 +100,7 @@ function Sidebar({ isOpen, onClose }: SidebarProps) {
                 </nav>
 
                 {/* Storage Info */}
-                <div className="p-4 m-3 rounded-xl bg-dark-800/50 border border-white/[0.04]">
+                <div className="p-4 m-3 rounded-xl bg-gradient-to-br from-primary-600/[0.12] via-dark-800/60 to-dark-800/40 border border-primary-500/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
                     <div className="flex items-center gap-2 mb-2 text-sm text-dark-300">
                         <HardDrive className="w-4 h-4" />
                         <span>Storage</span>
@@ -219,12 +219,15 @@ const NavItem = memo(function NavItem({ section, icon: Icon, label, active, onCl
     return (
         <button
             onClick={() => onClick(section)}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
+            className={`relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ${
                 active
-                    ? 'bg-primary-600/10 text-primary-400 font-medium'
+                    ? 'bg-gradient-to-r from-primary-600/30 via-primary-600/10 to-transparent text-primary-200 font-medium shadow-[inset_0_0_0_1px_rgba(168,85,247,0.2),0_0_20px_-6px_rgba(168,85,247,0.5)]'
                     : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
             }`}
         >
+            {active && (
+                <span className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-1 rounded-full bg-gradient-to-b from-primary-400 to-primary-600 shadow-[0_0_12px_rgba(168,85,247,0.8)]" />
+            )}
             <Icon className="w-5 h-5" />
             {label}
         </button>

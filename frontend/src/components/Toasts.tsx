@@ -25,18 +25,19 @@ function ToastItem({ toast, onDismiss }: { toast: { id: string; message: string;
     }, []);
 
     const getIcon = () => {
+        const chip = 'w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border';
         switch (toast.type) {
-            case 'success': return <CheckCircle className="w-5 h-5 text-green-400" />;
-            case 'error': return <AlertCircle className="w-5 h-5 text-red-400" />;
-            default: return <Info className="w-5 h-5 text-blue-400" />;
+            case 'success': return <span className={`${chip} bg-green-500/15 border-green-500/25 shadow-[0_0_16px_-4px_rgba(34,197,94,0.5)]`}><CheckCircle className="w-4 h-4 text-green-400" /></span>;
+            case 'error': return <span className={`${chip} bg-red-500/15 border-red-500/25 shadow-[0_0_16px_-4px_rgba(239,68,68,0.5)]`}><AlertCircle className="w-4 h-4 text-red-400" /></span>;
+            default: return <span className={`${chip} bg-blue-500/15 border-blue-500/25 shadow-[0_0_16px_-4px_rgba(59,130,246,0.5)]`}><Info className="w-4 h-4 text-blue-400" /></span>;
         }
     };
 
     const getBgColor = () => {
          switch (toast.type) {
-            case 'success': return 'border-green-500/20 bg-dark-900/90 shadow-green-900/10';
-            case 'error': return 'border-red-500/20 bg-dark-900/90 shadow-red-900/10';
-            default: return 'border-blue-500/20 bg-dark-900/90 shadow-blue-900/10';
+            case 'success': return 'border-green-500/25 border-l-2 border-l-green-400 bg-dark-900/90 shadow-green-900/20';
+            case 'error': return 'border-red-500/25 border-l-2 border-l-red-400 bg-dark-900/90 shadow-red-900/20';
+            default: return 'border-blue-500/25 border-l-2 border-l-blue-400 bg-dark-900/90 shadow-blue-900/20';
         }
     };
 

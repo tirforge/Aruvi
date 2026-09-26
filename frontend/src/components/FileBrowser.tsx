@@ -146,6 +146,12 @@ export default function FileBrowser() {
         await updateFileMutation.mutateAsync({ id: fileId, folder_id: folderId });
     }, [updateFileMutation]);
 
+    // Handle drag-drop folder into folder (previously swallowed silently —
+    // FolderCard only routed `type:'file'` payloads anywhere).
+    const handleFolderDrop = useCallback(async (draggedId: number, targetId: number) => {
+        await moveFoldersMutation.mutateAsync({ ids: [draggedId], folderId: targetId });
+    }, [moveFoldersMutation]);
+
     // Handle file rename
     const handleRenameFile = useCallback(async (newName: string) => {
         if (!renameFile) return;
@@ -425,6 +431,11 @@ export default function FileBrowser() {
                 else if (showNewFolder) setShowNewFolder(false);
                 else if (moveItems) setMoveItems(null);
                 else if (deleteConfirm) setDeleteConfirm(null);
+                // RenameModal handles its own Escape, but a global close-all
+                // keeps FileBrowser's state consistent if the modal's listener
+                // ever misses (e.g. focus trapped outside the document).
+                else if (renameFile) setRenameFile(null);
+                else if (renameFolder) setRenameFolder(null);
                 else clearSelection();
             }
 
@@ -567,18 +578,18 @@ export default function FileBrowser() {
     }
 
     return (
-        <div className="flex h-screen bg-dark-950 text-white selection:bg-primary-500/30 overflow-hidden">
+        <div className="flex h-screen text-white selection:bg-primary-500/30 overflow-hidden">
             <Sidebar isOpen={isSidebarOpen} onClose={closeSidebar} />
             
-            <main className={`flex-1 flex flex-col min-w-0 relative bg-gradient-to-br from-dark-950 to-dark-900 transition-[margin] duration-300 ease-in-out ${isSidebarOpen ? 'md:ml-64' : 'ml-0'}`}>
+            <main className={`flex-1 flex flex-col min-w-0 relative bg-transparent transition-[margin] duration-300 ease-in-out ${isSidebarOpen ? 'md:ml-64' : 'ml-0'}`}>
                 {/* Header */}
-                <header className="h-16 border-b border-white/[0.06] flex items-center justify-between px-4 sm:px-6 bg-dark-900/50 backdrop-blur-sm z-30 sticky top-0">
+                <header className="h-16 border-b border-white/[0.06] flex items-center justify-between px-4 sm:px-6 bg-dark-950/60 backdrop-blur-xl z-30 sticky top-0 shadow-[0_1px_0_rgba(255,255,255,0.04),0_12px_32px_-16px_rgba(0,0,0,0.8)]">
                     {/* Left: Hamburger & Search & Breadcrumbs */}
                     <div className="flex items-center gap-3 md:gap-6 flex-1 min-w-0">
                         {/* Hamburger */}
                         <button 
                             onClick={() => setSidebarOpen(!isSidebarOpen)}
-                            className="p-2 -ml-2 text-dark-400 hover:text-white"
+                            className="p-2 -ml-2 rounded-lg text-dark-400 hover:text-white hover:bg-white/[0.06] transition-colors"
                         >
                             <Menu className="w-6 h-6" />
                         </button>
@@ -593,7 +604,7 @@ export default function FileBrowser() {
                                     placeholder="Search..."
                                     value={searchInput}
                                     onChange={(e) => setSearchInput(e.target.value)}
-                                    className="w-full bg-dark-800/50 border border-white/[0.06] rounded-lg pl-9 pr-3 py-1.5 text-sm text-white focus:outline-none focus:border-primary-500/50 focus:bg-dark-800 transition-all"
+                                    className="w-full bg-dark-800/50 border border-white/[0.06] rounded-lg pl-9 pr-3 py-1.5 text-sm text-white focus:outline-none focus:border-primary-500/50 focus:bg-dark-800 focus:shadow-[0_0_20px_-4px_rgba(168,85,247,0.5)] transition-all"
                                 />
                         </div>
                         )}
@@ -609,7 +620,7 @@ export default function FileBrowser() {
                                     <button 
                                         onClick={() => navigateToBreadcrumb(index)}
                                         className={`px-2 py-1 rounded-md text-sm truncate max-w-[150px] transition-colors ${index === breadcrumbs.length - 1 
-                                            ? 'text-white font-medium bg-white/[0.05]'
+                                            ? 'text-primary-200 font-medium bg-gradient-to-r from-primary-600/25 to-primary-600/5 shadow-[inset_0_0_0_1px_rgba(168,85,247,0.15)]'
                                             : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
                                             }`}
                                     >
@@ -629,7 +640,7 @@ export default function FileBrowser() {
                                 onClick={() => setFileTypeFilter(null)}
                                 title="All Files"
                                 className={`p-1.5 rounded-md transition-all ${
-                                    !fileTypeFilter ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
+                                    !fileTypeFilter ? 'bg-gradient-to-br from-primary-500 to-primary-700 text-white shadow-md shadow-primary-600/40' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
                                 }`}
                             >
                                 <Grid className="w-4 h-4" />
@@ -638,7 +649,7 @@ export default function FileBrowser() {
                                 onClick={() => setFileTypeFilter('video')}
                                 title="Videos"
                                 className={`p-1.5 rounded-md transition-all ${
-                                    fileTypeFilter === 'video' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
+                                    fileTypeFilter === 'video' ? 'bg-gradient-to-br from-primary-500 to-primary-700 text-white shadow-md shadow-primary-600/40' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
                                 }`}
                             >
                                 <Film className="w-4 h-4" />
@@ -647,7 +658,7 @@ export default function FileBrowser() {
                                 onClick={() => setFileTypeFilter('audio')}
                                 title="Audio"
                                 className={`p-1.5 rounded-md transition-all ${
-                                    fileTypeFilter === 'audio' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
+                                    fileTypeFilter === 'audio' ? 'bg-gradient-to-br from-primary-500 to-primary-700 text-white shadow-md shadow-primary-600/40' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
                                 }`}
                             >
                                 <Music className="w-4 h-4" />
@@ -656,7 +667,7 @@ export default function FileBrowser() {
                                 onClick={() => setFileTypeFilter('image')}
                                 title="Images"
                                 className={`p-1.5 rounded-md transition-all ${
-                                    fileTypeFilter === 'image' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
+                                    fileTypeFilter === 'image' ? 'bg-gradient-to-br from-primary-500 to-primary-700 text-white shadow-md shadow-primary-600/40' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
                                 }`}
                             >
                                 <ImageIcon className="w-4 h-4" />
@@ -665,7 +676,7 @@ export default function FileBrowser() {
                                 onClick={() => setFileTypeFilter('document')}
                                 title="Documents"
                                 className={`p-1.5 rounded-md transition-all ${
-                                    fileTypeFilter === 'document' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
+                                    fileTypeFilter === 'document' ? 'bg-gradient-to-br from-primary-500 to-primary-700 text-white shadow-md shadow-primary-600/40' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
                                 }`}
                             >
                                 <FileText className="w-4 h-4" />
@@ -684,13 +695,13 @@ export default function FileBrowser() {
                              <div className="w-px h-3 bg-white/[0.1] mx-1"></div>
                              <button
                                  onClick={() => setViewMode('grid')}
-                                 className={`p-1.5 rounded-md transition-all ${viewMode === 'grid' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'}`}
+                                 className={`p-1.5 rounded-md transition-all ${viewMode === 'grid' ? 'bg-gradient-to-br from-primary-500 to-primary-700 text-white shadow-md shadow-primary-600/40' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'}`}
                              >
                                  <Grid className="w-4 h-4" />
                              </button>
                              <button
                                  onClick={() => setViewMode('list')}
-                                 className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'}`}
+                                 className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-gradient-to-br from-primary-500 to-primary-700 text-white shadow-md shadow-primary-600/40' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'}`}
                              >
                                  <List className="w-4 h-4" />
                              </button>
@@ -757,6 +768,7 @@ export default function FileBrowser() {
                                             onSelect={(multi) => selectFolder(folder.id, multi)}
                                             onOpen={() => navigateToFolder(folder)}
                                             onFileDrop={handleFileDrop}
+                                            onFolderDrop={handleFolderDrop}
                                         />
                                     ))}
                                     
@@ -774,8 +786,8 @@ export default function FileBrowser() {
                                 </div>
                             ) : (
                                 <div className="h-full flex flex-col items-center justify-center text-center pb-20 animate-fade-in">
-                                    <div className="w-24 h-24 rounded-3xl bg-dark-800/50 flex items-center justify-center border border-white/[0.04] mb-6 shadow-2xl">
-                                        <ArrowUp className="w-10 h-10 text-dark-600 animate-bounce" />
+                                    <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-primary-600/15 via-dark-800/60 to-dark-800/40 flex items-center justify-center border border-primary-500/15 shadow-glow mb-6">
+                                        <ArrowUp className="w-10 h-10 text-primary-400 animate-bounce" />
                                     </div>
                                     <h3 className="text-xl font-bold text-white mb-2">No files found</h3>
                                     <p className="text-dark-400 max-w-xs">

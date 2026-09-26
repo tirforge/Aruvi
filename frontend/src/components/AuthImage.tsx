@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useAccessToken } from '../lib/api';
+import { API_BASE, useAccessToken } from '../lib/api';
 
 interface AuthImageProps {
     src: string;
@@ -10,7 +10,14 @@ interface AuthImageProps {
 const getAbsoluteUrl = (url: string) => {
     if (!url) return '';
     if (url.startsWith('http')) return url;
-    return `${window.location.origin}${url}`;
+    // Respect split frontend/backend deploys (__BACKEND_URL__) and tolerate
+    // relative paths missing the leading slash (which naive concatenation
+    // mangles into https://hostapi/...). Falls back to origin-joined.
+    try {
+        return new URL(url, API_BASE || window.location.origin).href;
+    } catch {
+        return `${window.location.origin}/${url.replace(/^\/+/, '')}`;
+    }
 };
 
 export default function AuthImage({ src, alt, className }: AuthImageProps) {
@@ -58,9 +65,16 @@ export default function AuthImage({ src, alt, className }: AuthImageProps) {
         const url = getAbsoluteUrl(src);
 
         let cancelled = false;
+        // Abort the in-flight download on unmount/src change/token rotation.
+        // The old `cancelled` flag only skipped setState — the fetch kept
+        // downloading, so fast-scrolling a big library left dozens of orphaned
+        // thumbnail downloads hammering the backend.
+        const controller = new AbortController();
+        const signal = controller.signal;
 
         const loadImage = (authToken: string) =>
             fetch(url, {
+                signal,
                 headers: { 'Authorization': `Bearer ${authToken}` }
             })
             .then((res) => {
@@ -77,7 +91,7 @@ export default function AuthImage({ src, alt, className }: AuthImageProps) {
             // Token may have expired mid-session - retry once with whatever token
             // is currently in storage (another tab may have refreshed it).
             const freshToken = localStorage.getItem('access_token');
-            if (!cancelled && freshToken && freshToken !== token && err instanceof Error && err.message === 'Auth failed') {
+            if (!cancelled && !signal.aborted && freshToken && freshToken !== token && err instanceof Error && err.message === 'Auth failed') {
                 return loadImage(freshToken);
             }
             throw err;
@@ -92,11 +106,13 @@ export default function AuthImage({ src, alt, className }: AuthImageProps) {
             setBlobUrl(url);
         })
         .catch(() => {
-            if (!cancelled) setError(true);
+            // Aborts are intentional, not errors — don't blank the thumbnail.
+            if (!cancelled && !signal.aborted) setError(true);
         });
 
         return () => {
             cancelled = true;
+            controller.abort();
             if (blobUrlRef.current) {
                 URL.revokeObjectURL(blobUrlRef.current);
                 blobUrlRef.current = null;

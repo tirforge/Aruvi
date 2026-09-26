@@ -13,9 +13,10 @@ interface FolderCardProps {
     onSelect?: (multi: boolean) => void;
     onOpen: () => void;
     onFileDrop: (fileId: number, folderId: number) => void;
+    onFolderDrop?: (folderId: number, targetFolderId: number) => void;
 }
 
-function FolderCardImpl({ folder, viewMode, selected, onSelect, onOpen, onFileDrop }: FolderCardProps) {
+function FolderCardImpl({ folder, viewMode, selected, onSelect, onOpen, onFileDrop, onFolderDrop }: FolderCardProps) {
     const [isDragOver, setIsDragOver] = useState(false);
     const activeContextMenu = useAppStore((s) => s.activeContextMenu);
     const setActiveContextMenu = useAppStore((s) => s.setActiveContextMenu);
@@ -64,24 +65,32 @@ function FolderCardImpl({ folder, viewMode, selected, onSelect, onOpen, onFileDr
         // `text/plain` file id; folder cards publish only `application/json`
         // ({type:'folder', id}). Accept the JSON payload first, then fall back
         // to the raw numeric file id from text/plain.
+        let handled = false;
         try {
             const data = JSON.parse(e.dataTransfer.getData('application/json'));
-            if ((data.type === 'file' || data.type === 'folder') && data.id && data.type === 'file') {
+            if (data?.id && data.type === 'file') {
                 onFileDrop(data.id, folder.id);
-                return;
+                handled = true;
+            } else if (data?.id && data.type === 'folder' && data.id !== folder.id) {
+                // Dropping a folder onto itself would be a no-op cycle.
+                onFolderDrop?.(data.id, folder.id);
+                handled = true;
             }
-        } catch (err) {
+        } catch {
+            // Not JSON — fall through to the plain-text fallback below.
+        }
+        if (!handled) {
             const plain = e.dataTransfer.getData('text/plain').trim();
             if (/^\d+$/.test(plain)) {
                 onFileDrop(Number(plain), folder.id);
-                return;
+            } else {
+                console.error('Invalid drop data');
             }
-            console.error('Invalid drop data:', err);
         }
     };
 
     const dropStyles = isDragOver
-        ? 'ring-2 ring-primary-500 bg-primary-500/20 scale-105 shadow-xl shadow-primary-500/20'
+        ? 'ring-2 ring-primary-400 bg-primary-500/20 scale-105 shadow-glow border-primary-400/40'
         : '';
         
     const selectedStyles = selected 
@@ -141,7 +150,7 @@ function FolderCardImpl({ folder, viewMode, selected, onSelect, onOpen, onFileDr
                                 setActiveContextMenu({ type: 'folder', item: folder, x: rect.right, y: rect.bottom });
                             }
                         }}
-                        className={`p-2 rounded-lg transition-colors ${showMenu ? 'bg-white/10 text-white' : 'hover:bg-white/[0.08] text-dark-400 opacity-0 group-hover:opacity-100'}`}
+                        className={`p-2 rounded-lg transition-colors ${showMenu ? 'bg-white/10 text-white' : 'hover:bg-white/[0.08] text-dark-400 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100'}`}
                     >
                         <MoreVertical className="w-4 h-4" />
                     </button>
@@ -197,7 +206,7 @@ function FolderCardImpl({ folder, viewMode, selected, onSelect, onOpen, onFileDr
                             setActiveContextMenu({ type: 'folder', item: folder, x: rect.right, y: rect.bottom });
                         }
                     }}
-                    className={`p-1.5 rounded-lg transition-colors ${showMenu ? 'bg-white/10 text-white' : 'hover:bg-white/[0.08] text-dark-400 opacity-0 group-hover:opacity-100'}`}
+                    className={`p-1.5 rounded-lg transition-colors ${showMenu ? 'bg-white/10 text-white' : 'hover:bg-white/[0.08] text-dark-400 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100'}`}
                 >
                     <MoreVertical className="w-4 h-4" />
                 </button>

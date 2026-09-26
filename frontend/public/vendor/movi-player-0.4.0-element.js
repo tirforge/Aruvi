@@ -1,3 +1,4 @@
+/* ARUVI-LOCAL-PATCH 2026-09-26: closeSettingsMenu() restores host focus via this.focus() (mirrors timeline/resume close paths); re-apply after any movi-player upgrade. */
 var A = ((A2) => (A2[A2.SILENT = 0] = "SILENT", A2[A2.ERROR = 1] = "ERROR", A2[A2.WARN = 2] = "WARN", A2[A2.INFO = 3] = "INFO", A2[A2.DEBUG = 4] = "DEBUG", A2[A2.TRACE = 5] = "TRACE", A2))(A || {});
 let t = 0;
 const n = { setLevel(A2) {
@@ -116293,7 +116294,7 @@ class MoviElement extends HTMLElement {
   }
   closeSettingsMenu() {
     const A2 = this.shadowRoot?.querySelector(".movi-settings-menu");
-    A2 && this.isBottomMenuOpen(A2) && (this.setBottomMenuOpen(A2, false), this.closeSettingsPage());
+    A2 && this.isBottomMenuOpen(A2) && (this.setBottomMenuOpen(A2, false), this.closeSettingsPage(), this.focus());
   }
   closeSettingsPage() {
     const A2 = this.shadowRoot;

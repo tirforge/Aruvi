@@ -3,6 +3,7 @@
  */
 import { useState, useRef } from 'react';
 import { X, Trash2 } from 'lucide-react';
+import { useFocusReturn } from '../lib/useFocusReturn';
 
 interface DeleteConfirmModalProps {
     type: 'file' | 'folder' | 'multiple';
@@ -15,6 +16,9 @@ interface DeleteConfirmModalProps {
 export default function DeleteConfirmModal({ type, name, count = 1, onConfirm, onClose }: DeleteConfirmModalProps) {
     const [isPending, setIsPending] = useState(false);
     const inFlightRef = useRef(false);
+    // Return focus to the opener (Delete menu item) on close. Safe when the
+    // deleted item's card is already gone — focus() on it just no-ops.
+    useFocusReturn();
 
     const handleConfirm = async () => {
         if (inFlightRef.current) return;
@@ -33,7 +37,9 @@ export default function DeleteConfirmModal({ type, name, count = 1, onConfirm, o
         : <>Are you sure you want to delete <span className="text-white font-medium">"{name}"</span>?</>;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <div
+            onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <div className="glass-card w-full max-w-sm p-6 animate-slide-up">
                 <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-semibold flex items-center gap-2 text-red-400">
