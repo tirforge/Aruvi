@@ -4,6 +4,7 @@ JWT authentication utilities.
 
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+import logging
 import secrets
 import time
 
@@ -17,12 +18,14 @@ from .config import get_settings
 from .database import get_db
 from .models import User
 
+logger = logging.getLogger(__name__)
+
 
 def _utcnow():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-# telegram_id → monotonic time of last last_active DB write (throttle)
+# user.id → monotonic time of last last_active DB write (throttle)
 _last_active_touch: dict[int, float] = {}
 
 settings = get_settings()
@@ -102,7 +105,12 @@ def verify_token(token: str, token_type: str = "access") -> Optional[int]:
         return None
 
     sub = payload.get("sub")
-    return int(sub) if sub is not None else None
+    if sub is None:
+        return None
+    try:
+        return int(sub)
+    except (TypeError, ValueError):
+        return None
 
 
 async def get_current_user_opt(
@@ -209,5 +217,6 @@ async def get_current_user(
             await db.commit()
         except Exception:
             await db.rollback()
+            logger.debug("last_active touch failed for user %s", user.id)
 
     return user

@@ -280,6 +280,10 @@ async def batch_delete_files(
     current_user: User = Depends(get_current_user),
 ):
     """Delete multiple files."""
+    if len(file_ids) > 100:
+        raise HTTPException(status_code=413, detail="Too many files (max 100)")
+    if not file_ids:
+        return {"message": "No files found to delete"}
     # Fetch all files
     result = await db.execute(
         select(File)

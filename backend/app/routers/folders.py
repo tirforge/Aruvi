@@ -164,13 +164,21 @@ async def create_folder(
             raise HTTPException(status_code=404, detail="Parent folder not found")
 
     # Check for duplicate name in same parent
-    existing = await db.execute(
-        select(Folder).where(
+    # NOTE: `== None` compiles to `= NULL` (never true) — root-level
+    # duplicates would slip through. Use is_(None) for the NULL case.
+    if folder_data.parent_id is None:
+        dup_stmt = select(Folder).where(
+            Folder.user_id == current_user.id,
+            Folder.parent_id.is_(None),
+            Folder.name == folder_data.name,
+        )
+    else:
+        dup_stmt = select(Folder).where(
             Folder.user_id == current_user.id,
             Folder.parent_id == folder_data.parent_id,
             Folder.name == folder_data.name,
         )
-    )
+    existing = await db.execute(dup_stmt)
     if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=400, detail="Folder with this name already exists"
@@ -382,6 +390,8 @@ async def batch_delete_folders(
     current_user: User = Depends(get_current_user),
 ):
     """Delete multiple folders."""
+    if len(folder_ids) > 100:
+        raise HTTPException(status_code=413, detail="Too many folders (max 100)")
     # Fetch all folders
     result = await db.execute(
         select(Folder).where(
@@ -464,6 +474,9 @@ async def batch_move_folders(
     """Move multiple folders to another folder."""
     folder_ids = move_data.ids
     target_id = move_data.folder_id
+
+    if not folder_ids:
+        raise HTTPException(status_code=400, detail="No folders specified")
 
     if target_id == 0:
         target_id = None

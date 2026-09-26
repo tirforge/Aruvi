@@ -9,7 +9,10 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-_libc = ctypes.CDLL("libc.so.6")
+try:
+    _libc = ctypes.CDLL("libc.so.6")
+except OSError:
+    _libc = None
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -74,12 +77,14 @@ async def lifespan(app: FastAPI):
 
     oom_task.cancel()
     cleanup_task.cancel()
-    startup_task.cancel()
+    if startup_task is not None and hasattr(startup_task, "cancel"):
+        startup_task.cancel()
     disk_sweep_task.cancel()
     try:
         await oom_task
         await cleanup_task
-        await startup_task
+        if startup_task is not None and hasattr(startup_task, "cancel"):
+            await startup_task
         await disk_sweep_task
     except asyncio.CancelledError:
         pass
@@ -111,7 +116,7 @@ async def _cleanup_expired_codes():
         except asyncio.CancelledError:
             raise
         except Exception:
-            pass
+            logger.warning("cleanup expired codes failed", exc_info=True)
 
 
 async def _oom_guard_loop():
@@ -119,7 +124,11 @@ async def _oom_guard_loop():
 
     def _gc_and_trim():
         gc.collect()
-        _libc.malloc_trim(0)
+        if _libc is not None:
+            try:
+                _libc.malloc_trim(0)
+            except Exception:
+                pass
 
     while True:
         try:
@@ -131,7 +140,7 @@ async def _oom_guard_loop():
         except asyncio.CancelledError:
             raise
         except Exception:
-            pass
+            logger.warning("oom guard loop failed", exc_info=True)
 
 
 async def _disk_cache_sweep_loop():
@@ -146,7 +155,7 @@ async def _disk_cache_sweep_loop():
         except asyncio.CancelledError:
             raise
         except Exception:
-            pass
+            logger.warning("disk cache sweep failed", exc_info=True)
 
 
 app = FastAPI(
@@ -375,6 +384,8 @@ async def api_clear_logs(request: Request):
 
 @app.get("/status", include_in_schema=False)
 async def status_page():
+    if not os.path.exists("app/static/status.html"):
+        return JSONResponse(status_code=404, content={"detail": "Not found"})
     return FileResponse("app/static/status.html")
 
 
@@ -399,12 +410,22 @@ async def download_page():
 @app.get("/{full_path:path}")
 async def serve_spa(request: Request, full_path: str):
     """Serve the React SPA for any non-API routes."""
-    if full_path == "api" or full_path.startswith("api/") or ".." in full_path:
+    import posixpath
+
+    if full_path == "api" or full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="Not found")
+    # Normalize encoded/dot segments and confine to app/static. The old
+    # `".." in full_path` check missed `%2e%2e`, `..%2f`, and symlinks.
+    normalized = posixpath.normpath("/" + full_path).lstrip("/")
+    if normalized.startswith("..") or "/../" in f"/{normalized}":
         raise HTTPException(status_code=404, detail="Not found")
 
     # Stats + precompressed lookups off the event loop (slow disks under
     # load would stall active streams).
-    static_file_path = f"app/static/{full_path}"
+    base_dir = os.path.realpath("app/static")
+    static_file_path = os.path.realpath(os.path.join(base_dir, normalized))
+    if os.path.commonpath([base_dir, static_file_path]) != base_dir:
+        raise HTTPException(status_code=404, detail="Not found")
     import mimetypes
 
     def _resolve():

@@ -283,8 +283,9 @@ async def upload_streaming(
 
     # ── Phase 1: Download full file to NVMe temp (pipelined byte-accurate) ──
     GDRIVE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = GDRIVE_UPLOAD_DIR / f"{msg.id}_{int(time.time())}.tmp"
+    tmp = GDRIVE_UPLOAD_DIR / f"{msg.id}_{int(time.time())}_{secrets.token_hex(4)}.tmp"
 
+    fd = None
     try:
         # Pre-allocate temp file
         with open(tmp, "wb") as f:

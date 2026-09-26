@@ -55,6 +55,7 @@ def _log_exceptions(coro):
 
 def format_size(size_bytes: int) -> str:
     """Format bytes to human readable size."""
+    size_bytes = size_bytes or 0
     for unit in ["B", "KB", "MB", "GB"]:
         if size_bytes < 1024:
             return f"{size_bytes:.1f} {unit}"

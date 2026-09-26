@@ -13,7 +13,10 @@ import os
 import tempfile
 import threading
 import time
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 CACHE_DIR = Path(os.environ.get("DISK_CACHE_DIR", "./data/vcache"))
 DISK_CACHE_TTL = int(os.environ.get("DISK_CACHE_TTL", "1800"))  # 30 minutes
@@ -168,7 +171,11 @@ class DiskChunkCache:
                     os.unlink(tmp)
                 except OSError:
                     pass
-        except OSError:
+        except OSError as e:
+            import errno
+
+            if e.errno == errno.ENOSPC:
+                logger.warning("disk cache put failed: no space left on device")
             pass
         self.touch(chat_id, message_id)
 
@@ -182,7 +189,11 @@ class DiskChunkCache:
         now = time.time()
         total = 0
         entries: list[tuple[float, Path, int]] = []
-        for d in self.cache_dir.iterdir():
+        try:
+            top_level = list(self.cache_dir.iterdir())
+        except OSError:
+            return 0
+        for d in top_level:
             if not d.is_dir():
                 continue
             key = _parse_key(d.name)
@@ -241,7 +252,11 @@ class DiskChunkCache:
         # Recompute totals now that per-video caps may have shrunk dirs.
         entries = []
         total = 0
-        for d in self.cache_dir.iterdir():
+        try:
+            top_level = list(self.cache_dir.iterdir())
+        except OSError:
+            return 0
+        for d in top_level:
             if not d.is_dir():
                 continue
             key = _parse_key(d.name)
@@ -272,7 +287,11 @@ class DiskChunkCache:
 
     @staticmethod
     def _remove_dir(d: Path):
-        for f in d.iterdir():
+        try:
+            children = list(d.iterdir())
+        except OSError:
+            return
+        for f in children:
             try:
                 f.unlink()
             except OSError:

@@ -107,7 +107,7 @@ def get_cpu() -> float:
                 du = usage - pu
                 _prev_cpu = (usage, now)
                 if dt > 0:
-                    return round(du / 1_000_000 / dt * 100 / cores, 1)
+                    return round(max(0.0, du) / 1_000_000 / dt * 100 / cores, 1)
                 return 0.0
             _prev_cpu = (usage, now)
             return 0.0
@@ -119,10 +119,17 @@ def _parse_mem_env(val: str) -> int:
     val = val.strip().upper()
     for suffix in ["GIB", "GI", "GB", "G", "MIB", "MI", "MB", "M"]:
         if val.endswith(suffix):
-            return int(
-                float(val[: -len(suffix)]) * (1024**3 if suffix[0] == "G" else 1024**2)
-            )
-    return int(val)
+            try:
+                return int(
+                    float(val[: -len(suffix)])
+                    * (1024**3 if suffix[0] == "G" else 1024**2)
+                )
+            except ValueError:
+                break
+    try:
+        return int(val)
+    except ValueError:
+        return 16 * 1024**3
 
 
 def _cgroup_memory_max() -> int | None:
@@ -344,8 +351,8 @@ def get_net() -> dict:
                 pt, pr, pt_ = _prev_net
                 dt = now - pt
                 if dt > 0:
-                    rx_mbps = round((rx - pr) * 8 / dt / 1024 / 1024, 1)
-                    tx_mbps = round((tx - pt_) * 8 / dt / 1024 / 1024, 1)
+                    rx_mbps = round(max(0, rx - pr) * 8 / dt / 1024 / 1024, 1)
+                    tx_mbps = round(max(0, tx - pt_) * 8 / dt / 1024 / 1024, 1)
             _prev_net = (now, rx, tx)
             return {"rx_mbps": rx_mbps, "tx_mbps": tx_mbps}
         except Exception:

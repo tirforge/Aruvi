@@ -80,7 +80,8 @@ class CompressibleGZipMiddleware:
                         headers = [
                             (k, v)
                             for k, v in start.get("headers", [])
-                            if k.lower() != b"content-length"
+                            if k.lower()
+                            not in (b"content-length", b"etag")
                         ]
                         headers += [
                             (b"content-length", str(len(compressed)).encode()),

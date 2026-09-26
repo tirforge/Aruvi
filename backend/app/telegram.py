@@ -193,7 +193,7 @@ async def start_one_client(i, c):
 async def start_all_clients():
     logger.info("Starting %d Telegram client(s)...", len(clients))
     tasks = [start_one_client(i, c) for i, c in enumerate(clients)]
-    await asyncio.gather(*tasks)
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def stop_one_client(c):
@@ -358,18 +358,21 @@ async def _finish_startup():
             if not c.is_connected:
                 diag_log(f"Client {i}: skipped channel check (not connected)")
                 continue
+            me = None
             try:
                 me = await c.get_me()
-                msg = await c.get_messages(channel_id, 1)
+                msg = await asyncio.wait_for(
+                    c.get_messages(channel_id, 1), timeout=15
+                )
                 if msg:
-                    diag_log(f"Client {i} (@{me.username}): channel access OK")
+                    diag_log(f"Client {i} (@{getattr(me, 'username', '?')}): channel access OK")
                 else:
                     diag_log(
-                        f"Client {i} (@{me.username}): channel returned empty — add bot as admin"
+                        f"Client {i} (@{getattr(me, 'username', '?')}): channel returned empty — add bot as admin"
                     )
             except Exception as e:
                 diag_log(
-                    f"Client {i} (@{me.username}): CHANNEL_INVALID — add this bot as admin to channel {channel_id}"
+                    f"Client {i} (@{getattr(me, 'username', '?')}): CHANNEL_INVALID — add this bot as admin to channel {channel_id}"
                 )
                 diag_log(
                     f"  Bot token starts with: {getattr(c, 'bot_token', '?')[:8]}..."
@@ -641,9 +644,12 @@ async def get_message_from_channel(message_id: int) -> Message:
         ts, msg = _msg_cache[key]
         if now - ts < MSG_CACHE_TTL:
             return msg
-    msg = await tg_client.get_messages(
-        settings.telegram_storage_channel_id,
-        message_id,
+    msg = await asyncio.wait_for(
+        tg_client.get_messages(
+            settings.telegram_storage_channel_id,
+            message_id,
+        ),
+        timeout=15,
     )
     # Don't cache empty/missing messages — a transient fetch failure would
     # otherwise pin a useless (or wrong) result for the full TTL hour.

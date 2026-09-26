@@ -206,7 +206,10 @@ async def _os_search(
             continue
         file_id = files[0].get("file_id")
         release = attrs.get("release") or attrs.get("slug") or f"subtitle {sub_id}"
-        score = int(attrs.get("download_count") or 0)
+        try:
+            score = int(attrs.get("download_count") or 0)
+        except (TypeError, ValueError):
+            score = 0
         out.append(
             {
                 "provider": "opensubtitlescom",
@@ -251,7 +254,13 @@ async def _os_download(sub_id: str, file_id: int | None) -> tuple[str, str]:
                 raise HTTPException(
                     status_code=502, detail="OpenSubtitles returned no download link"
                 )
-            content = (await client.get(link, headers=_os_headers())).content
+            dl_resp = await client.get(link, headers=_os_headers())
+            dl_resp.raise_for_status()
+            content = dl_resp.content
+            if len(content) > 5 * 1024 * 1024:
+                raise HTTPException(
+                    status_code=502, detail="Subtitle file too large"
+                )
     except HTTPException:
         raise
     except Exception as exc:

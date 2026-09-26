@@ -4,8 +4,6 @@ from datetime import datetime
 
 router = APIRouter()
 
-YEAR = datetime.now().year
-
 STYLE = """\
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -76,7 +74,7 @@ def page(title, content, active):
         logo=LOGO,
         nav=_nav(active),
         content=content,
-        year=YEAR,
+        year=datetime.now().year,
     )
 
 

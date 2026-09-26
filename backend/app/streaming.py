@@ -15,7 +15,10 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import AsyncGenerator
 from contextlib import asynccontextmanager
 
-_libc = ctypes.CDLL("libc.so.6")
+try:
+    _libc = ctypes.CDLL("libc.so.6")
+except OSError:
+    _libc = None
 
 
 class CappedSemaphore(asyncio.Semaphore):
@@ -157,7 +160,8 @@ class CacheManager:
     def remove(self, chat_id: int, message_id: int):
         key = (chat_id, message_id)
         if key in self._caches:
-            self._caches.pop(key).clear()
+            return self._caches.pop(key).clear()
+        return 0
 
     def clear_all(self, exclude_keys: set[tuple[int, int]] | None = None) -> int:
         total = 0
@@ -259,7 +263,10 @@ def _do_restart():
 def _schedule_restart(delay: float = 900.0):
     global _pending_restart
     _cancel_restart()
-    loop = asyncio.get_running_loop()
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
     _pending_restart = loop.call_later(delay, _do_restart)
 
 
@@ -1945,7 +1952,11 @@ async def parallel_stream_generator(
             # growth of _prefetch_size across distinct movies streamed this boot.
             _prefetch_size.pop((chat_id, message_id), None)
         gced = gc.collect()
-        _libc.malloc_trim(0)
+        if _libc is not None:
+            try:
+                _libc.malloc_trim(0)
+            except Exception:
+                pass
         if gced > 10000:
             logger.info("Stream cleanup: gc %d objs, malloc_trim", gced)
         # Keep cache alive for CACHE_TTL (30min) — resume after network drop

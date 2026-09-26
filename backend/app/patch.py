@@ -246,6 +246,11 @@ async def resolve_listener(
         if not await entry["filters"](client, update):
             update.continue_propagation()
             return
+    if entry["future"].done():  # type: ignore
+        # Timeout/cancel won the race after the queue[0] check above —
+        # set_result would raise InvalidStateError and kill dispatch.
+        update.continue_propagation()
+        return
     entry["future"].set_result(update)  # type: ignore
     update.stop_propagation()
 

@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
 from fastapi.responses import StreamingResponse, HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import defer
 
 from ..database import get_db
 from ..models import File, User
@@ -277,7 +278,9 @@ async def stream_file_head(
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     result = await db.execute(
-        select(File).where(File.id == file_id, File.user_id == current_user.id)
+        select(File)
+        .where(File.id == file_id, File.user_id == current_user.id)
+        .options(defer(File.thumbnail_data))
     )
     file = result.scalar_one_or_none()
     if not file:
@@ -331,7 +334,9 @@ async def stream_file(
         raise HTTPException(status_code=401, detail="Not authenticated")
     # Get file from database
     result = await db.execute(
-        select(File).where(File.id == file_id, File.user_id == current_user.id)
+        select(File)
+        .where(File.id == file_id, File.user_id == current_user.id)
+        .options(defer(File.thumbnail_data))
     )
     file = result.scalar_one_or_none()
 
@@ -379,7 +384,7 @@ async def stream_file(
         return Response(status_code=200, content=b"", headers=headers)
 
     # Validate range
-    if (until_bytes > file_size) or (from_bytes < 0) or (from_bytes > until_bytes):
+    if (until_bytes >= file_size) or (from_bytes < 0) or (from_bytes > until_bytes):
         return Response(
             status_code=416,
             content="416: Range not satisfiable",
@@ -932,7 +937,7 @@ async def stream_for_cast(
         raise HTTPException(status_code=404, detail="Message not found in channel")
 
     is_mkv = (
-        file.file_name.lower().endswith(".mkv")
+        (file.file_name or "").lower().endswith(".mkv")
         or (file.mime_type or "").lower() == "video/x-matroska"
     )
     # Non-MKV without audio selection: serve as MP4 passthrough (Shaka fMP4)
@@ -942,7 +947,7 @@ async def stream_for_cast(
         mime_type = "video/mp4"
         from urllib.parse import quote
 
-        encoded_filename = quote(file.file_name.rsplit(".", 1)[0] + ".mp4")
+        encoded_filename = quote((file.file_name or "video").rsplit(".", 1)[0] + ".mp4")
         headers = {
             "Content-Type": mime_type,
             "Content-Disposition": f"inline; filename*=utf-8''{encoded_filename}",
@@ -971,7 +976,7 @@ async def stream_for_cast(
 
     from urllib.parse import quote
 
-    encoded_filename = quote(file.file_name.rsplit(".", 1)[0] + ".mp4")
+    encoded_filename = quote((file.file_name or "video").rsplit(".", 1)[0] + ".mp4")
 
     # Probe once (header only) so we can (a) map the requested audio to the exact
     # ffmpeg stream and (b) only map subtitle tracks that MP4 can actually carry.
@@ -988,7 +993,7 @@ async def stream_for_cast(
     range_header = request.headers.get("Range")
     seek_time = None
     start_byte = 0
-    if range_header and probe and probe["duration"]:
+    if range_header and probe and probe["duration"] and file.file_size:
         m = re.match(r"bytes=(\d+)-", range_header)
         if m:
             start_byte = int(m.group(1))
@@ -1004,10 +1009,7 @@ async def stream_for_cast(
         "Accept-Ranges": "bytes",
         "X-Accel-Buffering": "no",
     }
-    if seek_time is not None:
-        headers["Content-Range"] = (
-            f"bytes {start_byte}-{file.file_size - 1}/{file.file_size}"
-        )
+    # Remuxed fMP4 length is unknown — don't advertise source byte counts.
 
     spawn_background(prefetch_first_batch_safe(tg_client, message, 0))
 
@@ -1052,6 +1054,8 @@ async def stream_for_cast(
         feed_task = asyncio.create_task(feed_stdin())
         try:
             while True:
+                if proc.stdout is None:
+                    break
                 out = await proc.stdout.read(64 * 1024)
                 if not out:
                     break
@@ -1059,14 +1063,31 @@ async def stream_for_cast(
             await feed_task
             rc = await proc.wait()
             if rc != 0:
-                err = (await proc.stderr.read()).decode(errors="ignore")[:2000]
+                try:
+                    err = (await proc.stderr.read()).decode(errors="ignore")[:2000]
+                except Exception:
+                    err = ""
                 logger.warning("ffmpeg remux exited %d: %s", rc, err)
         finally:
-            feed_task.cancel()
+            if not feed_task.done():
+                feed_task.cancel()
+                try:
+                    await feed_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    pass
             try:
                 proc.terminate()
             except Exception:
                 pass
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
 
     return StreamingResponse(
         ffmpeg_remux_stream(),

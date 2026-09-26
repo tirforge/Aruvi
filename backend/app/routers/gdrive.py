@@ -79,7 +79,7 @@ def _page(
     icon_svg: str, title: str, body: str, extra: str = "", is_error: bool = False
 ) -> str:
     cls = " error" if is_error else ""
-    home = settings.web_base_url
+    home = html_escape(settings.web_base_url, quote=True)
     title = html_escape(title)
     body = html_escape(body)
     return f"""\
@@ -201,13 +201,13 @@ async def gdrive_auth_callback(request: Request):
 
     try:
         token_dict = await exchange_code(code, code_verifier)
-    except Exception as e:
+    except Exception:
         _log.exception("GDrive token exchange failed for user %s", telegram_id)
         return HTMLResponse(
             _page(
                 CROSS_SVG,
                 "Token exchange failed",
-                str(e),
+                "Could not complete the Google authorization. Please try again.",
                 '<p class="sub">Please try again.</p>',
                 is_error=True,
             ),

@@ -36,7 +36,11 @@ def _cleanup_expired() -> None:
         entry = _pending.pop(k, None)
         if entry:
             try:
-                asyncio.get_event_loop().create_task(entry["client"].disconnect())
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    continue
+                loop.create_task(entry["client"].disconnect())
             except Exception:
                 pass
 
@@ -81,7 +85,7 @@ async def setup_send_code(request: Request, body: SendCodeIn):
     _cleanup_expired()
     from pyrogram import Client  # deferred: heavy import only when actually used
 
-    token = uuid.uuid4().hex[:16]
+    token = uuid.uuid4().hex
     client = Client(
         f"setup_{token}",
         api_id=body.api_id,
@@ -91,12 +95,12 @@ async def setup_send_code(request: Request, body: SendCodeIn):
     try:
         await client.connect()
         phone_code_hash = await client.send_code(body.phone.strip())
-    except Exception as e:
+    except Exception:
         try:
             await client.disconnect()
         except Exception:
             pass
-        raise HTTPException(400, f"Telegram rejected the request: {e}")
+        raise HTTPException(400, "Telegram rejected the request")
 
     _pending[token] = {
         "client": client,
@@ -124,10 +128,10 @@ async def setup_sign_in(request: Request, body: SignInIn):
             raise HTTPException(401, "need_password")
         try:
             await client.check_password(body.password)
-        except Exception as e:
-            raise HTTPException(403, f"Wrong 2FA password: {e}")
-    except Exception as e:
-        raise HTTPException(400, f"Sign-in failed: {e}")
+        except Exception:
+            raise HTTPException(403, "Wrong 2FA password")
+    except Exception:
+        raise HTTPException(400, "Sign-in failed")
 
     session_string = await client.export_session_string()
     try:
