@@ -8,18 +8,29 @@ name: opencode-fullscan
 # Heavy on xhigh: lower `variant` or narrow scope if runs get slow/pricey.
 on:
   workflow_dispatch:
+    inputs:
+      area:
+        description: "Area to scan (all = backend+frontend+android)"
+        type: choice
+        default: all
+        options: [all, backend, frontend, android]
   schedule:
     # Sundays 3am UTC
     - cron: "0 3 * * 0"
 
 jobs:
   scan:
+    # Targeted re-runs: dispatch with area=backend to retry one area.
+    # Scheduled runs always scan all (inputs.area is empty on schedule).
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.area == 'all' || inputs.area == matrix.area }}
     strategy:
       fail-fast: false
       matrix:
         area: [backend, frontend, android]
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # Backend xhigh scan once ran the full 120min and timed out (public
+    # repos allow up to 360). Give it headroom instead of false cancels.
+    timeout-minutes: 300
     permissions:
       id-token: write
       contents: write
@@ -30,7 +41,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: anomalyco/opencode/github@latest
+      - uses: anomalyco/opencode/github@545f51d26cc39a907d2867492d498d9607ea5fa4 # v1.18.32
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

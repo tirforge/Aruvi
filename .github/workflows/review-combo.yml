@@ -164,11 +164,10 @@ jobs:
           "✅ **review-combo: all clean** — opencode, Sonar, and CodeRabbit found nothing to fix."
 
       - uses: anomalyco/opencode/github@545f51d26cc39a907d2867492d498d9607ea5fa4 # v1.18.32
-        # Dependabot PRs never reach the fixer: the opencode action asserts
-        # PR-author write permissions and dependabot[bot] has none (verified
-        # in logs). Harvest + decide above still run for visibility.
+        # No continue-on-error here on purpose: a dead fixer must go red,
+        # not vanish. (The review step above keeps its continue-on-error so
+        # a dead reviewer can't block the fix pass.)
         if: steps.guard.outputs.skip == 'false' && steps.decide.outputs.dirty == 'true' && github.event.pull_request.user.login != 'dependabot[bot]'
-        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
