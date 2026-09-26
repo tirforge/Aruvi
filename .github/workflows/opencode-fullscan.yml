@@ -62,6 +62,12 @@ jobs:
               user.email="aruvi@users.noreply.github.com"`, push, and open
               a PR titled `opencode fullscan: ${{ matrix.area }} fixes`
               listing every bug found + fixed (file:line for each).
+            - Right after opening the PR, comment `@coderabbitai review`
+              on it. This repo is under 10 stars so CodeRabbit only
+              reviews on manual trigger — without this comment the
+              CodeRabbit layer of the combo never runs. (CI, CodeQL,
+              opencode-review, and Sonar all fire automatically on the
+              new PR; only CodeRabbit needs the nudge.)
             - If nothing worth fixing: do NOT open a PR. Just log a short
               "clean" summary.
             - If a fix PR for this area is already open, add to it instead
