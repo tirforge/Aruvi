@@ -19,7 +19,9 @@ jobs:
       matrix:
         area: [backend, frontend, android]
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # xhigh full-repo audit of frontend exceeds 2h (cancelled @120m on
+    # 2026-09-27); backend/android finish in ~15min. Keep headroom.
+    timeout-minutes: 300
     permissions:
       id-token: write
       contents: write
@@ -57,7 +59,7 @@ jobs:
             DELIVERY:
             - If you fixed anything: create branch
               `opencode/fullscan-${{ matrix.area }}-${{ github.run_number }}`,
-              commit with `git -c user.name="Aruvi" -c
+              commit with `git -c user.name="Aruvi bot" -c
               user.email="aruvi@users.noreply.github.com"`, push, and open
               a PR titled `opencode fullscan: ${{ matrix.area }} fixes`
               listing every bug found + fixed (file:line for each).

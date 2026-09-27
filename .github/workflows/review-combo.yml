@@ -83,6 +83,14 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: true
 
+      - name: Configure git identity (fixer commits)
+        # The opencode fixer runs plain `git commit`; without an identity
+        # configured the commit fails with "Author identity unknown"
+        # (exit 128) and fails the whole fix job (seen 2026-09-26).
+        run: |
+          git config user.name "Aruvi bot"
+          git config user.email "aruvi@users.noreply.github.com"
+
       - name: Loop guard (bot's own fix commit?)
         id: guard
         env:
