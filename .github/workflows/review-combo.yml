@@ -109,8 +109,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Guard the API call: under bash -e a single failed `gh pr checks`
+          # (API hiccup, checks not registered yet) would kill the whole
+          # step. On failure treat as "still pending" and retry next loop.
           for i in $(seq 1 60); do
-            PENDING=$(gh pr checks ${{ github.event.pull_request.number }} --json name,state --jq '[.[] | select(.name=="SonarCloud Code Analysis" or .name=="CodeQL" or (.name|startswith("analyze"))) | select(.state!="COMPLETED")] | length')
+            PENDING=$(gh pr checks ${{ github.event.pull_request.number }} --json name,state --jq '[.[] | select(.name=="SonarCloud Code Analysis" or .name=="CodeQL" or (.name|startswith("analyze"))) | select(.state!="COMPLETED")] | length' || echo '?')
             [ "$PENDING" = "0" ] && break
             sleep 20
           done
