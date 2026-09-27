@@ -15,7 +15,10 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import AsyncGenerator
 from contextlib import asynccontextmanager
 
-_libc = ctypes.CDLL("libc.so.6")
+try:
+    _libc = ctypes.CDLL("libc.so.6")
+except OSError:
+    _libc = None  # non-glibc (Alpine/macOS): skip malloc_trim below
 
 
 class CappedSemaphore(asyncio.Semaphore):
@@ -39,34 +42,41 @@ class CappedSemaphore(asyncio.Semaphore):
         super().__init__(value)
 
 
-BATCH_SIZE = int(
-    os.environ.get("STREAM_BATCH_SIZE", "10")
-)  # chunks per stream_media call
+def _env_int(name: str, default: int) -> int:
+    """Env knob that falls back to the default on garbage instead of
+    crashing the import (or yielding 0/negative, which deadlocks Semaphore)."""
+    try:
+        return int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+BATCH_SIZE = _env_int("STREAM_BATCH_SIZE", 10)  # chunks per stream_media call
 CHUNK_SIZE = 1024 * 1024  # 1 MB per chunk
 
 # Cache profile: RAM is a SMALL hot layer, the disk tier (disk_cache.py) is the
 # authoritative big cache. These env knobs retune the RAM/disk balance without
 # code edits — defaults are tuned for a ~3 GB / 2-core box where the old 350 MB
 # per-video RAM cache + 300 MB prefetch could OOM with 5 concurrent streams.
-STREAM_RAM_PER_VIDEO_MB = int(os.environ.get("STREAM_RAM_PER_VIDEO_MB", "300"))
-STREAM_INFLIGHT_MB = int(os.environ.get("STREAM_INFLIGHT_MB", "200"))
-STREAM_MAX_CONCURRENT = int(os.environ.get("STREAM_MAX_CONCURRENT", "4"))
-STREAM_PREFETCH_AHEAD_MB = int(os.environ.get("STREAM_PREFETCH_AHEAD_MB", "192"))
-STREAM_PREFETCH_CONCURRENCY = int(os.environ.get("STREAM_PREFETCH_CONCURRENCY", "3"))
+STREAM_RAM_PER_VIDEO_MB = _env_int("STREAM_RAM_PER_VIDEO_MB", 300)
+STREAM_INFLIGHT_MB = _env_int("STREAM_INFLIGHT_MB", 200)
+STREAM_MAX_CONCURRENT = _env_int("STREAM_MAX_CONCURRENT", 4)
+STREAM_PREFETCH_AHEAD_MB = _env_int("STREAM_PREFETCH_AHEAD_MB", 192)
+STREAM_PREFETCH_CONCURRENCY = _env_int("STREAM_PREFETCH_CONCURRENCY", 3)
 # Prefetch load gate: above this many concurrent live streams the ahead-prefetcher
 # stops pre-filling entirely. Below it (but >= 2) it paces gentler instead of
 # stopping, so the 2nd+ concurrent stream still gets some buffer headroom.
-STREAM_PREFETCH_MAX_STREAMS = int(os.environ.get("STREAM_PREFETCH_MAX_STREAMS", "6"))
+STREAM_PREFETCH_MAX_STREAMS = _env_int("STREAM_PREFETCH_MAX_STREAMS", 6)
 # Batch fetch budget (s): wall-clock cap for a batch's stream_media, and the
 # no-progress stall threshold inside a batch. A slow-but-steady batch is now
 # given STREAM_BATCH_TIMEOUT_S total instead of being killed mid-progress.
-STREAM_BATCH_TIMEOUT_S = int(os.environ.get("STREAM_BATCH_TIMEOUT_S", "30"))
-STREAM_BATCH_STALL_S = int(os.environ.get("STREAM_BATCH_STALL_S", "15"))
+STREAM_BATCH_TIMEOUT_S = _env_int("STREAM_BATCH_TIMEOUT_S", 30)
+STREAM_BATCH_STALL_S = _env_int("STREAM_BATCH_STALL_S", 15)
 # Separate short cap for waiting on a busy bot's transmission slot, so queueing
 # behind a slow fetch never eats into the actual fetch budget.
-STREAM_SEM_WAIT_TIMEOUT_S = int(os.environ.get("STREAM_SEM_WAIT_TIMEOUT_S", "10"))
+STREAM_SEM_WAIT_TIMEOUT_S = _env_int("STREAM_SEM_WAIT_TIMEOUT_S", 10)
 # Single-chunk emergency fetch budget (s).
-STREAM_CHUNK_TIMEOUT_S = int(os.environ.get("STREAM_CHUNK_TIMEOUT_S", "15"))
+STREAM_CHUNK_TIMEOUT_S = _env_int("STREAM_CHUNK_TIMEOUT_S", 15)
 
 
 def _get_media(message):
@@ -392,7 +402,10 @@ _prefetch_last_activity: dict[tuple[int, int], float] = {}
 _prefetch_size: dict[tuple[int, int], int] = {}
 
 
-_MEM_PRESSURE_RATIO = float(os.environ.get("STREAM_MEM_PRESSURE_RATIO", "0.6"))
+try:
+    _MEM_PRESSURE_RATIO = float(os.environ.get("STREAM_MEM_PRESSURE_RATIO", "0.6"))
+except (TypeError, ValueError):
+    _MEM_PRESSURE_RATIO = 0.6
 
 
 def _process_rss_bytes() -> int:
@@ -1945,7 +1958,8 @@ async def parallel_stream_generator(
             # growth of _prefetch_size across distinct movies streamed this boot.
             _prefetch_size.pop((chat_id, message_id), None)
         gced = gc.collect()
-        _libc.malloc_trim(0)
+        if _libc is not None:
+            _libc.malloc_trim(0)
         if gced > 10000:
             logger.info("Stream cleanup: gc %d objs, malloc_trim", gced)
         # Keep cache alive for CACHE_TTL (30min) — resume after network drop

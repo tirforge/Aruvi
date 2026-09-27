@@ -138,8 +138,23 @@ class TestAuthRotation:
         await temp_db.commit()
 
         # First refresh: should succeed and rotate
+        # (slowapi's decorator validates a real starlette Request)
+        from starlette.requests import Request as StarletteRequest
+
+        def _refresh_req():
+            return StarletteRequest(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/api/auth/refresh",
+                    "headers": [],
+                    "query_string": b"",
+                    "client": ("127.0.0.1", 12345),
+                }
+            )
+
         req = RefreshTokenRequest(refresh_token=refresh_token_str)
-        result = await refresh_token(req, db=temp_db)
+        result = await refresh_token(_refresh_req(), req, db=temp_db)
 
         assert result.access_token is not None
         assert result.refresh_token is not None
@@ -150,13 +165,13 @@ class TestAuthRotation:
         from fastapi import HTTPException
 
         with pytest.raises(HTTPException) as exc_info:
-            await refresh_token(req2, db=temp_db)
+            await refresh_token(_refresh_req(), req2, db=temp_db)
         assert exc_info.value.status_code == 401
         assert "invalidated" in str(exc_info.value.detail).lower()
 
         # New token should work
         req3 = RefreshTokenRequest(refresh_token=result.refresh_token)
-        result2 = await refresh_token(req3, db=temp_db)
+        result2 = await refresh_token(_refresh_req(), req3, db=temp_db)
         assert result2.access_token is not None
 
         # Exactly one session row exists

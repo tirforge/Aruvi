@@ -264,6 +264,10 @@ async def _os_download(sub_id: str, file_id: int | None) -> tuple[str, str]:
         raise HTTPException(
             status_code=502, detail="OpenSubtitles returned empty subtitle"
         )
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(
+            status_code=502, detail="Subtitle file too large"
+        )
     text = content.decode("utf-8", errors="replace")
     fmt = "webvtt" if text.lstrip().startswith("WEBVTT") else "srt"
     return fmt, text

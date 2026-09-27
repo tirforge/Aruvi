@@ -69,8 +69,10 @@ async def get_bot_info_endpoint():
 
 
 @router.post("/refresh", response_model=Token)
+@limiter.limit("30/minute")
 async def refresh_token(
-    request: RefreshTokenRequest,
+    request: Request,
+    refresh_request: RefreshTokenRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """Refresh access token using refresh token.
@@ -80,7 +82,7 @@ async def refresh_token(
     replayed token no longer matches any stored session, so it dies immediately
     instead of remaining valid for its full lifetime.
     """
-    payload = verify_token_payload(request.refresh_token, token_type="refresh")
+    payload = verify_token_payload(refresh_request.refresh_token, token_type="refresh")
     telegram_id = int(payload.get("sub")) if payload and payload.get("sub") else None
     token_version = payload.get("ver") if payload else None
 
@@ -99,7 +101,7 @@ async def refresh_token(
             status_code=401, detail="Refresh token has been invalidated"
         )
 
-    presented_hash = sha256(request.refresh_token.encode()).hexdigest()
+    presented_hash = sha256(refresh_request.refresh_token.encode()).hexdigest()
     session_result = await db.execute(
         select(RefreshSession).where(
             RefreshSession.token_hash == presented_hash,
@@ -354,6 +356,7 @@ async def _verify_login_code_once(
 # Keep this for backward compatibility or direct code login if needed,
 # but verify-code is the main one for TV flow now.
 @router.post("/code", response_model=AuthResponse)
+@limiter.limit("80/minute")
 async def login_with_code(
     request: Request,
     code_request: LoginCodeRequest,

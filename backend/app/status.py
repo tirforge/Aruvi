@@ -116,13 +116,17 @@ def get_cpu() -> float:
 
 
 def _parse_mem_env(val: str) -> int:
-    val = val.strip().upper()
-    for suffix in ["GIB", "GI", "GB", "G", "MIB", "MI", "MB", "M"]:
-        if val.endswith(suffix):
-            return int(
-                float(val[: -len(suffix)]) * (1024**3 if suffix[0] == "G" else 1024**2)
-            )
-    return int(val)
+    try:
+        val = val.strip().upper()
+        for suffix in ["GIB", "GI", "GB", "G", "MIB", "MI", "MB", "M"]:
+            if val.endswith(suffix):
+                return int(
+                    float(val[: -len(suffix)]) * (1024**3 if suffix[0] == "G" else 1024**2)
+                )
+        return int(val)
+    except (ValueError, AttributeError):
+        # Malformed MEMORY env (e.g. "16 GB" with a space) must not 500 /status.
+        return 16 * 1024**3
 
 
 def _cgroup_memory_max() -> int | None:
@@ -406,19 +410,19 @@ async def get_status() -> dict:
     per_video = _cache_manager.per_video
     forward = get_forward_snapshot()
 
-    # Merge forward data into per_video
-    forward_by_mid = {s["message_id"]: s for s in forward}
+    # Merge forward data into per_video (keyed by stream; message_id alone
+    # collides across chats)
+    forward_by_key = {(s["chat_id"], s["message_id"]): s for s in forward}
     for v in per_video:
-        mid = v["message_id"]
-        fwd = forward_by_mid.pop(mid, None)
+        fwd = forward_by_key.pop((v.get("chat_id"), v["message_id"]), None)
         v["forward_mb"] = fwd["prebuffer_mb"] if fwd else 0
         v["forward_max_mb"] = fwd["max_mb"] if fwd else 0
     # Active streams not yet in backward cache
-    for mid, fwd in forward_by_mid.items():
+    for (chat_id, mid), fwd in forward_by_key.items():
         per_video.append(
             {
                 "message_id": mid,
-                "chat_id": fwd["chat_id"],
+                "chat_id": chat_id,
                 "chunks": 0,
                 "size_mb": 0,
                 "max_mb": 200,

@@ -102,7 +102,10 @@ def verify_token(token: str, token_type: str = "access") -> Optional[int]:
         return None
 
     sub = payload.get("sub")
-    return int(sub) if sub is not None else None
+    try:
+        return int(sub) if sub is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 async def get_current_user_opt(

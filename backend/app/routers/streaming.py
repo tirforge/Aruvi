@@ -86,7 +86,7 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
         if "," in range_header:
             return None
         # Suffix range: bytes=-500 (last N bytes)
-        suffix_match = re.match(r"bytes=-(\d+)", range_header)
+        suffix_match = re.match(r"bytes=-(\d+)\s*$", range_header)
         if suffix_match:
             suffix_len = int(suffix_match.group(1))
             if file_size == 0:
@@ -94,7 +94,7 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
             start = max(0, file_size - suffix_len)
             return start, file_size - 1
 
-        match = re.match(r"bytes=(\d+)-(\d*)", range_header)
+        match = re.match(r"bytes=(\d+)-(\d*)\s*$", range_header)
         if not match:
             return 0, file_size - 1
 
@@ -189,9 +189,9 @@ async def streaming_debug(request: Request):
             "active_streams": forward_info,
             "active_stream_count": len(forward_info),
         }
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to build debug response")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to build debug response")
 
 
 PARALLEL_DOWNLOAD_HTML = r"""<!DOCTYPE html>
@@ -378,8 +378,8 @@ async def stream_file(
         }
         return Response(status_code=200, content=b"", headers=headers)
 
-    # Validate range
-    if (until_bytes > file_size) or (from_bytes < 0) or (from_bytes > until_bytes):
+    # Validate range (until is inclusive: max satisfiable end is file_size - 1)
+    if (until_bytes >= file_size) or (from_bytes < 0) or (from_bytes > until_bytes):
         return Response(
             status_code=416,
             content="416: Range not satisfiable",
@@ -988,7 +988,7 @@ async def stream_for_cast(
     range_header = request.headers.get("Range")
     seek_time = None
     start_byte = 0
-    if range_header and probe and probe["duration"]:
+    if range_header and probe and probe["duration"] and file.file_size:
         m = re.match(r"bytes=(\d+)-", range_header)
         if m:
             start_byte = int(m.group(1))
@@ -1065,6 +1065,7 @@ async def stream_for_cast(
             feed_task.cancel()
             try:
                 proc.terminate()
+                await asyncio.wait_for(proc.wait(), timeout=5)
             except Exception:
                 pass
 

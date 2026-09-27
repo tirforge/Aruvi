@@ -382,6 +382,8 @@ async def batch_delete_folders(
     current_user: User = Depends(get_current_user),
 ):
     """Delete multiple folders."""
+    if len(folder_ids) > 500:
+        raise HTTPException(status_code=400, detail="Too many folders (max 500)")
     # Fetch all folders
     result = await db.execute(
         select(Folder).where(

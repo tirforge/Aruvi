@@ -53,6 +53,13 @@ def _prune_nonces():
     expired = [k for k, (_, ts, _) in _nonce_store.items() if now - ts > _NONCE_TTL]
     for k in expired:
         _nonce_store.pop(k, None)
+    # Hard cap so the store can't grow without bound if expiry pruning
+    # ever falls behind; oldest nonces go first.
+    overflow = len(_nonce_store) - 5000
+    if overflow > 0:
+        oldest = sorted(_nonce_store, key=lambda k: _nonce_store[k][1])[:overflow]
+        for k in oldest:
+            _nonce_store.pop(k, None)
 
 
 def _pkce_challenge(verifier: str) -> str:
@@ -283,7 +290,7 @@ async def upload_streaming(
 
     # ── Phase 1: Download full file to NVMe temp (pipelined byte-accurate) ──
     GDRIVE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = GDRIVE_UPLOAD_DIR / f"{msg.id}_{int(time.time())}.tmp"
+    tmp = GDRIVE_UPLOAD_DIR / f"{msg.id}_{int(time.time())}_{secrets.token_hex(8)}.tmp"
 
     try:
         # Pre-allocate temp file
@@ -298,7 +305,7 @@ async def upload_streaming(
         # (and the whole service) for the duration of the task-gather. Page
         # cache + one final fsync below gives the same durability without the
         # per-chunk stall.
-        fd = os.open(tmp, os.O_RDWR | os.O_CREAT, 0o644)
+        fd = os.open(tmp, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
 
         # Split file into 1MB slots — each slot is one _byte_accurate_file_stream call
         SLOT_SIZE = 1024 * 1024

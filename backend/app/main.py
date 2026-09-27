@@ -9,7 +9,10 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-_libc = ctypes.CDLL("libc.so.6")
+try:
+    _libc = ctypes.CDLL("libc.so.6")
+except OSError:
+    _libc = None  # non-glibc (Alpine/macOS): skip malloc_trim below
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -119,7 +122,8 @@ async def _oom_guard_loop():
 
     def _gc_and_trim():
         gc.collect()
-        _libc.malloc_trim(0)
+        if _libc is not None:
+            _libc.malloc_trim(0)
 
     while True:
         try:
@@ -399,7 +403,19 @@ async def download_page():
 @app.get("/{full_path:path}")
 async def serve_spa(request: Request, full_path: str):
     """Serve the React SPA for any non-API routes."""
-    if full_path == "api" or full_path.startswith("api/") or ".." in full_path:
+    from urllib.parse import unquote
+
+    decoded = unquote(full_path)
+    if (
+        full_path == "api"
+        or full_path.startswith("api/")
+        or decoded == "api"
+        or decoded.startswith("api/")
+        or ".." in full_path
+        or ".." in decoded
+        or decoded.startswith("/")
+        or "\\" in decoded
+    ):
         raise HTTPException(status_code=404, detail="Not found")
 
     # Stats + precompressed lookups off the event loop (slow disks under
@@ -408,6 +424,12 @@ async def serve_spa(request: Request, full_path: str):
     import mimetypes
 
     def _resolve():
+        # Containment: never serve outside app/static even if the guard above
+        # missed an encoding trick.
+        base = os.path.realpath("app/static")
+        candidate = os.path.realpath(static_file_path)
+        if candidate != base and not candidate.startswith(base + os.sep):
+            return None, None
         if os.path.isfile(static_file_path):
             gz = static_file_path + ".gz"
             if os.path.isfile(gz):

@@ -14,8 +14,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-_libc = ctypes.CDLL("libc.so.6")
+try:
+    _libc = ctypes.CDLL("libc.so.6")
+except OSError:
+    _libc = None  # non-glibc (Alpine/macOS): skip malloc_trim below
 _log = logging.getLogger("run")
+
+
+def _server_port() -> int:
+    try:
+        return int(os.environ.get("SERVER_PORT", "7680"))
+    except (TypeError, ValueError):
+        _log.warning("Invalid SERVER_PORT, falling back to 7680")
+        return 7680
 
 uvs.Server.capture_signals = lambda self: contextlib.nullcontext()
 
@@ -35,7 +46,8 @@ async def _periodic_housekeeping():
 
     def _gc_and_trim():
         gc.collect()
-        _libc.malloc_trim(0)
+        if _libc is not None:
+            _libc.malloc_trim(0)
 
     while True:
         await asyncio.sleep(60)
@@ -68,7 +80,7 @@ async def _periodic_housekeeping():
 config = uvicorn.Config(
     app,
     host="0.0.0.0",
-    port=int(os.environ.get("SERVER_PORT", "7680")),
+    port=_server_port(),
     log_level="info",
     access_log=False,
 )

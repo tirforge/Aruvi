@@ -202,8 +202,8 @@ def _collect_sessions() -> list[str]:
         # 3. TELEGRAM_BOT_SESSION_STRINGS
         if not sessions and s.telegram_bot_session_strings:
             sessions.extend(s.telegram_bot_session_strings)
-    except Exception:
-        pass
+    except Exception as e:
+        _log.warning("grabber: settings session collection failed: %s", e)
     # 4. Env var fallback
     if not sessions:
         env = os.environ.get("TELEGRAM_BOT_SESSION_STRINGS", "")

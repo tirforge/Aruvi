@@ -368,12 +368,7 @@ async def _finish_startup():
                         f"Client {i} (@{me.username}): channel returned empty — add bot as admin"
                     )
             except Exception as e:
-                diag_log(
-                    f"Client {i} (@{me.username}): CHANNEL_INVALID — add this bot as admin to channel {channel_id}"
-                )
-                diag_log(
-                    f"  Bot token starts with: {getattr(c, 'bot_token', '?')[:8]}..."
-                )
+                diag_log(f"Client {i}: CHANNEL_INVALID — add this bot as admin to channel {channel_id}")
                 diag_log(f"  Error: {e}")
 
     # Retry bot 0 if it failed earlier (transient Telegram DC issue)

@@ -10,7 +10,10 @@ import ctypes
 import uvicorn
 import uvicorn.server as uvs
 
-_libc = ctypes.CDLL("libc.so.6")
+try:
+    _libc = ctypes.CDLL("libc.so.6")
+except OSError:
+    _libc = None  # non-glibc (Alpine/macOS): skip malloc_trim below
 _log = logging.getLogger("run")
 
 uvs.Server.capture_signals = lambda self: contextlib.nullcontext()
@@ -31,13 +34,12 @@ async def _periodic_housekeeping():
     while True:
         await asyncio.sleep(60)
         gc.collect()
-        _libc.malloc_trim(0)
+        if _libc is not None:
+            _libc.malloc_trim(0)
         try:
             now = time.monotonic()
-            # Active streams — never evict
-            active = {
-                (info["chat_id"], mid) for mid, info in list(_forward_streams.items())
-            }
+            # Active streams — never evict (keys are (chat_id, message_id))
+            active = set(_forward_streams.keys())
             # Recently finished streams — keep for CACHE_TTL (10min) for resume after network drop
             for key, finished_at in list(_cache_finished_at.items()):
                 if now - finished_at < CACHE_TTL:

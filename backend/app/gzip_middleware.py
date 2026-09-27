@@ -23,6 +23,32 @@ COMPRESSIBLE_TYPES = frozenset(
 )
 
 
+def _accepts_gzip(accept: bytes) -> bool:
+    """True when the client really accepts gzip.
+
+    A substring check matches ``nogzip`` and misses ``q=0`` refusals;
+    parse the comma-separated tokens instead.
+    """
+    try:
+        header = accept.decode("latin-1")
+    except ValueError:
+        return False
+    for part in header.split(","):
+        tokens = part.strip().lower().split(";")
+        if tokens[0].strip() not in ("gzip", "x-gzip"):
+            continue
+        for param in tokens[1:]:
+            param = param.strip()
+            if param.startswith("q="):
+                try:
+                    if float(param[2:]) == 0:
+                        return False
+                except ValueError:
+                    pass
+        return True
+    return False
+
+
 def _content_type(start_message) -> str:
     for k, v in start_message.get("headers", []):
         if k.lower() == b"content-type":
@@ -48,7 +74,7 @@ class CompressibleGZipMiddleware:
             if k.lower() == b"accept-encoding":
                 accept = v
                 break
-        if b"gzip" not in accept:
+        if not _accepts_gzip(accept):
             await self.app(scope, receive, send)
             return
 

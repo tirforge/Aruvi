@@ -63,11 +63,12 @@ class DiskChunkCache:
             return frozenset()
         d = self._movie_dir(chat_id, message_id)
         try:
-            return frozenset(
-                int(entry.name[:-4])
-                for entry in os.scandir(d)
-                if entry.is_file() and entry.name.endswith(".bin")
-            )
+            with os.scandir(d) as it:
+                return frozenset(
+                    int(entry.name[:-4])
+                    for entry in it
+                    if entry.is_file() and entry.name.endswith(".bin")
+                )
         except (OSError, ValueError):
             return frozenset()
 
