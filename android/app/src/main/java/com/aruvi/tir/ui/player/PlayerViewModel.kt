@@ -321,8 +321,11 @@ class PlayerViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(toggleResizeMode = next, videoScale = 1.0f)
     }
 
-    private var currentFileId: Int = savedStateHandle.get<Int>("fileId") ?: 0
-private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.takeIf { it.isNotEmpty() }
+    private var currentFileId: Int = savedStateHandle.get<Int>("fileId")?.takeIf { it > 0 } ?: 0
+    // Only http(s) direct URLs are accepted — crafted navigation args or grab
+    // results must never inject file://, content:// or javascript: into ExoPlayer.
+    private var directUrl: String? = savedStateHandle.get<String>("directUrl")
+        ?.takeIf { it.isNotEmpty() && (it.startsWith("http://") || it.startsWith("https://")) }
 
     // Cast MediaTracks (audio + subtitle) captured at cast start. Cached so that
     // reloadCastForDisplay() can re-publish them on the reloaded MediaInfo; without
@@ -972,14 +975,20 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                         null
                     }
                     var foundUri: Uri? = null
-                    val legacyFile = downloadsDir?.let { File(it, file.fileName) }
+                    val safeName = File(file.fileName).name.take(180)
+                        .replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "download" }
+                    val legacyFile = downloadsDir?.let { File(it, safeName) }
+                        ?.takeIf {
+                            try { it.canonicalPath.startsWith(downloadsDir.canonicalPath) } catch (_: Exception) { false }
+                        }
                     if (legacyFile != null && legacyFile.exists() && legacyFile.length() > 0) {
                         foundUri = Uri.fromFile(legacyFile)
                     } else if (Build.VERSION.SDK_INT >= 29) {
                         // Scoped storage: downloads are stored as MediaStore.Downloads rows,
                         // not raw files at the public Downloads path.
+                        // DISPLAY_NAME was sanitized at enqueue time — query the same form.
                         val selection = "${MediaStore.Downloads.DISPLAY_NAME} = ?"
-                        val selectionArgs = arrayOf(file.fileName)
+                        val selectionArgs = arrayOf(safeName)
                         context.contentResolver.query(
                             MediaStore.Downloads.EXTERNAL_CONTENT_URI,
                             arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.IS_PENDING),

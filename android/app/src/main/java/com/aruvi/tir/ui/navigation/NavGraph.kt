@@ -95,7 +95,7 @@ composable(Screen.Home.route) {
                 navArgument("fileId") { type = NavType.IntType }
             )
         ) { backStackEntry ->
-            val fileId = backStackEntry.arguments?.getInt("fileId") ?: return@composable
+            val fileId = backStackEntry.arguments?.getInt("fileId")?.takeIf { it > 0 } ?: return@composable
             DetailsScreen(
                 fileId = fileId,
                 onPlayClick = { id, resumePosition ->

@@ -3,7 +3,9 @@ package com.aruvi.tir.data.api
 import com.aruvi.tir.data.repository.AuthRepository
 import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
+import okhttp3.Protocol
 import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -18,11 +20,14 @@ class AuthInterceptor @Inject constructor(
     override fun intercept(chain: Interceptor.Chain): Response {
         val originalRequest = chain.request()
 
-        // Skip auth for login endpoints
+        // Skip auth for public login endpoints (exact match — contains()
+        // would also match unrelated paths such as /files/auth/refresh).
         val path = originalRequest.url.encodedPath
-        if (path.contains("/auth/generate-code") ||
-            path.contains("/auth/verify-code") ||
-            path.contains("/auth/refresh")) {
+        if (path.endsWith("/auth/generate-code") ||
+            path.endsWith("/auth/verify-code") ||
+            path.endsWith("/auth/refresh") ||
+            path.endsWith("/auth/logout") ||
+            path.endsWith("/auth/bot/info")) {
             return chain.proceed(originalRequest)
         }
 
@@ -53,10 +58,18 @@ class AuthInterceptor @Inject constructor(
                     .build()
                 response = chain.proceed(retryRequest)
             } else {
-                // Refresh failed — return a FRESH unauthenticated response.
-                // Returning the closed one would make Retrofit throw
-                // "IllegalStateException: closed" instead of a clean 401.
-                response = chain.proceed(originalRequest)
+                // Refresh failed — do NOT replay the request unauthenticated
+                // (that doubles load and yields a confusing second 401).
+                // Return a synthetic 401 built from the failed response.
+                response = failedResponse.let {
+                    Response.Builder()
+                        .request(originalRequest)
+                        .protocol(it.protocol)
+                        .code(401)
+                        .message("Unauthorized")
+                        .body("".toResponseBody(null))
+                        .build()
+                }
             }
         }
 

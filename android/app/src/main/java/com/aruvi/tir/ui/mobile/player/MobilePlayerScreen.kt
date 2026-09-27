@@ -201,6 +201,11 @@ fun MobilePlayerScreen(
                     isFocusable = false
                 }
             },
+            onRelease = { playerView ->
+                playerView.player = null
+                playerView.keepScreenOn = false
+                playerView.onPause()
+            },
             update = { playerView ->
                 playerView.player = viewModel.exoPlayer
                 // Fit/Fill/Zoom enabled on Default Receiver: stored as customData and

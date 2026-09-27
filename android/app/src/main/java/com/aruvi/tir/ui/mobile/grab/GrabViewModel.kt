@@ -101,7 +101,8 @@ fun search() {
         // server-side grab (it keeps occupying an Ivy slot, forwards to the
         // storage channel and inserts a DB row). Ignore taps while in flight.
         if (grabJob?.isActive == true) return
-        val idx = item.row * 100 + item.col + (item.msgId % 1000) * 100000
+        val msgMod = ((item.msgId % 1000) + 1000) % 1000
+        val idx = item.row * 100 + item.col + msgMod * 100000
         _state.value = _state.value.copy(grabbingIdx = idx, grabResult = null)
         grabJob = viewModelScope.launch {
             try {
@@ -136,7 +137,24 @@ fun clearGrabResult() { _state.value = _state.value.copy(grabResult = null) }
 fun clearError() { _state.value = _state.value.copy(error = null) }
 
 fun download(result: GrabSelectResponse) {
-downloader.enqueue(result.id ?: 0, result.name, result.streamUrl, "video/*")
+    val id = result.id?.takeIf { it > 0 } ?: run {
+        _state.value = _state.value.copy(error = "Cannot download: missing file id")
+        return
+    }
+    val url = result.streamUrl.trim()
+    if (!(url.startsWith("http://") || url.startsWith("https://"))) {
+        _state.value = _state.value.copy(error = "Cannot download: invalid stream URL")
+        return
+    }
+    if (result.name.isBlank()) {
+        _state.value = _state.value.copy(error = "Cannot download: missing file name")
+        return
+    }
+    try {
+        downloader.enqueue(id, result.name, url, "video/*")
+    } catch (e: Exception) {
+        _state.value = _state.value.copy(error = e.message ?: "Download failed")
+    }
 }
 
 }

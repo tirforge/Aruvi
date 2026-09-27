@@ -25,6 +25,11 @@ class DynamicBaseUrlInterceptor @Inject constructor(
         val request = chain.request()
         val base = settingsRepository.peekServerUrl().toHttpUrlOrNull()
             ?: return chain.proceed(request)
+        // Reject hostile stored values: blank host or embedded credentials
+        // would redirect API + refresh-token traffic to an attacker host.
+        if (base.host.isBlank() || base.username.isNotEmpty() || base.password.isNotEmpty()) {
+            return chain.proceed(request)
+        }
         val rewritten = request.url.newBuilder()
             .scheme(base.scheme)
             .host(base.host)

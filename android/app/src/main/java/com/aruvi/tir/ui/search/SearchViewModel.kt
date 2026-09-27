@@ -84,7 +84,8 @@ class SearchViewModel @Inject constructor(
             } else {
                 _uiState.value = _uiState.value.copy(
                     results = emptyList(),
-                    hasSearched = false
+                    hasSearched = false,
+                    isSearching = false
                 )
             }
         }
@@ -94,25 +95,30 @@ class SearchViewModel @Inject constructor(
      * Execute search.
      */
     private suspend fun search(query: String) {
-        _uiState.value = _uiState.value.copy(isSearching = true, error = null)
+        try {
+            _uiState.value = _uiState.value.copy(isSearching = true, error = null)
 
-        val result = filesRepository.searchFiles(query, limit = 50)
-        result.fold(
-            onSuccess = { files ->
-                _uiState.value = _uiState.value.copy(
-                    isSearching = false,
-                    results = files,
-                    hasSearched = true
-                )
-            },
-            onFailure = { e ->
-                _uiState.value = _uiState.value.copy(
-                    isSearching = false,
-                    error = e.message ?: "Search failed",
-                    hasSearched = true
-                )
-            }
-        )
+            val result = filesRepository.searchFiles(query, limit = 50)
+            result.fold(
+                onSuccess = { files ->
+                    _uiState.value = _uiState.value.copy(
+                        isSearching = false,
+                        results = files,
+                        hasSearched = true
+                    )
+                },
+                onFailure = { e ->
+                    _uiState.value = _uiState.value.copy(
+                        isSearching = false,
+                        error = e.message ?: "Search failed",
+                        hasSearched = true
+                    )
+                }
+            )
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            _uiState.value = _uiState.value.copy(isSearching = false)
+            throw e
+        }
     }
 
     /**
@@ -130,31 +136,42 @@ class SearchViewModel @Inject constructor(
     
     fun deleteFile(file: FileItem) {
         viewModelScope.launch {
-            filesRepository.deleteFile(file.id).onSuccess {
-                _uiState.value = _uiState.value.copy(
-                    results = _uiState.value.results.filter { it.id != file.id }
-                )
-            }
+            filesRepository.deleteFile(file.id)
+                .onSuccess {
+                    _uiState.value = _uiState.value.copy(
+                        results = _uiState.value.results.filter { it.id != file.id }
+                    )
+                }
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(error = e.message ?: "Delete failed")
+                }
         }
     }
-    
+
     fun renameFile(file: FileItem, newName: String) {
+        if (newName.isBlank()) {
+            _uiState.value = _uiState.value.copy(error = "Name cannot be empty")
+            return
+        }
         viewModelScope.launch {
-            filesRepository.updateFile(file.id, name = newName).onSuccess { updatedFile ->
-                _uiState.value = _uiState.value.copy(
-                    results = _uiState.value.results.map { if (it.id == file.id) updatedFile else it }
-                )
-            }
+            filesRepository.updateFile(file.id, name = newName)
+                .onSuccess { updatedFile ->
+                    _uiState.value = _uiState.value.copy(
+                        results = _uiState.value.results.map { if (it.id == file.id) updatedFile else it }
+                    )
+                }
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(error = e.message ?: "Rename failed")
+                }
         }
     }
-    
+
     fun moveFile(file: FileItem, targetFolderId: Int?) {
         viewModelScope.launch {
-            filesRepository.updateFile(file.id, folderId = targetFolderId).onSuccess {
-                // If moved, we can optionally remove it from search results or just keep it
-                // Usually search results are global, so keeping it is fine, but it moved folders.
-                // Let's keep it for now as moving doesn't invalidate the search match.
-            }
+            filesRepository.updateFile(file.id, folderId = targetFolderId)
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(error = e.message ?: "Move failed")
+                }
         }
     }
 

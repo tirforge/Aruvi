@@ -56,7 +56,7 @@ class DetailsViewModel @Inject constructor(
     private val fileDownloader: com.aruvi.tir.download.FileDownloader
 ) : ViewModel() {
 
-    private val fileId: Int = savedStateHandle.get<Int>("fileId") ?: 0
+    private val fileId: Int = savedStateHandle.get<Int>("fileId")?.takeIf { it > 0 } ?: -1
 
     private val _uiState = MutableStateFlow(DetailsUiState())
     val uiState: StateFlow<DetailsUiState> = _uiState.asStateFlow()
@@ -71,6 +71,10 @@ class DetailsViewModel @Inject constructor(
      * Load file details and watch progress.
      */
     fun loadFileDetails() {
+        if (fileId <= 0) {
+            _uiState.value = _uiState.value.copy(isLoading = false, error = "Invalid item")
+            return
+        }
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
 
@@ -119,13 +123,22 @@ class DetailsViewModel @Inject constructor(
      * Check if the file already exists in local Downloads folder.
      * Disk access — dispatched to IO (caller runs on Main).
      */
+    private fun sanitizeFileName(raw: String): String {
+        val base = File(raw).name.take(180).replace(Regex("[^A-Za-z0-9._-]"), "_").trim('_', '.', ' ')
+        return base.ifBlank { "download" }
+    }
+
     private fun checkLocalFile(fileName: String) {
+        val safeName = sanitizeFileName(fileName)
         viewModelScope.launch {
             val localFile = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 val downloadsDir = Environment.getExternalStoragePublicDirectory(
                     Environment.DIRECTORY_DOWNLOADS
                 )
-                File(downloadsDir, fileName).takeIf { it.exists() && it.length() > 0 }
+                val candidate = File(downloadsDir, safeName)
+                // Contain inside Downloads even if the name was hostile.
+                if (!candidate.canonicalPath.startsWith(downloadsDir.canonicalPath)) return@withContext null
+                candidate.takeIf { it.exists() && it.length() > 0 }
             }
             if (localFile != null) {
                 _uiState.value = _uiState.value.copy(
@@ -262,7 +275,16 @@ class DetailsViewModel @Inject constructor(
                                     totalBytes = task.totalBytes,
                                     downloadSpeed = task.speed,
                                     isFileLocal = task.status == DownloadStatus.COMPLETED,
-                                    localFilePath = if (task.status == DownloadStatus.COMPLETED) task.localPath else _uiState.value.localFilePath
+                                    localFilePath = if (task.status == DownloadStatus.COMPLETED) task.localPath else _uiState.value.localFilePath,
+                                    // Allow retry after terminal non-success states.
+                                    downloadStarted = when (task.status) {
+                                        DownloadStatus.FAILED, DownloadStatus.CANCELLED -> false
+                                        else -> _uiState.value.downloadStarted
+                                    },
+                                    downloadId = when (task.status) {
+                                        DownloadStatus.FAILED, DownloadStatus.CANCELLED -> null
+                                        else -> _uiState.value.downloadId
+                                    }
                                 )
                             }
                         }
@@ -286,5 +308,10 @@ class DetailsViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    override fun onCleared() {
+        downloadJob?.cancel()
+        super.onCleared()
     }
 }

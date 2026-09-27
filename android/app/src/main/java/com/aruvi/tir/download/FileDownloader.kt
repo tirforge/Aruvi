@@ -80,10 +80,23 @@ class FileDownloader(
     private val retryDelayMs = 5_000L
 
     /**
+     * Strip path components and unsafe chars from a server-provided file name
+     * so "../", "/" or absolute paths can never escape the Downloads dir.
+     */
+    private fun sanitizeFileName(raw: String): String {
+        val base = raw.substringAfterLast('/').substringAfterLast('\\').trim()
+            .take(180)
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
+            .trim('_', '.', ' ')
+        return base.ifBlank { "download.bin" }
+    }
+
+    /**
      * Enqueue a new download. Returns the download task ID.
      */
     fun enqueue(fileId: Int, fileName: String, url: String, mimeType: String? = null): Long {
         val id = nextId.getAndIncrement()
+        val safeName = sanitizeFileName(fileName)
 
         // Register the task immediately so the UI sees it; the MediaStore
         // insert (a provider round-trip) happens off the caller thread —
@@ -91,7 +104,7 @@ class FileDownloader(
         val task = DownloadTask(
             id = id,
             fileId = fileId,
-            fileName = fileName,
+            fileName = safeName,
             url = url,
             mimeType = mimeType,
             status = DownloadStatus.PENDING,
@@ -100,8 +113,18 @@ class FileDownloader(
         updateTask(task)
 
         scope.launch(Dispatchers.IO) {
-            val ready = task.copy(localPath = createDestination(fileName, mimeType))
+            val destination = try {
+                createDestination(safeName, mimeType)
+            } catch (e: Exception) {
+                updateTask(task.copy(status = DownloadStatus.FAILED, error = e.message ?: "Cannot create destination", speed = 0L))
+                return@launch
+            }
+            val ready = task.copy(localPath = destination)
             updateTask(ready)
+            // Pause() may have run before this IO block — don't resurrect it.
+            val current = _tasks.value[id]
+            if (current == null || current.status == DownloadStatus.PAUSED ||
+                current.status == DownloadStatus.CANCELLED) return@launch
             // Start foreground service to keep downloads alive in background
             try { DownloadService.start(context) } catch (_: Exception) {}
             startDownload(ready)
@@ -247,6 +270,9 @@ class FileDownloader(
      * connection keeps making progress instead of dying after a few MB.
      */
     private fun startDownload(task: DownloadTask) {
+        // Guard against double-start (double-tap Resume racing enqueue):
+        // two jobs writing the same destination corrupt the file and leak one job.
+        if (activeJobs[task.id]?.isActive == true) return
         val job = scope.launch(Dispatchers.IO) {
             try {
                 var attempt = 0
@@ -309,11 +335,19 @@ class FileDownloader(
         }
 
         try {
-            val response = okHttpClient.newCall(requestBuilder.build()).execute()
-
+            okHttpClient.newCall(requestBuilder.build()).execute().use { response ->
             if (!response.isSuccessful && response.code != 206) {
+                // 416 = range beyond EOF: the file is already fully on disk.
+                if (response.code == 416 && existing > 0) {
+                    updateTask(_tasks.value[task.id]?.copy(
+                        status = DownloadStatus.COMPLETED,
+                        downloadedBytes = existing,
+                        totalBytes = existing,
+                        speed = 0L
+                    ) ?: return false)
+                    return true
+                }
                 val retryable = response.code == 429 || response.code >= 500
-                response.close()
                 if (retryable) {
                     throw DownloadRetryableException("HTTP ${response.code}: ${response.message}")
                 }
@@ -324,7 +358,8 @@ class FileDownloader(
                 return false
             }
 
-            val body = response.body ?: run {
+            val body = response.body
+            if (body == null) {
                 updateTask(task.copy(
                     status = DownloadStatus.FAILED,
                     error = "Empty response body"
@@ -350,86 +385,99 @@ class FileDownloader(
                 totalBytes = totalBytes
             ))
 
-            // Open d/ Open destination: MediaStore row via content resolver (API 29+),
-            // otherwise the raw file. RandomAccessFile supports both paths.
-            val output: java.nio.channels.FileChannel = if (contentUri != null) {
-                val pfd = context.contentResolver.openFileDescriptor(
-                    Uri.parse(contentUri), if (startOffset > 0) "rw" else "w"
-                ) ?: return false
-                java.io.FileOutputStream(pfd.fileDescriptor).channel
-            } else {
-                val file = File(task.localPath ?: return false)
-                file.parentFile?.mkdirs()
-                val channel = RandomAccessFile(file, "rw").channel
-                // A full 200 response overwrites from the start - truncate any stale
-                // trailing bytes left from a larger partial file.
-                if (startOffset == 0L) channel.truncate(0)
-                channel
-            }
+            // Open destination: MediaStore row via content resolver (API 29+),
+            // otherwise the raw file. Both descriptors are closed via use{}.
+            var pfd: android.os.ParcelFileDescriptor? = null
+            var raf: RandomAccessFile? = null
+            try {
+                val output: java.nio.channels.FileChannel = if (contentUri != null) {
+                    pfd = context.contentResolver.openFileDescriptor(
+                        Uri.parse(contentUri), if (startOffset > 0) "rw" else "w"
+                    ) ?: return false
+                    java.io.FileOutputStream(pfd.fileDescriptor).channel
+                } else {
+                    val file = File(task.localPath ?: return false)
+                    file.parentFile?.mkdirs()
+                    raf = RandomAccessFile(file, "rw")
+                    val channel = raf.channel
+                    // A full 200 response overwrites from the start - truncate any stale
+                    // trailing bytes left from a larger partial file.
+                    if (startOffset == 0L) channel.truncate(0)
+                    channel
+                }
 
-            // Write using RandomAccessFile for seek support
-            val buffer = ByteArray(65536) // 64KB buffer for good throughput
-            var bytesWritten = startOffset
-            val inputStream = body.byteStream()
+                // Write using RandomAccessFile for seek support
+                val buffer = ByteArray(65536) // 64KB buffer for good throughput
+                var bytesWritten = startOffset
+                val inputStream = body.byteStream()
 
-            lastBytesMap[task.id] = bytesWritten
-            lastTimeMap[task.id] = System.currentTimeMillis()
-            var lastUpdateTime = System.currentTimeMillis()
+                lastBytesMap[task.id] = bytesWritten
+                lastTimeMap[task.id] = System.currentTimeMillis()
+                var lastUpdateTime = System.currentTimeMillis()
 
-            inputStream.use { stream ->
-                output.use { channel ->
-                    channel.position(startOffset)
+                inputStream.use { stream ->
+                    output.use { channel ->
+                        channel.position(startOffset)
 
-                    while (coroutineContext.isActive) {
-                        val bytesRead = stream.read(buffer)
-                        if (bytesRead == -1) break
+                        while (coroutineContext.isActive) {
+                            val bytesRead = stream.read(buffer)
+                            if (bytesRead == -1) break
 
-                        channel.write(java.nio.ByteBuffer.wrap(buffer, 0, bytesRead))
-                        bytesWritten += bytesRead
+                            channel.write(java.nio.ByteBuffer.wrap(buffer, 0, bytesRead))
+                            bytesWritten += bytesRead
 
-                        // Throttle UI updates to every 500ms to avoid excessive StateFlow emissions
-                        val now = System.currentTimeMillis()
-                        if (now - lastUpdateTime >= 500) {
-                            val lastBytes = lastBytesMap[task.id] ?: bytesWritten
-                            val lastTime = lastTimeMap[task.id] ?: now
-                            val timeDelta = (now - lastTime).coerceAtLeast(1)
-                            val speed = ((bytesWritten - lastBytes) * 1000) / timeDelta
+                            // Throttle UI updates to every 500ms to avoid excessive StateFlow emissions.
+                            // Skip if paused/cancelled mid-chunk so we never
+                            // overwrite PAUSED with a stale RUNNING update.
+                            val now = System.currentTimeMillis()
+                            if (now - lastUpdateTime >= 500) {
+                                if (!coroutineContext.isActive) break
+                                val snapshot = _tasks.value[task.id]
+                                if (snapshot == null || (snapshot.status != DownloadStatus.RUNNING &&
+                                        snapshot.status != DownloadStatus.PENDING)) break
+                                val lastBytes = lastBytesMap[task.id] ?: bytesWritten
+                                val lastTime = lastTimeMap[task.id] ?: now
+                                val timeDelta = (now - lastTime).coerceAtLeast(1)
+                                val speed = ((bytesWritten - lastBytes) * 1000) / timeDelta
 
-                            lastBytesMap[task.id] = bytesWritten
-                            lastTimeMap[task.id] = now
-                            lastUpdateTime = now
+                                lastBytesMap[task.id] = bytesWritten
+                                lastTimeMap[task.id] = now
+                                lastUpdateTime = now
 
-                            updateTask(_tasks.value[task.id]?.copy(
-                                status = DownloadStatus.RUNNING,
-                                downloadedBytes = bytesWritten,
-                                totalBytes = totalBytes,
-                                speed = speed
-                            ) ?: return false)
+                                updateTask(snapshot.copy(
+                                    status = DownloadStatus.RUNNING,
+                                    downloadedBytes = bytesWritten,
+                                    totalBytes = totalBytes,
+                                    speed = speed
+                                ))
+                            }
                         }
                     }
                 }
+
+                // Check if completed or cancelled
+                if (!coroutineContext.isActive) return false
+
+                // Publish the MediaStore entry so it shows up in the Downloads app
+                if (contentUri != null) {
+                    context.contentResolver.update(
+                        Uri.parse(contentUri),
+                        ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
+                        null, null
+                    )
+                }
+                updateTask(_tasks.value[task.id]?.copy(
+                    status = DownloadStatus.COMPLETED,
+                    downloadedBytes = bytesWritten,
+                    totalBytes = if (totalBytes > 0) totalBytes else bytesWritten,
+                    speed = 0L
+                ) ?: return false)
+                return true
+            } finally {
+                try { raf?.close() } catch (_: Exception) {}
+                try { pfd?.close() } catch (_: Exception) {}
             }
-
-            response.close()
-
-            // Check if completed or cancelled
-            if (!coroutineContext.isActive) return false
-
-            // Publish the MediaStore entry so it shows up in the Downloads app
-            if (contentUri != null) {
-                context.contentResolver.update(
-                    Uri.parse(contentUri),
-                    ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
-                    null, null
-                )
             }
-            updateTask(_tasks.value[task.id]?.copy(
-                status = DownloadStatus.COMPLETED,
-                downloadedBytes = bytesWritten,
-                totalBytes = if (totalBytes > 0) totalBytes else bytesWritten,
-                speed = 0L
-            ) ?: return false)
-            return true
         } catch (e: CancellationException) {
             throw e
         } catch (e: IOException) {

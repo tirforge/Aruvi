@@ -94,7 +94,8 @@ fun search() {
         // server-side grab (it keeps occupying an Ivy slot, forwards to the
         // storage channel and inserts a DB row). Ignore taps while in flight.
         if (grabJob?.isActive == true) return
-        val idx = item.row * 100 + item.col + (item.msgId % 1000) * 100000
+        val msgMod = ((item.msgId % 1000) + 1000) % 1000
+        val idx = item.row * 100 + item.col + msgMod * 100000
         _state.value = _state.value.copy(grabbingIdx = idx, grabResult = null)
         grabJob = viewModelScope.launch {
             try {

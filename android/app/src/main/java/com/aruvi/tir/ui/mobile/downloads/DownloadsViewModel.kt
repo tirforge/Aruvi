@@ -73,12 +73,16 @@ class DownloadsViewModel @Inject constructor(
      * Start a new download.
      */
     fun startDownload(fileId: Int, fileName: String, mimeType: String? = null) {
+        if (fileId <= 0 || fileName.isBlank()) return
         viewModelScope.launch {
             val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
+            if (serverUrl.isBlank()) return@launch
             // FileDownloader uses its own authenticated OkHttpClient from NetworkModule,
             // so we don't need the token in the URL query param here.
             val url = "$serverUrl/api/stream/$fileId"
-            fileDownloader.enqueue(fileId, fileName, url, mimeType)
+            try {
+                fileDownloader.enqueue(fileId, fileName, url, mimeType)
+            } catch (_: Exception) { }
         }
     }
 

@@ -233,6 +233,11 @@ fun PlayerScreen(
                     player = viewModel.exoPlayer
                 }
             },
+            onRelease = { playerView ->
+                playerView.player = null
+                playerView.keepScreenOn = false
+                playerView.onPause()
+            },
             update = { playerView ->
                 playerView.player = viewModel.exoPlayer
                 playerView.keepScreenOn = true

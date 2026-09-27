@@ -62,7 +62,19 @@ class DownloadService : Service() {
 
 override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     // Must call startForeground immediately
-    startForeground(SUMMARY_NOTIFICATION_ID, buildSummaryNotification("Preparing downloads..."))
+    if (Build.VERSION.SDK_INT >= 29) {
+        try {
+            startForeground(
+                SUMMARY_NOTIFICATION_ID,
+                buildSummaryNotification("Preparing downloads..."),
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } catch (_: Exception) {
+            startForeground(SUMMARY_NOTIFICATION_ID, buildSummaryNotification("Preparing downloads..."))
+        }
+    } else {
+        startForeground(SUMMARY_NOTIFICATION_ID, buildSummaryNotification("Preparing downloads..."))
+    }
 
     // Cancel previous scope and recreate to prevent coroutine leaks on restart
     serviceScope.cancel()
@@ -72,7 +84,11 @@ override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     observerJob?.cancel()
     observerJob = serviceScope.launch {
         fileDownloader.tasks.collect { tasks ->
-            updateNotifications(tasks)
+            try {
+                updateNotifications(tasks)
+            } catch (e: Exception) {
+                android.util.Log.w("DownloadService", "notification update failed", e)
+            }
         }
     }
 
@@ -80,8 +96,19 @@ override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
 }
 
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Swipe-away: stop if nothing actively downloading, else keep summary fresh.
+        val hasRunning = try {
+            fileDownloader.tasks.value.values.any {
+                it.status == DownloadStatus.RUNNING || it.status == DownloadStatus.PENDING
+            }
+        } catch (_: Exception) { false }
+        if (!hasRunning) stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
+
     private fun updateNotifications(tasks: Map<Long, DownloadTask>) {
-        val notificationManager = getSystemService(NotificationManager::class.java)
+        val notificationManager = getSystemService(NotificationManager::class.java) ?: return
 
         val activeDownloads = tasks.values.filter {
             it.status == DownloadStatus.RUNNING || it.status == DownloadStatus.PENDING

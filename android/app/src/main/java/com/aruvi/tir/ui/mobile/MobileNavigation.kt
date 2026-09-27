@@ -97,6 +97,14 @@ navArgument("directUrl") { type = NavType.StringType; nullable = true; defaultVa
 )
 ) { backStackEntry ->
 val startPosition = backStackEntry.arguments?.getLong("startPosition") ?: 0L
+// Validate nav args early: fileId/directUrl come from deep links and grab
+// results. The PlayerViewModel re-reads them via SavedStateHandle, but a
+// hostile directUrl (file://, content://) must never reach the player.
+val rawDirectUrl = backStackEntry.arguments?.getString("directUrl")
+if (rawDirectUrl != null && !(rawDirectUrl.startsWith("http://") || rawDirectUrl.startsWith("https://"))) {
+rootNavController.popBackStack()
+return@composable
+}
 MobilePlayerScreen(
 startPosition = startPosition,
 onBack = { rootNavController.popBackStack() }

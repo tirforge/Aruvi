@@ -7,6 +7,7 @@
     <application>
         <activity
             android:name=".ui.mobile.MobileMainActivity"
+            android:exported="true"
             android:theme="@style/Theme.Aruvi.Mobile">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

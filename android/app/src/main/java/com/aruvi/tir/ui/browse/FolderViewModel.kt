@@ -39,7 +39,7 @@ class FolderViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
-    private val folderId: Int = savedStateHandle.get<Int>("folderId") ?: 0
+    private val folderId: Int = savedStateHandle.get<Int>("folderId")?.takeIf { it > 0 } ?: -1
 
     private val _uiState = MutableStateFlow(FolderUiState())
     val uiState: StateFlow<FolderUiState> = _uiState.asStateFlow()
@@ -52,6 +52,10 @@ class FolderViewModel @Inject constructor(
      * Load folder contents.
      */
     fun loadFolder() {
+        if (folderId <= 0) {
+            _uiState.value = _uiState.value.copy(isLoading = false, error = "Invalid folder")
+            return
+        }
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
 
