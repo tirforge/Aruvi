@@ -42,6 +42,15 @@ jobs:
         with:
           persist-credentials: false
 
+      # Prompt-only identity (user.name passed on the commit command line)
+      # is fragile: an agent that runs plain `git commit` hits exit 128
+      # failure review-combo's fixer hit on 2026-09-26. Belt and suspenders:
+      # real config here, prompt keeps plain `git commit` below.
+      - name: Configure git identity (fixer commits)
+        run: |
+          git config user.name "Aruvi bot"
+          git config user.email "aruvi@users.noreply.github.com"
+
       # Targeted re-runs: dispatch with area=backend to scan one area only.
       # Scheduled runs and area=all scan everything (inputs.area is empty on
       # schedule, so the first clause covers it).
@@ -73,8 +82,7 @@ jobs:
             DELIVERY:
             - If you fixed anything: create branch
               `opencode/fullscan-${{ matrix.area }}-${{ github.run_number }}`,
-              commit with `git -c user.name="Aruvi bot" -c
-              user.email="aruvi@users.noreply.github.com"`, push, and open
+              commit (identity is pre-configured above), push, and open
               a PR titled `opencode fullscan: ${{ matrix.area }} fixes`
               listing every bug found + fixed (file:line for each).
             - Right after opening the PR, comment `@coderabbitai review`
