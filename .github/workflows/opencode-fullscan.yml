@@ -20,9 +20,10 @@ on:
 
 jobs:
   scan:
-    # Targeted re-runs: dispatch with area=backend to retry one area.
-    # Scheduled runs always scan all (inputs.area is empty on schedule).
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.area == 'all' || inputs.area == matrix.area }}
+    # NOTE: no job-level `if` with matrix here on purpose — `matrix` is not
+    # available in jobs.<job>.if (docs: only github/needs/vars/inputs), so a
+    # matrix comparison there silently skips everything. Area filtering lives
+    # on the steps below, where `matrix` IS available.
     strategy:
       fail-fast: false
       matrix:
@@ -41,7 +42,11 @@ jobs:
         with:
           persist-credentials: false
 
+      # Targeted re-runs: dispatch with area=backend to scan one area only.
+      # Scheduled runs and area=all scan everything (inputs.area is empty on
+      # schedule, so the first clause covers it).
       - uses: anomalyco/opencode/github@545f51d26cc39a907d2867492d498d9607ea5fa4 # v1.18.32
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.area == 'all' || inputs.area == matrix.area }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -91,7 +96,9 @@ jobs:
               of opening a duplicate.
 
       - name: Publish verdict to step summary
-        if: always()
+        # Same area gate as the scan step: a skipped area must not false-fail
+        # here for a missing report file.
+        if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.area == 'all' || inputs.area == matrix.area) }}
         run: |
           f="fullscan-${{ matrix.area }}-report.md"
           if [ -f "$f" ]; then
@@ -103,7 +110,7 @@ jobs:
           fi
 
       - name: Upload verdict artifact
-        if: always()
+        if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.area == 'all' || inputs.area == matrix.area) }}
         uses: actions/upload-artifact@v4
         with:
           name: fullscan-${{ matrix.area }}-report
