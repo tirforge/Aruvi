@@ -218,3 +218,5 @@ jobs:
             Do not open new PRs. Never touch .github/ — the job token cannot
             push workflow files (push gets remote-rejected), so any CI finding
             goes in your report comment for a human instead of a commit.
+            Never commit findings/ or any other harvest/evidence files — they
+            are workspace scratch for your analysis only, not PR content.
