@@ -33,8 +33,5 @@ reviews:
         dangerouslySetInnerHTML or unescaped URLs, focus loss after
         modal/menu close, unhandled promise rejections in event handlers,
         useEffect missing cleanup or stale-closure races.
-tools:
-  ruff:
-    config_file: backend/pyproject.toml
 chat:
   auto_reply: true

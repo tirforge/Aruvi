@@ -77,11 +77,20 @@ jobs:
       contents: write
       pull-requests: write
       issues: read
+      workflows: write
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: true
+
+      - name: Configure git identity (fixer commits)
+        # The opencode fixer runs plain `git commit`; without an identity
+        # configured the commit fails with "Author identity unknown"
+        # (exit 128) and fails the whole fix job (seen 2026-09-26).
+        run: |
+          git config user.name "Aruvi bot"
+          git config user.email "aruvi@users.noreply.github.com"
 
       - name: Loop guard (bot's own fix commit?)
         id: guard
@@ -101,8 +110,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Guard the API call: under bash -e a single failed `gh pr checks`
+          # (API hiccup, checks not registered yet) would kill the whole
+          # step. On failure treat as "still pending" and retry next loop.
           for i in $(seq 1 60); do
-            PENDING=$(gh pr checks ${{ github.event.pull_request.number }} --json name,state --jq '[.[] | select(.name=="SonarCloud Code Analysis" or .name=="CodeQL" or (.name|startswith("analyze"))) | select(.state!="COMPLETED")] | length')
+            PENDING=$(gh pr checks ${{ github.event.pull_request.number }} --json name,state --jq '[.[] | select(.name=="SonarCloud Code Analysis" or .name=="CodeQL" or (.name|startswith("analyze"))) | select(.state!="COMPLETED")] | length' || echo '?')
             [ "$PENDING" = "0" ] && break
             sleep 20
           done
@@ -164,11 +176,10 @@ jobs:
           "✅ **review-combo: all clean** — opencode, Sonar, and CodeRabbit found nothing to fix."
 
       - uses: anomalyco/opencode/github@545f51d26cc39a907d2867492d498d9607ea5fa4 # v1.18.32
-        # Dependabot PRs never reach the fixer: the opencode action asserts
-        # PR-author write permissions and dependabot[bot] has none (verified
-        # in logs). Harvest + decide above still run for visibility.
+        # No continue-on-error here on purpose: a dead fixer must go red,
+        # not vanish. (The review step above keeps its continue-on-error so
+        # a dead reviewer can't block the fix pass.)
         if: steps.guard.outputs.skip == 'false' && steps.decide.outputs.dirty == 'true' && github.event.pull_request.user.login != 'dependabot[bot]'
-        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

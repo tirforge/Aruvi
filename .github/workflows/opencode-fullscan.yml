@@ -8,18 +8,29 @@ name: opencode-fullscan
 # Heavy on xhigh: lower `variant` or narrow scope if runs get slow/pricey.
 on:
   workflow_dispatch:
+    inputs:
+      area:
+        description: "Area to scan (all = backend+frontend+android)"
+        type: choice
+        default: all
+        options: [all, backend, frontend, android]
   schedule:
     # Sundays 3am UTC
     - cron: "0 3 * * 0"
 
 jobs:
   scan:
+    # Targeted re-runs: dispatch with area=backend to retry one area.
+    # Scheduled runs always scan all (inputs.area is empty on schedule).
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.area == 'all' || inputs.area == matrix.area }}
     strategy:
       fail-fast: false
       matrix:
         area: [backend, frontend, android]
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # xhigh full-repo audit of frontend exceeds 2h (cancelled @120m on
+    # 2026-09-27); backend/android finish in ~15min. Keep headroom.
+    timeout-minutes: 300
     permissions:
       id-token: write
       contents: write
@@ -30,7 +41,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: anomalyco/opencode/github@latest
+      - uses: anomalyco/opencode/github@545f51d26cc39a907d2867492d498d9607ea5fa4 # v1.18.32
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -57,7 +68,7 @@ jobs:
             DELIVERY:
             - If you fixed anything: create branch
               `opencode/fullscan-${{ matrix.area }}-${{ github.run_number }}`,
-              commit with `git -c user.name="Aruvi" -c
+              commit with `git -c user.name="Aruvi bot" -c
               user.email="aruvi@users.noreply.github.com"`, push, and open
               a PR titled `opencode fullscan: ${{ matrix.area }} fixes`
               listing every bug found + fixed (file:line for each).

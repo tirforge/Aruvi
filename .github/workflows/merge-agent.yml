@@ -22,15 +22,22 @@ permissions:
   issues: write
   id-token: write
 
+# Serialize per PR (two runs merging the same PR race); re-triggering
+# replaces the older run. Different PRs can still merge in parallel.
+concurrency:
+  group: merge-agent-pr-${{ inputs.pr }}
+  cancel-in-progress: true
+
 jobs:
   merge:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - uses: anomalyco/opencode/github@latest
+      - uses: anomalyco/opencode/github@545f51d26cc39a907d2867492d498d9607ea5fa4 # v1.18.32
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ inputs.pr }}

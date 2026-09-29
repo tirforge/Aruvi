@@ -15,6 +15,12 @@ permissions:
   issues: write
   id-token: write
 
+# One sweep at a time: a slow xhigh run can overlap the next 6h tick and
+# two sweeps merging PRs concurrently is asking for trouble. Queue behind.
+concurrency:
+  group: merge-sweep
+  cancel-in-progress: false
+
 jobs:
   sweep:
     runs-on: ubuntu-latest
@@ -23,7 +29,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: anomalyco/opencode/github@latest
+      - uses: anomalyco/opencode/github@545f51d26cc39a907d2867492d498d9607ea5fa4 # v1.18.32
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
