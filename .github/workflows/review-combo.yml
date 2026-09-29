@@ -83,6 +83,14 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: true
 
+      - name: Configure git identity (fixer commits)
+        # The opencode fixer runs plain `git commit`; without an identity
+        # configured the commit fails with "Author identity unknown"
+        # (exit 128) and fails the whole fix job (seen 2026-09-26).
+        run: |
+          git config user.name "Aruvi bot"
+          git config user.email "aruvi@users.noreply.github.com"
+
       - name: Loop guard (bot's own fix commit?)
         id: guard
         env:
@@ -101,9 +109,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # PENDING counts Sonar/CodeQL/analyze checks not yet in a terminal
+          # state. NOTE: gh reports states like SUCCESS/IN_PROGRESS, never
+          # COMPLETED — comparing against COMPLETED would burn the full 20m
+          # every run. Under bash -e a failed `gh pr checks` must not clobber
+          # a valid zero: only empty output falls back to "still pending".
+          # After 60 tries fail loud instead of harvesting incomplete data.
           for i in $(seq 1 60); do
-            PENDING=$(gh pr checks ${{ github.event.pull_request.number }} --json name,state --jq '[.[] | select(.name=="SonarCloud Code Analysis" or .name=="CodeQL" or (.name|startswith("analyze"))) | select(.state!="COMPLETED")] | length')
+            if ! PENDING=$(gh pr checks ${{ github.event.pull_request.number }} --json name,state --jq '[.[] | select(.name=="SonarCloud Code Analysis" or .name=="CodeQL" or (.name|startswith("analyze"))) | select(.state!="SUCCESS" and .state!="FAILURE" and .state!="CANCELLED" and .state!="SKIPPED")] | length'); then
+              [ -n "$PENDING" ] || PENDING='?'
+            fi
             [ "$PENDING" = "0" ] && break
+            if [ "$i" = "60" ]; then
+              echo "::error::Checks still pending after 20m (last PENDING=$PENDING). Failing to avoid harvesting incomplete Sonar/CodeQL data."
+              exit 1
+            fi
             sleep 20
           done
 
@@ -164,11 +184,10 @@ jobs:
           "✅ **review-combo: all clean** — opencode, Sonar, and CodeRabbit found nothing to fix."
 
       - uses: anomalyco/opencode/github@545f51d26cc39a907d2867492d498d9607ea5fa4 # v1.18.32
-        # Dependabot PRs never reach the fixer: the opencode action asserts
-        # PR-author write permissions and dependabot[bot] has none (verified
-        # in logs). Harvest + decide above still run for visibility.
+        # No continue-on-error here on purpose: a dead fixer must go red,
+        # not vanish. (The review step above keeps its continue-on-error so
+        # a dead reviewer can't block the fix pass.)
         if: steps.guard.outputs.skip == 'false' && steps.decide.outputs.dirty == 'true' && github.event.pull_request.user.login != 'dependabot[bot]'
-        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -196,5 +215,8 @@ jobs:
             Commit each round separately (message must contain [combo-fix]) and push
             to the current branch. Post a short final report as a PR comment: rounds
             used, what got fixed, anything that resisted (needs human).
-            Do not open new PRs. Do not touch .github/ unless a finding is
-            about CI itself.
+            Do not open new PRs. Never touch .github/ — the job token cannot
+            push workflow files (push gets remote-rejected), so any CI finding
+            goes in your report comment for a human instead of a commit.
+            Never commit findings/ or any other harvest/evidence files — they
+            are workspace scratch for your analysis only, not PR content.

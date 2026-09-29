@@ -32,6 +32,10 @@ android/app/build/
 *.keystore
 *.apk
 
+# CI scratch — review-combo harvests bot reports here for the fixer agent;
+# workspace-only, never PR content
+/findings/
+
 # IDE / OS
 .idea/
 .vscode/

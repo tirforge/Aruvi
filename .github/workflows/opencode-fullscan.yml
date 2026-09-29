@@ -8,18 +8,30 @@ name: opencode-fullscan
 # Heavy on xhigh: lower `variant` or narrow scope if runs get slow/pricey.
 on:
   workflow_dispatch:
+    inputs:
+      area:
+        description: "Area to scan (all = backend+frontend+android)"
+        type: choice
+        default: all
+        options: [all, backend, frontend, android]
   schedule:
     # Sundays 3am UTC
     - cron: "0 3 * * 0"
 
 jobs:
   scan:
+    # NOTE: no job-level `if` with matrix here on purpose — `matrix` is not
+    # available in jobs.<job>.if (docs: only github/needs/vars/inputs), so a
+    # matrix comparison there silently skips everything. Area filtering lives
+    # on the steps below, where `matrix` IS available.
     strategy:
       fail-fast: false
       matrix:
         area: [backend, frontend, android]
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # xhigh full-repo audit of frontend exceeds 2h (cancelled @120m on
+    # 2026-09-27); backend/android finish in ~15min. Keep headroom.
+    timeout-minutes: 300
     permissions:
       id-token: write
       contents: write
@@ -30,7 +42,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: anomalyco/opencode/github@latest
+      # Prompt-only identity (user.name passed on the commit command line)
+      # is fragile: an agent that runs plain `git commit` hits exit 128
+      # failure review-combo's fixer hit on 2026-09-26. Belt and suspenders:
+      # real config here, prompt keeps plain `git commit` below.
+      - name: Configure git identity (fixer commits)
+        run: |
+          git config user.name "Aruvi bot"
+          git config user.email "aruvi@users.noreply.github.com"
+
+      # Targeted re-runs: dispatch with area=backend to scan one area only.
+      # Scheduled runs and area=all scan everything (inputs.area is empty on
+      # schedule, so the first clause covers it).
+      - uses: anomalyco/opencode/github@545f51d26cc39a907d2867492d498d9607ea5fa4 # v1.18.32
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.area == 'all' || inputs.area == matrix.area }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -57,8 +82,7 @@ jobs:
             DELIVERY:
             - If you fixed anything: create branch
               `opencode/fullscan-${{ matrix.area }}-${{ github.run_number }}`,
-              commit with `git -c user.name="Aruvi" -c
-              user.email="aruvi@users.noreply.github.com"`, push, and open
+              commit (identity is pre-configured above), push, and open
               a PR titled `opencode fullscan: ${{ matrix.area }} fixes`
               listing every bug found + fixed (file:line for each).
             - Right after opening the PR, comment `@coderabbitai review`
@@ -80,7 +104,9 @@ jobs:
               of opening a duplicate.
 
       - name: Publish verdict to step summary
-        if: always()
+        # Same area gate as the scan step: a skipped area must not false-fail
+        # here for a missing report file.
+        if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.area == 'all' || inputs.area == matrix.area) }}
         run: |
           f="fullscan-${{ matrix.area }}-report.md"
           if [ -f "$f" ]; then
@@ -92,7 +118,7 @@ jobs:
           fi
 
       - name: Upload verdict artifact
-        if: always()
+        if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.area == 'all' || inputs.area == matrix.area) }}
         uses: actions/upload-artifact@v4
         with:
           name: fullscan-${{ matrix.area }}-report
