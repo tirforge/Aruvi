@@ -24,10 +24,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Pinned upstream download script (no third-party wrapper action to rot).
       - name: actionlint
-        uses: rhysd/actionlint-github-action@v6
-        with:
-          fail_on_error: true
+        run: |
+          curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash -o /tmp/dl-actionlint.bash
+          bash /tmp/dl-actionlint.bash 1.7.12 /tmp/bin
+          /tmp/bin/actionlint -no-color
 
       - name: Policy test (known-bad CI patterns)
         run: |
