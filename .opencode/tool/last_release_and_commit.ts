@@ -29,14 +29,25 @@ export default tool({
     const tag = lastRelease.tag_name
 
     // NOTE: GitHub's target_commitish is a branch name (e.g. "main"), NOT a
-    // SHA — commit_diff needs a real SHA for its from_sha range, so resolve
-    // the tag. Falls back to target_commitish if the tag isn't fetched.
-    let sha: string = lastRelease.target_commitish
+    // SHA — never return it as commit_sha. Resolve the immutable tag commit.
+    let sha: string | null = null
+    try {
+      await Bun.$`git fetch --tags --quiet`.text()
+    } catch {
+      // offline — try local resolve anyway
+    }
     try {
       const resolved = (await Bun.$`git rev-list -n 1 ${tag}`.text()).trim()
-      if (resolved) sha = resolved
+      if (/^[0-9a-f]{40}$/i.test(resolved)) sha = resolved
     } catch {
-      // keep target_commitish fallback
+      // fall through to explicit error below
+    }
+    if (!sha) {
+      return JSON.stringify({
+        error: `could not resolve tag ${tag} to a commit (not fetched)`,
+        tag,
+        commit_sha: null,
+      })
     }
 
     return JSON.stringify({

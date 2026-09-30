@@ -12,8 +12,11 @@ Read-only command: never edit code, never push, never open PRs.
 ## Process
 
 1. **Get previous release**: Use the `last_release_and_commit` tool to retrieve
-   the most recent release tag and its commit SHA. If no release exists yet,
-   use the first commit of the repo as the start point.
+   the most recent release tag and its commit SHA. If no release exists yet
+   (tool returns an error with commit_sha null), do NOT use the root commit
+   as exclusive from_sha (a `root..TAG` range drops the initial commit).
+   List all commits reachable from $ARGUMENTS and compare its tree against the
+   empty tree (`git hash-object -t tree /dev/null`) instead.
 
 2. **Get changes**: Use the `commit_diff` tool with the previous release's
    commit SHA as `from_sha` and the git ref for version $ARGUMENTS as `to_sha`
