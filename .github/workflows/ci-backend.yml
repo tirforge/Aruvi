@@ -1,0 +1,46 @@
+name: CI Backend
+
+on:
+  push:
+    paths:
+      - "backend/**"
+      - "docker-compose.yml"
+      - "Dockerfile"
+      - ".github/workflows/ci-backend.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "docker-compose.yml"
+      - "Dockerfile"
+      - ".github/workflows/ci-backend.yml"
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest pytest-asyncio
+
+      - name: Compile check (matches AGENTS.md rule)
+        run: python -m compileall -q app
+
+      # Unit tests are informational for now (some suites need live
+      # Telegram creds); failures here don't block the PR.
+      - name: Unit tests (non-blocking)
+        run: python -m pytest tests/test_fixes.py tests/test_cast_remux.py -q
+        continue-on-error: true
+        env:
+          JWT_SECRET: ci-dummy-secret
+          DATABASE_URL: sqlite+aiosqlite:///./ci_test.db
