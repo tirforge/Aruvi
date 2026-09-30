@@ -36,3 +36,5 @@ jobs:
         run: |
           python3 -c "import yaml" 2>/dev/null || pip install -q pyyaml
           python3 .github/scripts/ci_selfcheck.py
+
+# e2e probe: review-combo trigger test (no functional change)
