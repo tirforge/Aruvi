@@ -24,6 +24,37 @@ on:
       - ".opencode/**"
       - ".github/**"
 
+  # Reusable packaging (public release): other repos call
+  #   uses: tirforge/Aruvi/.github/workflows/review-combo.yml@v1
+  # with their own Sonar project key + model. Same-org callers use
+  # `secrets: inherit`; cross-org callers map SONAR_TOKEN explicitly.
+  # Path filtering lives in the CALLER (workflow_call has no paths:).
+  workflow_call:
+    inputs:
+      model:
+        description: "opencode model for review + fix passes"
+        required: false
+        type: string
+        default: "opencode/muse-spark-1.3-contributor-free"
+      variant:
+        description: "opencode effort variant"
+        required: false
+        type: string
+        default: "xhigh"
+      sonar_project_key:
+        description: "SonarCloud component key (org_repo)"
+        required: false
+        type: string
+        default: "tirforge_Aruvi"
+      enable_coderabbit:
+        description: "Summon CodeRabbit as a third signal (needs its app)"
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      SONAR_TOKEN:
+        required: false
+
 permissions:
   contents: read
 
@@ -49,20 +80,50 @@ jobs:
         with:
           persist-credentials: false
 
+      # Trivial-PR fast path: lockfile/manifest-only diffs burn a full xhigh
+      # review for zero signal. Skip the review burn, post why, stay green.
+      # The fix job below still runs (Sonar may flag something real), and
+      # /fix re-runs the combo if anyone disagrees with the skip.
+      - name: Trivial-PR check (lockfile-only?)
+        id: trivial
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FILES=$(bash .github/scripts/gh-retry.sh pr diff ${{ github.event.pull_request.number }} --name-only)
+          if [ -z "$FILES" ]; then
+            echo "trivial=false" >> "$GITHUB_OUTPUT"
+          elif printf '%s' "$FILES" | grep -qvE '(\.lock$|lock\.json$|-lock\.json$|\.lockfile$|requirements.*\.txt$|Gemfile\.lock$|Cargo\.lock$|go\.sum$|yarn\.lock$|pnpm-lock\.yaml$|Podfile\.lock$|gradle\.lockfile$|\.versions\.json$)'; then
+            echo "trivial=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "trivial=true" >> "$GITHUB_OUTPUT"
+            echo "Lockfile-only PR — skipping review burn."
+          fi
+
       - name: Summon CodeRabbit (manual trigger, <10 stars)
+        if: steps.trivial.outputs.trivial != 'true' && inputs.enable_coderabbit != false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >
           gh pr comment ${{ github.event.pull_request.number }}
           --body "@coderabbitai review" || true
 
+      - name: Trivial skip notice
+        if: steps.trivial.outputs.trivial == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          gh pr comment ${{ github.event.pull_request.number }} --body
+          "⏭️ **review-combo: trivial skip** — lockfile/manifest-only diff, no review burn.
+          Sonar fix-pass still runs below; comment \`/fix\` if you want a full review." || true
+
       - uses: anomalyco/opencode/github@545f51d26cc39a907d2867492d498d9607ea5fa4 # v1.18.32
+        if: steps.trivial.outputs.trivial != 'true'
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          model: opencode/muse-spark-1.3-contributor-free
-          variant: xhigh
+          model: ${{ inputs.model || 'opencode/muse-spark-1.3-contributor-free' }}
+          variant: ${{ inputs.variant || 'xhigh' }}
           agent: reviewer
           use_github_token: true
           prompt: |
@@ -175,7 +236,7 @@ jobs:
           # body — without -f curl exits 0, the fallback never fires, and the
           # empty file crashes the parser below.
           curl -sf -u "$SONAR_TOKEN:" -o findings/sonar.json \
-            "https://sonarcloud.io/api/issues/search?componentKeys=tirforge_Aruvi&pullRequest=$PR&resolved=false&ps=100" \
+            "https://sonarcloud.io/api/issues/search?componentKeys=${{ inputs.sonar_project_key || 'tirforge_Aruvi' }}&pullRequest=$PR&resolved=false&ps=100" \
             || echo '{"issues":[]}' > findings/sonar.json
           python3 -c "import json; raw=open('findings/sonar.json').read().strip() or '{\"issues\":[]}'; d=json.loads(raw); print('\n---\n'.join(f\"[{i['severity']}] {i['component'].split(':')[-1]}:{i.get('line','?')} {i['rule']} — {i['message']}\" for i in d.get('issues',[])) or 'CLEAN: no open Sonar issues.')" > findings/sonar.md
           wc -c findings/*.md
@@ -241,8 +302,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          model: opencode/muse-spark-1.3-contributor-free
-          variant: xhigh
+          model: ${{ inputs.model || 'opencode/muse-spark-1.3-contributor-free' }}
+          variant: ${{ inputs.variant || 'xhigh' }}
           use_github_token: true
           prompt: |
             Fix-review pass. Read findings/opencode.md, findings/rabbit-main.md,
@@ -251,9 +312,9 @@ jobs:
             causes) and .opencode/skills/verification-before-completion/SKILL.md
             (verify each fix: build/lint/test what you touched).
             Apply every valid finding to the code. Then fix YOUR OWN fallout too —
-            bounded loop, max 3 rounds. Round 1: apply all findings. Then verify
+            bounded loop, max ${{ vars.COMBO_MAX_ROUNDS || '3' }} rounds. Round 1: apply all findings. Then verify
             (ruff check backend/, tsc --noEmit + vite build in frontend/, backend
-            compileall). Rounds 2-3 ONLY if verification surfaced NEW issues your
+            compileall). Later rounds ONLY if verification surfaced NEW issues your
             edits introduced — fix those, re-verify. Stop early when fully clean.
             Convergence gate: total error count (ruff + tsc) MUST be strictly lower
             than the previous round; otherwise STOP, revert that round, report it.
@@ -270,6 +331,10 @@ jobs:
             goes in your report comment for a human instead of a commit.
             Never commit findings/ or any other harvest/evidence files — they
             are workspace scratch for your analysis only, not PR content.
+            Spend guard: COMBO_MAX_ROUNDS (repo Variable, default 3) caps your
+            fix rounds. If the checks are still red after that, STOP pushing,
+            report what resists in your final comment, and hand to a human —
+            never burn a 4th round hoping it gets better.
 
       # A dead fixer must be VISIBLE, not just red: point the PR author at
       # the logs. failure() only (success/skip stay quiet). || true because

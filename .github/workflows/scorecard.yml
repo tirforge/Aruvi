@@ -1,0 +1,56 @@
+name: scorecard
+
+# Monthly pipeline report card, posted on ONE pinned issue so the trend is
+# visible in a single thread. Metrics are deliberately cheap (run list +
+# commit count — no artifact downloads): green rate, loop pressure
+# (runs-per-PR; high = the fixer is churning), fixes shipped.
+# Runs on the 1st, 7am UTC + on demand.
+on:
+  schedule:
+    - cron: "0 7 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: scorecard
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Build scorecard
+        id: build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LABEL=$(date -u +%Y-%m)
+          SINCE=$(date -u -d "30 days ago" +%Y-%m-%d)
+          bash .github/scripts/gh-retry.sh run list --workflow review-combo.yml \
+            --created ">=$SINCE" --limit 200 \
+            --json conclusion,headBranch,createdAt > runs.json
+          FIXES=$(git log --since="30 days ago" --oneline --grep='\[combo-fix\]' | wc -l)
+          python3 .github/scripts/scorecard.py runs.json "$FIXES" "$LABEL" > scorecard.md
+          cat scorecard.md >> "$GITHUB_STEP_SUMMARY"
+          echo "label=$LABEL" >> "$GITHUB_OUTPUT"
+
+      - name: Post to pinned scorecard issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE=$(gh issue list --label scorecard --state open --limit 1 --json number -q '.[0].number // ""')
+          if [ -z "$ISSUE" ]; then
+            gh issue create --title "📊 review-combo scorecard" --label scorecard \
+              --body-file scorecard.md
+          else
+            gh issue comment "$ISSUE" --body-file scorecard.md
+          fi

@@ -1,0 +1,24 @@
+# Example: consume review-combo as a reusable workflow (copy into YOUR repo).
+# One `uses:` line + one secret = the full review -> fix -> verify loop.
+# Path filtering lives HERE (workflow_call has no paths:), so list the dirs
+# you want reviewed. Same-org callers may use `secrets: inherit`; cross-org
+# callers map SONAR_TOKEN explicitly (inherit is same-org only).
+name: review-combo
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "src/**"
+      - "backend/**"
+
+jobs:
+  combo:
+    uses: tirforge/Aruvi/.github/workflows/review-combo.yml@v1
+    with:
+      sonar_project_key: "myorg_myrepo" # SonarCloud project key
+      enable_coderabbit: false # set true if the CodeRabbit app is installed
+      # model: "opencode/muse-spark-1.3-contributor-free"
+      # variant: "xhigh"
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

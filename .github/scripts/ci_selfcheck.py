@@ -100,7 +100,8 @@ check("timeout-minutes: 120" in sweep, "sweep: 120min cap")
 # Supply-chain: every third-party action pinned to a full commit SHA.
 # A floating @vN/@main/@latest tag is a mutable ref — a compromised tag
 # poisons all runs. SHA pins (40 hex) never match this pattern.
-FLOATING = re.compile(r"uses:.*@(v\d+|latest|main|master)([\s\"']|$)")
+FLOATING = re.compile(r"^\s*-\s*uses:\s*\S+@(v\d+|latest|main|master)([\s\"']|$)",
+                        re.MULTILINE)
 for _wf in sorted((W).glob("*.yml")):
     _txt = _wf.read_text()
     check(not FLOATING.search(_txt), f"{_wf.name}: no floating action refs")
@@ -124,6 +125,37 @@ r = subprocess.run([sys.executable, "-m", "py_compile",
                     str(_scripts / "redact-secrets.py")],
                    capture_output=True, text=True)
 check(r.returncode == 0, "redact-secrets.py: py_compile OK")
+
+# Chat-ops + hygiene + scorecard + reusable packaging + spend guard
+cmds = (W / "opencode-commands.yml").read_text()
+check("'/fix'" in cmds and "'/merge'" in cmds
+      and "'/close'" in cmds and "'/sweep'" in cmds,
+      "commands: all four chat-ops routed")
+check("OWNER" in cmds and "COLLABORATOR" in cmds
+      and "author_association" in cmds,
+      "commands: collaborator-only gate")
+check("run rerun --failed" in cmds, "commands: /fix reruns failed jobs only")
+check("trivial" in combo and "lockfile" in combo.lower(),
+      "combo: trivial-PR fast path")
+check("workflow_call:" in combo and "sonar_project_key" in combo,
+      "combo: reusable packaging (workflow_call + sonar key)")
+check("inputs.model ||" in combo and "inputs.variant ||" in combo,
+      "combo: model/variant parameterized with fallbacks")
+check("COMBO_MAX_ROUNDS" in combo, "combo: spend guard in fixer prompt")
+hy = (W / "pr-hygiene.yml").read_text()
+check("auto-close" in hy.lower() and "NEVER auto-closed" in hy,
+      "hygiene: bot-only close, humans never")
+sc = (W / "scorecard.yml").read_text()
+check("scorecard" in sc and "scorecard.py" in sc,
+      "scorecard: monthly pinned-issue report")
+for _py in ["pr-hygiene.py", "scorecard.py"]:
+    r = subprocess.run([sys.executable, "-m", "py_compile",
+                        str(_scripts / _py)],
+                       capture_output=True, text=True)
+    check(r.returncode == 0, f"{_py}: py_compile OK")
+r = subprocess.run(["bash", "-n", str(_scripts / "process_opencode_output.sh")],
+                   capture_output=True, text=True)
+check(r.returncode == 0, "process_opencode_output.sh: bash -n OK")
 for f in ["opencode-fullscan.yml", "review-combo.yml",
           "merge-agent.yml", "merge-sweep.yml", "ci-selfcheck.yml"]:
     yaml.safe_load((W / f).read_text())
