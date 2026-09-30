@@ -136,7 +136,9 @@ jobs:
             --- a/<file> / +++ b/<file> headers, or a full replacement code
             block. If the output risks truncation, end with CONTINUED and keep
             going in a follow-up comment — never silently drop findings.
-            Only comment on changed lines.
+            Only comment on changed lines. Reference code as `file:line` —
+            never write `#` followed by digits (GitHub autolinks those to
+            unrelated issues, even inside code spans).
 
   fix:
     needs: review
@@ -210,36 +212,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        # Single source of truth with .github/tests/test-harvest.sh: the
+        # same script runs in CI fixture mode, so extraction drift fails
+        # the PR instead of silently starving the fixer.
         run: |
-          mkdir -p findings
-          PR=${{ github.event.pull_request.number }}
-          # 1. opencode review (posted by github-actions bot).
-          # Fetch-then-filter with guards: --paginate can emit page arrays
-          # that break --jq object filters, and any API hiccup under bash -e
-          # kills the whole step. So: fetch raw (never fail), then filter
-          # locally with null-safe recursion that handles flat or paged shapes.
-          # gh-retry: one bounded retry on transient blips (reads only —
-          # writes are never retried blind, a 5xx can't say if it landed).
-          bash .github/scripts/gh-retry.sh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate > findings/issues-raw.json \
-            || echo '[]' > findings/issues-raw.json
-          jq -r '[.. | objects | select(.user?.login=="github-actions") | .body] | join("\n---\n")' findings/issues-raw.json > findings/opencode.md
-          # 2. CodeRabbit (issue + inline review comments)
-          jq -r '[.. | objects | select(.user?.login=="coderabbitai[bot]" or .user?.login=="coderabbitai") | .body] | join("\n---\n")' findings/issues-raw.json > findings/rabbit-main.md
-          bash .github/scripts/gh-retry.sh api "repos/${{ github.repository }}/pulls/$PR/comments" --paginate > findings/pull-raw.json \
-            || echo '[]' > findings/pull-raw.json
-          jq -r '[.. | objects | select(.user?.login=="coderabbitai[bot]" or .user?.login=="coderabbitai") | ("`"+(.path // "?")+":"+([.line,.original_line]|map(values)|join(","))+"` "+.body)] | join("\n---\n")' findings/pull-raw.json > findings/rabbit-inline.md
-          # 3. SonarCloud open issues on this PR. Download to a file first,
-          # then parse — never pipe a download straight into an interpreter.
-          # Fallback keeps the job alive if the API is unreachable; empty
-          # result parses as CLEAN below. -f matters: dependabot-triggered
-          # runs get NO secrets from GitHub, so the call 401s with an empty
-          # body — without -f curl exits 0, the fallback never fires, and the
-          # empty file crashes the parser below.
-          curl -sf -u "$SONAR_TOKEN:" -o findings/sonar.json \
-            "https://sonarcloud.io/api/issues/search?componentKeys=${{ inputs.sonar_project_key || 'tirforge_Aruvi' }}&pullRequest=$PR&resolved=false&ps=100" \
-            || echo '{"issues":[]}' > findings/sonar.json
-          python3 -c "import json; raw=open('findings/sonar.json').read().strip() or '{\"issues\":[]}'; d=json.loads(raw); print('\n---\n'.join(f\"[{i['severity']}] {i['component'].split(':')[-1]}:{i.get('line','?')} {i['rule']} — {i['message']}\" for i in d.get('issues',[])) or 'CLEAN: no open Sonar issues.')" > findings/sonar.md
-          wc -c findings/*.md
+          bash .github/scripts/harvest-findings.sh "${{ github.repository }}" "${{ github.event.pull_request.number }}" "${{ inputs.sonar_project_key || 'tirforge_Aruvi' }}" findings
 
       # Model output is untrusted text: a review that quotes a leaked secret
       # must not propagate it into the summary, artifacts, or PR comments.
@@ -247,6 +224,13 @@ jobs:
       - name: Redact secrets from harvest
         if: steps.guard.outputs.skip == 'false'
         run: python3 .github/scripts/redact-secrets.py findings/
+
+      # Fold the three raw reports into one deduped list (same file:line
+      # from 2+ sources = one entry, sources tagged). The fixer reads this
+      # first: fixing each location once, not once per signal.
+      - name: Merge harvest into deduped list
+        if: steps.guard.outputs.skip == 'false'
+        run: python3 .github/scripts/merge-findings.py findings/
 
       # gitlab-opencode port: every run leaves downloadable evidence
       # (.jsonl/.out there). Here the harvest dir IS the evidence: publish
@@ -257,7 +241,7 @@ jobs:
         run: |
           {
             echo "## review-combo harvest (PR ${{ github.event.pull_request.number }})"
-            for f in findings/opencode.md findings/rabbit-main.md findings/rabbit-inline.md findings/sonar.md; do
+            for f in findings/merged.md findings/opencode.md findings/rabbit-main.md findings/rabbit-inline.md findings/sonar.md; do
               echo "### $f ($(wc -c < "$f" 2>/dev/null || echo 0) bytes)"
               head -c 2000 "$f" 2>/dev/null || echo "(missing)"
               echo ""
@@ -306,8 +290,11 @@ jobs:
           variant: ${{ inputs.variant || 'xhigh' }}
           use_github_token: true
           prompt: |
-            Fix-review pass. Read findings/opencode.md, findings/rabbit-main.md,
-            findings/rabbit-inline.md, findings/sonar.md in the repo root.
+            Fix-review pass. Read findings/merged.md FIRST — it is the deduped
+            list across all three signals (one entry per file:line, sources
+            tagged); fix each location once, not once per signal. Consult the
+            raw files (opencode.md, rabbit-main.md, rabbit-inline.md, sonar.md)
+            only for detail a merged entry lacks.
             Follow .opencode/skills/systematic-debugging/SKILL.md (fix root
             causes) and .opencode/skills/verification-before-completion/SKILL.md
             (verify each fix: build/lint/test what you touched).
@@ -326,6 +313,9 @@ jobs:
             Commit each round separately (message must contain [combo-fix]) and push
             to the current branch. Post a short final report as a PR comment: rounds
             used, what got fixed, anything that resisted (needs human).
+            In every comment you post, reference code as `path:line` — never
+            write `#` followed by digits (GitHub autolinks those to unrelated
+            issues, even inside code spans).
             Do not open new PRs. Never touch .github/ — the job token cannot
             push workflow files (push gets remote-rejected), so any CI finding
             goes in your report comment for a human instead of a commit.

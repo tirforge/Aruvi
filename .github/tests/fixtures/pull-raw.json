@@ -1,0 +1,1 @@
+[[{"user": {"login": "coderabbitai[bot]"}, "path": "backend/app/auth.py", "line": 42, "original_line": null, "body": "Same hardcoded default — inline confirmation with exact line."}], [{"user": {"login": "somehuman"}, "path": "backend/app/auth.py", "line": 50, "original_line": null, "body": "human chatter, must be ignored."}]]

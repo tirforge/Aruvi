@@ -153,6 +153,22 @@ for _py in ["pr-hygiene.py", "scorecard.py"]:
                         str(_scripts / _py)],
                        capture_output=True, text=True)
     check(r.returncode == 0, f"{_py}: py_compile OK")
+
+# Harvest -> merge chain: one script, fixture-tested, merged-first fixer
+check("harvest-findings.sh" in combo, "combo: harvest via shared script")
+check("merge-findings.py" in combo and "merged.md" in combo,
+      "combo: deduped merged.md wired (merge + summary + fixer)")
+r = subprocess.run([sys.executable, "-m", "py_compile",
+                    str(_scripts / "merge-findings.py")],
+                   capture_output=True, text=True)
+check(r.returncode == 0, "merge-findings.py: py_compile OK")
+r = subprocess.run(["bash", "-n", str(_scripts / "harvest-findings.sh")],
+                   capture_output=True, text=True)
+check(r.returncode == 0, "harvest-findings.sh: bash -n OK")
+r = subprocess.run(["bash", str(ROOT / ".github/tests/test-harvest.sh")],
+                   capture_output=True, text=True, cwd=ROOT)
+check(r.returncode == 0 and "HARVEST-FIXTURE-PASS" in r.stdout,
+      "harvest fixture test passes (no network)")
 r = subprocess.run(["bash", "-n", str(_scripts / "process_opencode_output.sh")],
                    capture_output=True, text=True)
 check(r.returncode == 0, "process_opencode_output.sh: bash -n OK")
