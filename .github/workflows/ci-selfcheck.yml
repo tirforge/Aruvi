@@ -28,6 +28,7 @@ jobs:
       - name: actionlint
         run: |
           curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash -o /tmp/dl-actionlint.bash
+          mkdir -p /tmp/bin
           bash /tmp/dl-actionlint.bash 1.7.12 /tmp/bin
           /tmp/bin/actionlint -no-color
 
