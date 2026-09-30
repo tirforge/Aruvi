@@ -15,7 +15,7 @@ Read-only command: never edit code, never push, never open PRs.
    the most recent release tag and its commit SHA. If no release exists yet
    (tool returns an error with commit_sha null), do NOT use the root commit
    as exclusive from_sha (a `root..TAG` range drops the initial commit).
-   Run `git log --format=... $ARGUMENTS` to list all commits reachable from
+   Run `git log --format='%h %s (%an)' "$ARGUMENTS"` to list all commits reachable from
    $ARGUMENTS. Run `git diff --stat $(git hash-object -t tree /dev/null)
    $ARGUMENTS` to compare the release tree against the empty tree. Do not pass
    the empty-tree SHA to `commit_diff` (it runs `git log from..to`, which

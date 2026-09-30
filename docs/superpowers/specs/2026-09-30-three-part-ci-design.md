@@ -50,7 +50,11 @@ CodeQL gains java-kotlin. Sonar Kotlin deferred (needs Jacoco +
 - New check names: `CI Backend / backend`, `CI Frontend / frontend`,
   `CI Android / build`. Old `CI / *` names disappear with `ci.yml`.
 - Branch protection (`main`, currently requires `backend` +
-  `frontend`): replace with the three new checks. Attempt via API
+  `frontend`): do NOT require the three path-filtered checks directly
+  (a backend-only PR would leave `frontend`/`android` pending forever
+  and block merge). Add an always-running `CI Gate` job (`needs:
+  [backend, frontend, build]`, `if: always()`, passes when areas skip)
+  and require only `CI Gate`. Attempt via API
   first; if token lacks admin, owner updates in
   Settings → Branches (30-sec click path, exact contexts provided at
   implementation time).
