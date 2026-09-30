@@ -50,6 +50,20 @@ jobs:
         env:
           JWT_SECRET: ci-dummy-secret
           DATABASE_URL: sqlite+aiosqlite:///./ci_test.db
+      # Frontend lcov is gitignored too, so generate it here as well —
+      # otherwise every frontend line reads as 0% (killed the gate on PR #58).
+      - uses: actions/setup-node@v7
+        if: steps.gate.outputs.skip != 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Frontend tests with coverage (for Sonar)
+        if: steps.gate.outputs.skip != 'true'
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run test:coverage
       - uses: SonarSource/sonarqube-scan-action@v8
         if: steps.gate.outputs.skip != 'true'
         env:
