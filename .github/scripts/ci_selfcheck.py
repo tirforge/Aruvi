@@ -125,6 +125,9 @@ r = subprocess.run([sys.executable, "-m", "py_compile",
                     str(_scripts / "redact-secrets.py")],
                    capture_output=True, text=True)
 check(r.returncode == 0, "redact-secrets.py: py_compile OK")
+_gitleaks = (ROOT / ".gitleaks.toml").read_text()
+check("SONAR_TOKEN" in _gitleaks and "curl -sf -u" in _gitleaks,
+      "gitleaks: allowlist covers SONAR_TOKEN env-reference line shape")
 
 # Chat-ops + hygiene + scorecard + reusable packaging + spend guard
 cmds = (W / "opencode-commands.yml").read_text()

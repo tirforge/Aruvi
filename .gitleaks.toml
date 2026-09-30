@@ -1,0 +1,9 @@
+# Gitleaks allowlist for Aruvi.
+# The curl-auth-user rule flags `curl -u "$VAR:"` even when the credential
+# is an env-var reference, not a literal. These entries match ONLY the exact
+# line shape used for the SonarCloud API call (variable reference, never a
+# value) — a real pasted credential on the same line shape would still be
+# unusual, and any other `-u` usage is still flagged.
+[allowlist]
+description = "SONAR_TOKEN env reference in SonarCloud API calls (variable, not a value)"
+regexes = ['''curl -sf -u "\$SONAR_TOKEN:"''']
