@@ -373,3 +373,162 @@ If Step 1 fails with 403, hand the owner this exact click path: GitHub → repo 
 - [ ] **Step 3: Verify protection sees green on the next PR**
 
 After merge of the split PR, confirm on `main` that the three checks report. No commit in this task.
+
+---
+
+## Amendment A (2026-09-30): aggregator `ci.yml` + `CI Gate` (supersedes Tasks 4–6)
+
+Context: spec §3 amended (commit 83eaba4) — required path-filtered checks deadlock every single-area PR. Three split files (Tasks 1–3, commits intact in history) become job-block donors.
+
+### Task 4': Write aggregator `ci.yml`, delete split files, CodeQL matrix
+
+**Files:**
+- Create (overwrite): `.github/workflows/ci.yml` (name `CI`)
+- Delete: `.github/workflows/ci-backend.yml`, `.github/workflows/ci-frontend.yml`, `.github/workflows/ci-android.yml`
+- Modify: `.github/workflows/codeql.yml:20` (`[python, javascript-typescript]` → `[python, javascript-typescript, java-kotlin]`)
+
+**Interfaces:** job bodies copied verbatim from the donor files (backend incl. `continue-on-error` pytest + env; frontend incl. eslint/tsc/test/build; android assemble+lint both flavors).
+
+- [ ] **Step 1: Write `.github/workflows/ci.yml`**
+
+```yaml
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      android: ${{ steps.filter.outputs.android }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - "backend/**"
+              - "docker-compose.yml"
+              - "Dockerfile"
+            frontend:
+              - "frontend/**"
+            android:
+              - "android/**"
+
+  backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest pytest-asyncio
+      - name: Compile check (matches AGENTS.md rule)
+        run: python -m compileall -q app
+      - name: Unit tests (non-blocking)
+        run: python -m pytest tests/test_fixes.py tests/test_cast_remux.py -q
+        continue-on-error: true
+        env:
+          JWT_SECRET: ci-dummy-secret
+          DATABASE_URL: sqlite+aiosqlite:///./ci_test.db
+
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npx eslint . --ext ts,tsx --max-warnings 0
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Unit tests
+        run: npm test
+      - name: Build
+        run: npx vite build
+
+  build:
+    needs: changes
+    if: needs.changes.outputs.android == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+      - name: Assemble mobile + TV debug
+        run: ./gradlew :app:assembleMobileDebug :app:assembleTvDebug --no-daemon
+      - name: Lint mobile + TV debug
+        run: ./gradlew :app:lintMobileDebug :app:lintTvDebug --no-daemon
+
+  gate:
+    needs: [changes, backend, frontend, build]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate area results
+        run: |
+          for r in "${{ needs.backend.result }}" "${{ needs.frontend.result }}" "${{ needs.build.result }}"; do
+            case "$r" in success|skipped) ;; *) echo "area result: $r"; exit 1;; esac
+          done
+          echo "CI gate passed"
+```
+
+- [ ] **Step 2: Delete split files, edit CodeQL, verify**
+
+Run:
+```bash
+git rm .github/workflows/ci-backend.yml .github/workflows/ci-frontend.yml .github/workflows/ci-android.yml
+python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))" && echo PARSE-OK
+python3 .github/scripts/ci_selfcheck.py 2>&1 | tail -2
+```
+Expected: `PARSE-OK`, selfcheck ALL GREEN baseline. actionlint if installed.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add .github/workflows/ci.yml .github/workflows/codeql.yml
+git commit -m "Use aggregator ci.yml with CI Gate (fix single-area PR deadlock)"
+```
+
+### Task 5': Push and verify (gate green on full + docs-only probe)
+
+- [ ] **Step 1: Rebase onto origin + push** (rebase, never merge; user-auth push so runs are real).
+- [ ] **Step 2: Confirm `CI / gate` green on the branch PR** via `gh run list --branch fix/sonar-minor-batch`; confirm CodeQL `java-kotlin` leg green.
+- [ ] **Step 3: Docs-only probe** — empty commit touching only `docs/`, push, confirm a new `CI` run where area jobs SKIP and `gate` still passes; then `git reset --hard HEAD~1 && git push --force-with-lease`.
+
+### Task 6': Require only `CI / gate` on main
+
+Same API-then-manual flow as original Task 6, but contexts=`["CI / gate"]`.
