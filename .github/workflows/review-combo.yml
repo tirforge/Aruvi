@@ -1,5 +1,8 @@
 # review-combo: ONE pipeline — Sonar + CodeRabbit findings feed opencode,
 # opencode fixes everything and commits back to the PR. No human clicks.
+# Artifact pattern (harvest upload + step summary with per-PR prefix) and
+# .github/scripts/process_opencode_output.sh ported from
+# nagyv/gitlab-opencode (MIT, https://gitlab.com/nagyv/gitlab-opencode).
 #
 # Flow per PR event:
 #   1. review job: summon CodeRabbit + run opencode-xhigh review (uncapped,
@@ -160,6 +163,30 @@ jobs:
             || echo '{"issues":[]}' > findings/sonar.json
           python3 -c "import json; raw=open('findings/sonar.json').read().strip() or '{\"issues\":[]}'; d=json.loads(raw); print('\n---\n'.join(f\"[{i['severity']}] {i['component'].split(':')[-1]}:{i.get('line','?')} {i['rule']} — {i['message']}\" for i in d.get('issues',[])) or 'CLEAN: no open Sonar issues.')" > findings/sonar.md
           wc -c findings/*.md
+
+      # gitlab-opencode port: every run leaves downloadable evidence
+      # (.jsonl/.out there). Here the harvest dir IS the evidence: publish
+      # a short summary + upload the full dir with a per-PR prefix
+      # (job_prefix idea) so parallel PR runs never collide.
+      - name: Publish findings to step summary
+        if: always() && steps.guard.outputs.skip == 'false'
+        run: |
+          {
+            echo "## review-combo harvest (PR ${{ github.event.pull_request.number }})"
+            for f in findings/opencode.md findings/rabbit-main.md findings/rabbit-inline.md findings/sonar.md; do
+              echo "### $f ($(wc -c < "$f" 2>/dev/null || echo 0) bytes)"
+              head -c 2000 "$f" 2>/dev/null || echo "(missing)"
+              echo ""
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload findings artifact
+        if: always() && steps.guard.outputs.skip == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: combo-findings-pr-${{ github.event.pull_request.number }}-${{ github.run_number }}
+          path: findings/
+          if-no-files-found: warn
 
       - name: Decide clean vs dirty
         id: decide

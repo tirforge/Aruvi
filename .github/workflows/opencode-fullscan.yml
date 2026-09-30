@@ -121,6 +121,8 @@ jobs:
         if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.area == 'all' || inputs.area == matrix.area) }}
         uses: actions/upload-artifact@v4
         with:
-          name: fullscan-${{ matrix.area }}-report
+          # gitlab-opencode port: per-run prefix (job_prefix idea) so weekly
+          # backend/frontend/android reports never overwrite each other.
+          name: fullscan-${{ matrix.area }}-report-${{ github.run_number }}
           path: fullscan-${{ matrix.area }}-report.md
-          if-no-files-found: warn
+          if-no-files-found: error

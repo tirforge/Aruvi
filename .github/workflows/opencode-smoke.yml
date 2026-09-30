@@ -1,0 +1,87 @@
+name: opencode-smoke
+
+# Self-test for the opencode automation layer (scripts, commands, tools,
+# workflows) — the GitHub port of gitlab-opencode's `who-are-you` smoke job.
+# Their `.gitlab-ci.yml` runs `opencode run --command who-are-you` on every
+# MR touching the component and asserts 3+ output lines via after_script.
+# Here: fast hermetic checks run always (free); the live LLM ping runs only
+# on demand (workflow_dispatch + llm_ping=true) so the schedule never burns
+# xhigh budget just to say hello.
+# Runs weekly + on demand (Actions tab -> Run workflow).
+
+on:
+  workflow_dispatch:
+    inputs:
+      llm_ping:
+        description: "Run live LLM ping (costs one agent call)"
+        type: boolean
+        default: false
+  schedule:
+    # Sundays 4am UTC (after fullscan)
+    - cron: "0 4 * * 0"
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Helper script self-test
+        run: |
+          bash -n .github/scripts/process_opencode_output.sh
+          printf '{"part":{"text":"hello"},"type": "text"}\n{"part":{"text":"smoke-ok"},"type": "text"}\n' > /tmp/smoke.jsonl
+          OUT=$(./.github/scripts/process_opencode_output.sh /tmp/smoke.jsonl)
+          [ "$OUT" = "smoke-ok" ] || { echo "::error::extraction failed (got: $OUT)"; exit 1; }
+          echo "process_opencode_output.sh OK"
+
+      - name: Command + tool files present
+        run: |
+          for f in .opencode/command/write-release-notes.md .opencode/tool/commit_diff.ts .opencode/tool/last_release_and_commit.ts; do
+            [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }
+          done
+          grep -q 'gh api' .opencode/tool/last_release_and_commit.ts || { echo "::error::last_release tool not gh-based"; exit 1; }
+          if grep -q 'glab' .opencode/tool/*.ts .opencode/command/*.md; then
+            echo "::error::leftover glab reference in ported files"
+            exit 1
+          fi
+          echo "command + tools OK"
+
+      - name: Repo selfcheck (ci_selfcheck.py)
+        run: python3 .github/scripts/ci_selfcheck.py 2>&1 | tail -3
+
+      # Live ping = their who-are-you job: tiny prompt, after_script asserts
+      # usable output instead of trusting exit code alone.
+      - uses: anomalyco/opencode/github@545f51d26cc39a907d2867492d498d9607ea5fa4 # v1.18.32
+        if: inputs.llm_ping == true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          model: opencode/muse-spark-1.3-contributor-free
+          use_github_token: true
+          prompt: |
+            Smoke ping. Describe yourself in a haiku. Then write exactly that
+            haiku (3 lines, nothing else) to the file `smoke-ping.out` at repo
+            root. Read-only otherwise: no code edits, no commits, no pushes.
+
+      - name: Assert ping output
+        if: inputs.llm_ping == true
+        run: |
+          [ -f smoke-ping.out ] || { echo "::error::smoke-ping.out missing"; exit 1; }
+          LINES=$(wc -l < smoke-ping.out)
+          [ "$LINES" -ge 3 ] || { echo "::error::expected 3+ lines, got $LINES"; exit 1; }
+          rm -f smoke-ping.out
+          echo "live ping OK ($LINES lines)"
+
+      - name: Publish to step summary
+        if: always()
+        run: |
+          echo "## opencode-smoke: PASS" >> "$GITHUB_STEP_SUMMARY"
+          echo "llm_ping=${{ inputs.llm_ping || false }}" >> "$GITHUB_STEP_SUMMARY"
