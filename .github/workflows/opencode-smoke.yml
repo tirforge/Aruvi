@@ -55,7 +55,11 @@ jobs:
           echo "command + tools OK"
 
       - name: Repo selfcheck (ci_selfcheck.py)
-        run: python3 .github/scripts/ci_selfcheck.py 2>&1 | tail -3
+        # pipefail: without it the step exits with tail's status and a
+        # failing selfcheck still reports green (caught by opencode review).
+        run: |
+          set -o pipefail
+          python3 .github/scripts/ci_selfcheck.py 2>&1 | tail -3
 
       # Live ping = their who-are-you job: tiny prompt, after_script asserts
       # usable output instead of trusting exit code alone.
