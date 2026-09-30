@@ -4,6 +4,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request, Response, Query
 from fastapi.responses import StreamingResponse
 from ..config import get_settings
+from ..rate_limit import limiter
 from ..utils import bearer_token_matches, spawn_background
 from ..telegram import tg_client
 from ..streaming import (
@@ -53,9 +54,10 @@ def _get_file_attrs(message) -> tuple[int, str, str] | None:
 
 
 @router.get("/bandwidth")
+@limiter.limit("10/minute")
 async def diag_bandwidth(
     request: Request,
-    mb: int = Query(10, ge=1, le=2000, description="Data size in MB"),
+    mb: int = Query(10, ge=1, le=500, description="Data size in MB"),
     chunk: int = Query(65536, ge=4096, le=1048576, description="Chunk size in bytes"),
 ):
     _check_auth(request)
@@ -94,6 +96,7 @@ async def diag_ping(request: Request):
 
 
 @router.get("/clear-cache")
+@limiter.limit("10/minute")
 async def diag_clear_cache(request: Request):
     """Free the in-app chunk cache (RAM heap) and force a GC pass.
     Note: this does not touch the kernel page cache, which is reclaimable
@@ -215,6 +218,7 @@ async def _diag_media_response(
 
 
 @router.get("/stream")
+@limiter.limit("30/minute")
 async def diag_stream(
     request: Request,
     msg: int = Query(..., description="Message ID in the chat"),
@@ -224,6 +228,7 @@ async def diag_stream(
 
 
 @router.head("/stream")
+@limiter.limit("30/minute")
 async def diag_stream_head(
     request: Request,
     msg: int = Query(..., description="Message ID in the chat"),

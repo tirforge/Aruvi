@@ -48,7 +48,7 @@ class CompressibleGZipMiddleware:
             if k.lower() == b"accept-encoding":
                 accept = v
                 break
-        if b"gzip" not in accept:
+        if b"gzip" not in accept.lower():
             await self.app(scope, receive, send)
             return
 

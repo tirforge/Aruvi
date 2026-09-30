@@ -1,8 +1,8 @@
 """One-shot Telegram login helper for self-hosters.
 
 Generates a Pyrogram session string server-side so users never have to run
-MTProto in a browser. Every endpoint is gated by SETUP_PASSWORD (falling back
-to DEBUG_PASSWORD); with neither set the whole router disables itself.
+MTProto in a browser. Every endpoint is gated by SETUP_PASSWORD only (no
+DEBUG_PASSWORD fallback); without it the whole router disables itself.
 
 Flow:
     POST /api/setup/send-code  {setup_key, api_id, api_hash, phone}
@@ -31,12 +31,38 @@ _TTL_SECONDS = 600
 
 def _cleanup_expired() -> None:
     now = time.time()
+    # Cap the pending map: without a cap, unauthenticated send-code calls can
+    # grow it (one live Pyrogram Client each) until the process OOMs.
+    if len(_pending) > 20:
+        for k in sorted(_pending, key=lambda k: _pending[k]["ts"])[
+            : len(_pending) - 20
+        ]:
+            entry = _pending.pop(k, None)
+            if entry:
+                try:
+                    coro = entry["client"].disconnect()
+                    try:
+                        asyncio.get_running_loop().create_task(coro)
+                    except RuntimeError:
+                        try:
+                            coro.close()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
     stale = [k for k, v in _pending.items() if now - v["ts"] > _TTL_SECONDS]
     for k in stale:
         entry = _pending.pop(k, None)
         if entry:
             try:
-                asyncio.get_event_loop().create_task(entry["client"].disconnect())
+                coro = entry["client"].disconnect()
+                try:
+                    asyncio.get_running_loop().create_task(coro)
+                except RuntimeError:
+                    try:
+                        coro.close()
+                    except Exception:
+                        pass
             except Exception:
                 pass
 

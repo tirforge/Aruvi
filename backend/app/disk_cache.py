@@ -182,7 +182,11 @@ class DiskChunkCache:
         now = time.time()
         total = 0
         entries: list[tuple[float, Path, int]] = []
-        for d in self.cache_dir.iterdir():
+        try:
+            top_level = list(self.cache_dir.iterdir())
+        except OSError:
+            return 0
+        for d in top_level:
             if not d.is_dir():
                 continue
             key = _parse_key(d.name)
@@ -241,7 +245,11 @@ class DiskChunkCache:
         # Recompute totals now that per-video caps may have shrunk dirs.
         entries = []
         total = 0
-        for d in self.cache_dir.iterdir():
+        try:
+            second_pass = list(self.cache_dir.iterdir())
+        except OSError:
+            return 0
+        for d in second_pass:
             if not d.is_dir():
                 continue
             key = _parse_key(d.name)
@@ -272,7 +280,11 @@ class DiskChunkCache:
 
     @staticmethod
     def _remove_dir(d: Path):
-        for f in d.iterdir():
+        try:
+            children = list(d.iterdir())
+        except OSError:
+            return
+        for f in children:
             try:
                 f.unlink()
             except OSError:

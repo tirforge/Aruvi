@@ -1477,7 +1477,8 @@ async def grab_selected(
         # (the frontend always sends file_name) works on any page up to depth.
         btn = None
         page_msg = result_msg
-        walk_limit = MAX_PAGES if depth is None else max(depth, 0)
+        # Clamp depth to MAX_PAGES even if a caller bypasses API validation.
+        walk_limit = MAX_PAGES if depth is None else min(max(depth, 0), MAX_PAGES)
         for _attempt in range(2):
             page_idx = 0
             while page_msg is not None and page_idx <= walk_limit:

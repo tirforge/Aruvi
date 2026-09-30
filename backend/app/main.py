@@ -404,7 +404,15 @@ async def serve_spa(request: Request, full_path: str):
 
     # Stats + precompressed lookups off the event loop (slow disks under
     # load would stall active streams).
-    static_file_path = f"app/static/{full_path}"
+    static_root = os.path.realpath("app/static")
+    static_file_path = os.path.realpath(os.path.join(static_root, full_path))
+    # Defense-in-depth: realpath containment so encoded/normalized variants
+    # (e.g. a%2e%2e, ....//) can never escape the static root even if the
+    # ".." substring check above is ever bypassed.
+    if static_file_path != static_root and not static_file_path.startswith(
+        static_root + os.sep
+    ):
+        raise HTTPException(status_code=404, detail="Not found")
     import mimetypes
 
     def _resolve():
@@ -415,7 +423,7 @@ async def serve_spa(request: Request, full_path: str):
             return static_file_path, None
         return None, None
 
-    accepts_gzip = "gzip" in request.headers.get("accept-encoding", "")
+    accepts_gzip = "gzip" in request.headers.get("accept-encoding", "").lower()
     static_file, gz_file = await asyncio.to_thread(_resolve)
     if static_file:
         if gz_file and accepts_gzip:

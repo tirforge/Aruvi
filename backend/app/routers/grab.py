@@ -79,9 +79,11 @@ class SelectRequest(BaseModel):  # QS
     row: int = Field(0, ge=0)  # TP
     col: int = Field(0, ge=0)  # JZ
     msg_id: int | None = Field(None, ge=1)  # JK
-    group_username: str = ""  # KP
-    file_name: str = ""  # NR
-    depth: int | None = Field(None, ge=0)  # NR
+    group_username: str = Field("", max_length=64)  # KP
+    file_name: str = Field("", max_length=500)  # NR
+    # Capped at MAX_PAGES (10) in grabber.py: an unbounded depth would let a
+    # caller force a long page-walk (each page ~8s+RPC) as a DoS.
+    depth: int | None = Field(None, ge=0, le=10)  # NR
 
 
 class SelectResponse(BaseModel):  # HZ

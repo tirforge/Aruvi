@@ -4,10 +4,13 @@ JWT authentication utilities.
 
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+import logging
 import secrets
 import time
 
 from jose import jwt, JWTError
+
+logger = logging.getLogger(__name__)
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -102,7 +105,12 @@ def verify_token(token: str, token_type: str = "access") -> Optional[int]:
         return None
 
     sub = payload.get("sub")
-    return int(sub) if sub is not None else None
+    if sub is None:
+        return None
+    try:
+        return int(sub)
+    except (TypeError, ValueError):
+        return None
 
 
 async def get_current_user_opt(
@@ -202,12 +210,27 @@ async def get_current_user(
     last = _last_active_touch.get(user.id, 0.0)
     if now - last > 300:
         _last_active_touch[user.id] = now
+        # Bound the throttle map: without eviction it grows by one entry per
+        # distinct user id for the life of the process.
+        if len(_last_active_touch) > 5000:
+            cutoff = now - 3600
+            for uid in [
+                k for k, ts in _last_active_touch.items() if ts < cutoff
+            ]:
+                _last_active_touch.pop(uid, None)
+            # If still over budget (many active users), drop oldest first.
+            if len(_last_active_touch) > 5000:
+                for uid in sorted(
+                    _last_active_touch, key=_last_active_touch.get
+                )[: len(_last_active_touch) - 5000]:
+                    _last_active_touch.pop(uid, None)
         try:
             await db.execute(
                 update(User).where(User.id == user.id).values(last_active=_utcnow())
             )
             await db.commit()
         except Exception:
+            logger.warning("last_active touch failed for user %s", user.id)
             await db.rollback()
 
     return user

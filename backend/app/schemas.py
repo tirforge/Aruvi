@@ -135,8 +135,8 @@ class WatchProgressBase(BaseModel):
 
 
 class WatchProgressUpdate(BaseModel):  # QB
-    position: int  # PT
-    duration: Optional[int] = None  # XB
+    position: int = Field(ge=0)  # PT
+    duration: Optional[int] = Field(default=None, ge=0)  # XB
     completed: Optional[bool] = None  # QZ
 
     model_config = ConfigDict(extra="ignore")  # Android client sends extra fields
@@ -144,7 +144,13 @@ class WatchProgressUpdate(BaseModel):  # QB
     @field_validator("position", "duration", mode="before")
     @classmethod
     def _int_from_float(cls, v):
-        return int(v) if isinstance(v, float) else v
+        if v is None:
+            return v
+        if isinstance(v, float):
+            if v < 0:
+                raise ValueError("must be non-negative")
+            return int(v)
+        return v
 
 
 class WatchProgressResponse(WatchProgressBase):
@@ -174,7 +180,8 @@ class RefreshTokenRequest(BaseModel):
 
 
 class TokenPayload(BaseModel):
-    sub: int  # user telegram_id
+    # JWT "sub" is always encoded as a string (see auth.create_*_token).
+    sub: str  # user telegram_id
     exp: datetime
 
 
@@ -209,7 +216,7 @@ class BotInfoResponse(BaseModel):
 
 
 class BatchMoveRequest(BaseModel):
-    ids: list[int]
+    ids: list[int] = Field(max_length=500)
     folder_id: Optional[int] = None
 
 

@@ -387,6 +387,12 @@ async def subtitle_content(
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
 
+    # Allowlist the provider: it flows into subliminal's provider loader, so
+    # an arbitrary value must never reach list_subtitles().
+    allowed = set(_subliminal_providers()) | {"opensubtitlescom"}
+    if provider not in allowed:
+        raise HTTPException(status_code=400, detail="Unknown subtitle provider")
+
     if provider == "opensubtitlescom":
         if not _os_enabled():
             raise HTTPException(

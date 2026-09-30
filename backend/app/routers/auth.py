@@ -69,7 +69,9 @@ async def get_bot_info_endpoint():
 
 
 @router.post("/refresh", response_model=Token)
+@limiter.limit("30/minute")
 async def refresh_token(
+    raw_request: Request,
     request: RefreshTokenRequest,
     db: AsyncSession = Depends(get_db),
 ):
@@ -81,7 +83,12 @@ async def refresh_token(
     instead of remaining valid for its full lifetime.
     """
     payload = verify_token_payload(request.refresh_token, token_type="refresh")
-    telegram_id = int(payload.get("sub")) if payload and payload.get("sub") else None
+    try:
+        telegram_id = (
+            int(payload.get("sub")) if payload and payload.get("sub") else None
+        )
+    except (TypeError, ValueError):
+        telegram_id = None
     token_version = payload.get("ver") if payload else None
 
     if not telegram_id:
