@@ -217,7 +217,7 @@ export default function GlobalContextMenu() {
                                             handleAction(() => {});
                                             // Short-lived file-bound token: the URL is handed to an
                                             // external app — never embed the account-wide JWT.
-                                            (async () => {
+                                            void (async () => {
                                                 try {
                                                     const baseUrl = `${window.location.protocol}//${window.location.host}`;
                                                     const url = f.public_stream_url
@@ -236,7 +236,7 @@ export default function GlobalContextMenu() {
                                             handleAction(() => {});
                                             // Clipboard URLs end up in logs/chat history — mint a
                                             // short-lived file-bound token, not the account JWT.
-                                            (async () => {
+                                            void (async () => {
                                                 try {
                                                     const baseUrl = `${window.location.protocol}//${window.location.host}`;
                                                     const url = f.public_stream_url
@@ -263,10 +263,10 @@ export default function GlobalContextMenu() {
                                 
                                 <hr className="border-white/[0.08] my-1" />
 
-                                <button className="context-menu-item w-full text-left disabled:opacity-50" disabled={busyId !== null} onClick={() => runBusy('download', async () => {
+                                <button className="context-menu-item w-full text-left disabled:opacity-50" disabled={busyId !== null} onClick={() => { void runBusy('download', async () => {
                                     const url = await ensurePublicLink(activeContextMenu.item as TelegramFile);
                                     if (url) handleCopy(url + (url.includes('?') ? '&' : '?') + 'download=1', 'download');
-                                })}>
+                                });}}>
                                     <HardDriveDownload className="w-4 h-4" />
                                     {copiedId === 'download' ? '✓ Copied!' : 'Copy Download URL'}
                                 </button>
@@ -278,14 +278,14 @@ export default function GlobalContextMenu() {
                                     if (f.public_stream_url) {
                                         return (
                                             <>
-                                                <button className="context-menu-item w-full text-left disabled:opacity-50" disabled={busyId !== null} onClick={() => runBusy('public', async () => {
+                                                <button className="context-menu-item w-full text-left disabled:opacity-50" disabled={busyId !== null} onClick={() => { void runBusy('public', async () => {
                                                     const url = await ensurePublicLink(f);
                                                     if (url) handleCopy(url, 'public');
-                                                })}>
+                                                });}}>
                                                     <Globe className="w-4 h-4 text-emerald-400" />
                                                     {copiedId === 'public' ? '✓ Copied!' : 'Copy Public Link'}
                                                 </button>
-                                                <button className="context-menu-item w-full text-left text-orange-400 hover:bg-orange-500/10 disabled:opacity-50" disabled={busyId !== null} onClick={() => runBusy('revoke', async () => handleRevokeShare(f))}>
+                                                <button className="context-menu-item w-full text-left text-orange-400 hover:bg-orange-500/10 disabled:opacity-50" disabled={busyId !== null} onClick={() => { void runBusy('revoke', async () => handleRevokeShare(f));}}>
                                                     <ShieldOff className="w-4 h-4" />
                                                     Revoke Public Link
                                                 </button>
@@ -293,10 +293,10 @@ export default function GlobalContextMenu() {
                                         );
                                     }
                                     return (
-                                        <button className="context-menu-item w-full text-left disabled:opacity-50" disabled={busyId !== null} onClick={() => runBusy('public', async () => {
+                                        <button className="context-menu-item w-full text-left disabled:opacity-50" disabled={busyId !== null} onClick={() => { void runBusy('public', async () => {
                                             const url = await ensurePublicLink(f);
                                             if (url) handleCopy(url, 'public');
-                                        })}>
+                                        });}}>
                                             <Globe className="w-4 h-4" />
                                             {copiedId === 'public' ? '✓ Copied!' : 'Copy Public Link'}
                                         </button>

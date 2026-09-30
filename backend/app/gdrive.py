@@ -286,9 +286,12 @@ async def upload_streaming(
     tmp = GDRIVE_UPLOAD_DIR / f"{msg.id}_{int(time.time())}.tmp"
 
     try:
-        # Pre-allocate temp file
-        with open(tmp, "wb") as f:
-            f.truncate(total)
+        # Pre-allocate temp file (off the event loop: slow disks stall it)
+        def _preallocate():
+            with open(tmp, "wb") as f:
+                f.truncate(total)
+
+        await asyncio.to_thread(_preallocate)
 
         downloaded = 0
         last_ts = 0
@@ -298,7 +301,7 @@ async def upload_streaming(
         # (and the whole service) for the duration of the task-gather. Page
         # cache + one final fsync below gives the same durability without the
         # per-chunk stall.
-        fd = os.open(tmp, os.O_RDWR | os.O_CREAT, 0o644)
+        fd = await asyncio.to_thread(os.open, tmp, os.O_RDWR | os.O_CREAT, 0o644)
 
         # Split file into 1MB slots — each slot is one _byte_accurate_file_stream call
         SLOT_SIZE = 1024 * 1024
@@ -424,7 +427,9 @@ async def upload_streaming(
             uploaded = 0
             last_report = 0
             resp = None
-            with open(tmp, "rb") as f:
+            # Open off the event loop; reads below are already in to_thread.
+            f = await asyncio.to_thread(open, tmp, "rb")
+            with f:
                 while True:
                     chunk = await asyncio.to_thread(f.read, CHUNK_SIZE)
                     if not chunk:

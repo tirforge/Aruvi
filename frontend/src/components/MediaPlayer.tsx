@@ -257,6 +257,10 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
             } else {
                 setError('The playback engine failed to load. Check your connection and try again.');
             }
+        }).catch(() => {
+            setMoviStatus('error');
+            setIsLoading(false);
+            setError('The playback engine failed to load. Check your connection and try again.');
         });
     }, [file.id, isImage]);
 
@@ -757,14 +761,14 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
                             </a>
                             <div className="flex gap-3">
                                 <Button
-                                    onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(externalUrl); }}
+                                    onClick={(e) => { e.stopPropagation(); void navigator.clipboard.writeText(externalUrl); }}
                                     className="flex-1 btn-secondary flex items-center justify-center gap-2"
                                 >
                                     <Copy className="w-4 h-4" />
                                     Copy URL
                                 </Button>
                                 <Button
-                                    onClick={(e) => { e.stopPropagation(); handleDownload(); }}
+                                    onClick={(e) => { e.stopPropagation(); void handleDownload(); }}
                                     className="flex-1 btn-secondary flex items-center justify-center gap-2"
                                 >
                                     <Download className="w-4 h-4" />

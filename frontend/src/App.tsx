@@ -47,7 +47,7 @@ navigate('/', { replace: true });
                         <p className="text-dark-400 text-sm mb-2">Token received (click to copy):</p>
                         <button
                             onClick={() => {
-                                navigator.clipboard.writeText(token);
+                                void navigator.clipboard.writeText(token);
                                 setStatus('Token copied! Open browser DevTools console and run:\nlocalStorage.setItem("access_token", "paste-token-here")');
                             }}
                             className="text-xs text-primary-400 break-all text-left hover:text-primary-300"
@@ -328,8 +328,14 @@ if (!('access_token' in data)) {
 
 function BotLink({ code }: { code?: string }) {
     const { data: botInfo } = useBotInfo();
-    const botUrl = botInfo?.username 
-        ? `https://t.me/${botInfo.username}${code ? `?start=${code}` : ''}` 
+    // Allowlist both halves before they reach the href sink: Telegram
+    // usernames are [A-Za-z0-9_]{5,32}, our login codes are [A-Z0-9]{6}.
+    // Anything else (e.g. pasted URL text) renders a dead link instead.
+    const username = botInfo?.username && /^[A-Za-z0-9_]{5,32}$/.test(botInfo.username)
+        ? botInfo.username : undefined;
+    const startCode = code && /^[A-Za-z0-9_-]{1,128}$/.test(code) ? code : undefined;
+    const botUrl = username
+        ? `https://t.me/${username}${startCode ? `?start=${startCode}` : ''}`
         : '#';
 
     return (

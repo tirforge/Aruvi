@@ -164,7 +164,9 @@ class FileDownloader(
             context.contentResolver.delete(Uri.parse(path), null, null)
         } else {
             val file = File(path)
-            if (file.exists()) file.delete()
+            if (file.exists() && !file.delete()) {
+                android.util.Log.w("FileDownloader", "Could not delete $path")
+            }
         }
     }
 

@@ -187,12 +187,12 @@ async def gdrive_auth_callback(request: Request):
 
     try:
         telegram_id, code_verifier = consume_state(state)
-    except ValueError as e:
+    except ValueError:
         return HTMLResponse(
             _page(
                 CROSS_SVG,
                 "Session expired",
-                str(e),
+                "This login session is no longer valid.",
                 '<p class="sub">Please tap "Save to Drive" again in Telegram.</p>',
                 is_error=True,
             ),
@@ -201,13 +201,13 @@ async def gdrive_auth_callback(request: Request):
 
     try:
         token_dict = await exchange_code(code, code_verifier)
-    except Exception as e:
+    except Exception:
         _log.exception("GDrive token exchange failed for user %s", telegram_id)
         return HTMLResponse(
             _page(
                 CROSS_SVG,
                 "Token exchange failed",
-                str(e),
+                "Google refused the authorization code. It may have expired.",
                 '<p class="sub">Please try again.</p>',
                 is_error=True,
             ),
