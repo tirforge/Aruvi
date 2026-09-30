@@ -69,7 +69,7 @@ CodeQL gains java-kotlin. Sonar Kotlin deferred (needs Jacoco +
 - `.github/scripts/ci_selfcheck.py` → ALL GREEN.
 - Push to feature branch; confirm all three workflows trigger on a
   touch-PR and path-filtering skips unrelated areas.
-- Confirm branch protection shows the three new required checks green.
+- Confirm branch protection shows only `CI Gate` required and green (the three area workflows may skip).
 - Full test suite run per AGENTS.md (backend compileall, frontend
   tsc+eslint+build) — implementation must not break existing gates.
 
