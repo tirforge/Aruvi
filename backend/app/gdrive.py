@@ -320,11 +320,13 @@ async def upload_streaming(
         except asyncio.CancelledError:
             # Worker can't be cancelled — retain its result so a descriptor
             # returned after cancellation is closed, not leaked.
+            leaked = None
             try:
                 leaked = await asyncio.shield(_open_task)
             except asyncio.CancelledError:
-                raise
-            await asyncio.to_thread(os.close, leaked)
+                pass
+            if leaked is not None:
+                await asyncio.to_thread(os.close, leaked)
             raise
 
         # Split file into 1MB slots — each slot is one _byte_accurate_file_stream call
