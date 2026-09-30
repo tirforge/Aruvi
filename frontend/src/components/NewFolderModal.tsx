@@ -62,6 +62,8 @@ export default function NewFolderModal({ parentId, onClose }: NewFolderModalProp
     return (
         <div
             onClick={(e) => { if (e.target === e.currentTarget) safeClose(); }}
+            onKeyDown={(e) => { if (e.key === "Escape") safeClose(); }}
+            tabIndex={-1}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <div className="glass-card w-full max-w-md p-6 animate-slide-up">
                 <div className="flex items-center justify-between mb-4">

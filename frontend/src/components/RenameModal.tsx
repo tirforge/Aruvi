@@ -126,6 +126,8 @@ export default function RenameModal({ isOpen, onClose, onRename, currentName, it
     return (
         <div
             onClick={(e) => { if (e.target === e.currentTarget) safeClose(); }}
+            onKeyDown={(e) => { if (e.key === "Escape") safeClose(); }}
+            tabIndex={-1}
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in">
             <div className="bg-dark-800 rounded-xl border border-dark-600 p-6 w-full max-w-md shadow-2xl">
                 <div className="flex items-center justify-between mb-4">
