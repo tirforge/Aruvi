@@ -22,7 +22,7 @@ pydantic-settings>=2.1.0
 python-jose[cryptography]>=3.3.0
 
 # Utilities
-python-multipart>=0.0.6
+python-multipart>=0.0.32
 aiofiles>=23.2.0
 python-dotenv>=1.0.0
 
