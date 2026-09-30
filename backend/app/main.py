@@ -26,6 +26,7 @@ from .status import get_status, attach_ring_handler, clear_logs, maybe_oom_clear
 from .streaming import _evict_idle_ram_caches
 from .utils import bearer_token_matches
 from .gzip_middleware import CompressibleGZipMiddleware
+from .static_allowlist import build_static_allowlist
 
 from .routers import (
     files_router,
@@ -396,6 +397,12 @@ async def download_page():
     return FileResponse("app/static/download.html", headers=NO_CACHE_HEADERS)
 
 
+# Servable static files, walked once at startup: {url path: abs file path}.
+# serve_spa ONLY serves map entries, so the response file never derives
+# from user input — traversal payloads just miss the lookup below.
+STATIC_ALLOWLIST = build_static_allowlist()
+
+
 @app.get("/{full_path:path}")
 async def serve_spa(request: Request, full_path: str):
     """Serve the React SPA for any non-API routes."""
@@ -404,17 +411,14 @@ async def serve_spa(request: Request, full_path: str):
 
     # Stats + precompressed lookups off the event loop (slow disks under
     # load would stall active streams).
-    # Containment: normalize the user path and refuse anything that
-    # resolves outside app/static (the ".." check above is a fast path;
-    # abspath+commonpath also defeats absolute paths and symlink escapes).
-    static_base = os.path.abspath("app/static")
-    static_file_path = os.path.abspath(os.path.join(static_base, full_path))
-    if os.path.commonpath([static_base, static_file_path]) != static_base:
-        raise HTTPException(status_code=404, detail="Not found")
+    # Allowlist lookup (not path containment): static_file_path comes from
+    # the startup map, never from user input, so "..", absolute paths and
+    # symlink escapes can't reach FileResponse.
+    static_file_path = STATIC_ALLOWLIST.get(full_path or "")
     import mimetypes
 
     def _resolve():
-        if os.path.isfile(static_file_path):
+        if static_file_path and os.path.isfile(static_file_path):
             gz = static_file_path + ".gz"
             if os.path.isfile(gz):
                 return static_file_path, gz

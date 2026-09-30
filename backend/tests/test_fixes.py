@@ -952,5 +952,91 @@ class TestRlsAutoLockdown:
         assert not any("service_role" in c for c in revokes)
 
 
+class TestSpaStaticAllowlist:
+    def test_builder_maps_nested_files_skips_gz(self, tmp_path):
+        from app.static_allowlist import build_static_allowlist
+
+        (tmp_path / "index.html").write_bytes(b"<html/>")
+        assets = tmp_path / "assets"
+        assets.mkdir()
+        (assets / "app-abc123.js").write_bytes(b"js")
+        (assets / "app-abc123.js.gz").write_bytes(b"gzipped")
+        (tmp_path / "sub").mkdir()
+
+        allow = build_static_allowlist(str(tmp_path))
+        assert allow["index.html"].endswith("index.html")
+        assert allow["assets/app-abc123.js"].endswith("app-abc123.js")
+        # .gz siblings are never directly addressable ...
+        assert "assets/app-abc123.js.gz" not in allow
+        # ... and directories are never servable
+        assert "sub" not in allow
+        assert "assets" not in allow
+
+    def test_builder_missing_dir_is_empty(self, tmp_path):
+        from app.static_allowlist import build_static_allowlist
+
+        assert build_static_allowlist(str(tmp_path / "nope")) == {}
+
+    def _client(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        return TestClient(app)
+
+    def test_spa_fallback_and_api_guard(self):
+        c = self._client()
+        r = c.get("/")
+        assert r.status_code == 200  # index.html exists in repo
+        assert r.headers["content-type"].startswith("text/html")
+        assert c.get("/api").status_code == 404
+        assert c.get("/api/some/route").status_code == 404
+        # unknown SPA route falls back to index, not 404
+        r = c.get("/some/client/route/that/does/not/exist")
+        assert r.status_code == 200
+
+    def test_known_static_file_served_byte_identical(self):
+        import os
+        from app.main import STATIC_ALLOWLIST
+
+        assert STATIC_ALLOWLIST, "repo ships app/static, allowlist must be non-empty"
+        rel = next(
+            r
+            for r in STATIC_ALLOWLIST
+            if r.endswith((".png", ".ico", ".html")) and "/" not in r
+        )
+        c = self._client()
+        r = c.get(f"/{rel}", headers={"accept-encoding": "identity"})
+        assert r.status_code == 200
+        with open(STATIC_ALLOWLIST[rel], "rb") as f:
+            assert r.content == f.read()
+        assert os.path.abspath(STATIC_ALLOWLIST[rel]).startswith(
+            os.path.abspath("app/static") + os.sep
+        )
+
+    def test_traversal_probes_never_disclose(self):
+        import os
+
+        c = self._client()
+        secret = None
+        if os.path.isfile("/etc/passwd"):
+            with open("/etc/passwd", "rb") as f:
+                secret = f.read(64)
+        probes = [
+            "/..%2f..%2fetc%2fpasswd",
+            "/....//....//etc/passwd",
+            "/%2e%2e/%2e%2e/etc/passwd",
+            "/static/../../../../etc/passwd",
+            "/assets/..%2f..%2frequirements.txt",
+        ]
+        for p in probes:
+            r = c.get(p)
+            assert r.status_code in (200, 404)
+            if secret:
+                assert secret not in r.content, f"disclosure via {p}"
+            assert "root:" not in r.text or "html" in r.headers.get(
+                "content-type", ""
+            ), f"suspicious body via {p}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
