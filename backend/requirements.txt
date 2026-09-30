@@ -35,7 +35,7 @@ httpx>=0.27.0
 # Google Drive
 google-api-python-client>=2.200.0
 google-auth-oauthlib>=1.2.0
-google-auth-httplib2>=0.2.0
+google-auth-httplib2>=0.4.2
 
 # Subtitles
 subliminal>=2.7.0
