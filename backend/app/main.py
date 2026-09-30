@@ -6,6 +6,7 @@ import asyncio
 import ctypes
 import gc
 import logging
+import mimetypes
 import os
 from contextlib import asynccontextmanager
 
@@ -26,6 +27,7 @@ from .status import get_status, attach_ring_handler, clear_logs, maybe_oom_clear
 from .streaming import _evict_idle_ram_caches
 from .utils import bearer_token_matches
 from .gzip_middleware import CompressibleGZipMiddleware
+from .static_allowlist import build_static_allowlist
 
 from .routers import (
     files_router,
@@ -76,13 +78,10 @@ async def lifespan(app: FastAPI):
     cleanup_task.cancel()
     startup_task.cancel()
     disk_sweep_task.cancel()
-    try:
-        await oom_task
-        await cleanup_task
-        await startup_task
-        await disk_sweep_task
-    except asyncio.CancelledError:
-        pass
+    # gather(return_exceptions=True) so per-task CancelledError results are
+    # collected, not swallowed — shutdown always proceeds to client stop.
+    await asyncio.gather(oom_task, cleanup_task, startup_task, disk_sweep_task,
+                         return_exceptions=True)
 
     logger.info("Shutting down...")
     await stop_telegram_client()
@@ -309,8 +308,9 @@ async def diag_bot_test(request: Request):
         me = await tg_client.get_me()
         result["bot_username"] = me.username
         result["bot_id"] = me.id
-    except Exception as e:
-        result["get_me_error"] = str(e)
+    except Exception:
+        logger.warning("diag bot-test get_me failed", exc_info=True)
+        result["get_me_error"] = "lookup failed (see server logs)"
     try:
         dc_id = await tg_client.storage.dc_id()
         result["dc_id"] = dc_id
@@ -318,8 +318,9 @@ async def diag_bot_test(request: Request):
         result["is_bot"] = is_bot
         user_id = await tg_client.storage.user_id()
         result["user_id"] = user_id
-    except Exception as e:
-        result["storage_error"] = str(e)
+    except Exception:
+        logger.warning("diag bot-test storage lookup failed", exc_info=True)
+        result["storage_error"] = "storage lookup failed (see server logs)"
     return result
 
 
@@ -337,8 +338,9 @@ async def diag_bot_send(request: Request, chat_id: int = 0):
             chat_id, "🧪 Bot test message — if you see this, sending works!"
         )
         return {"sent": True, "message_id": msg.id}
-    except Exception as e:
-        return {"sent": False, "error": str(e)}
+    except Exception:
+        logger.warning("diag bot-send failed", exc_info=True)
+        return {"sent": False, "error": "send failed (see server logs)"}
 
 
 @app.get("/api/v")
@@ -396,45 +398,74 @@ async def download_page():
     return FileResponse("app/static/download.html", headers=NO_CACHE_HEADERS)
 
 
+# Servable static files, walked once at startup: {url path: abs file path}.
+# serve_spa ONLY serves map entries, so the response file never derives
+# from user input — traversal payloads just miss the lookup below.
+STATIC_ALLOWLIST = build_static_allowlist()
+
+
+def _is_spa_bypass(full_path: str) -> bool:
+    """Reject API routes and traversal payloads before the allowlist lookup."""
+    return (
+        full_path == "api"
+        or full_path.startswith("api/")
+        or ".." in full_path
+    )
+
+
+def _resolve_static(static_file_path: str | None) -> tuple[str | None, str | None]:
+    """Resolve an allowlisted path to (plain, gz-or-None), re-checking symlinks."""
+    if static_file_path and os.path.isfile(static_file_path):
+        # Builder never allowlists symlinks, but re-check here: a link
+        # planted after startup (or a symlinked .gz sibling) would
+        # otherwise be followed by FileResponse out of app/static.
+        if os.path.islink(static_file_path):
+            return None, None
+        gz = static_file_path + ".gz"
+        if os.path.isfile(gz) and not os.path.islink(gz):
+            return static_file_path, gz
+        return static_file_path, None
+    return None, None
+
+
+def _spa_index_exists() -> bool:
+    """Check the SPA fallback exists (runs off the event loop via to_thread)."""
+    return os.path.exists("app/static/index.html")
+
+
+def _gz_response(static_file: str, gz_file: str) -> FileResponse:
+    """Build the precompressed-sibling response (~70% smaller on the wire)."""
+    media_type = mimetypes.guess_type(static_file)[0] or "application/octet-stream"
+    return FileResponse(
+        gz_file,
+        media_type=media_type,
+        headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"},
+    )
+
+
 @app.get("/{full_path:path}")
 async def serve_spa(request: Request, full_path: str):
     """Serve the React SPA for any non-API routes."""
-    if full_path == "api" or full_path.startswith("api/") or ".." in full_path:
+    if _is_spa_bypass(full_path):
         raise HTTPException(status_code=404, detail="Not found")
 
     # Stats + precompressed lookups off the event loop (slow disks under
     # load would stall active streams).
-    static_file_path = f"app/static/{full_path}"
-    import mimetypes
-
-    def _resolve():
-        if os.path.isfile(static_file_path):
-            gz = static_file_path + ".gz"
-            if os.path.isfile(gz):
-                return static_file_path, gz
-            return static_file_path, None
-        return None, None
+    # Allowlist lookup (not path containment): static_file_path comes from
+    # the startup map, never from user input, so "..", absolute paths and
+    # symlink escapes can't reach FileResponse.
+    static_file_path = STATIC_ALLOWLIST.get(full_path or "")
 
     accepts_gzip = "gzip" in request.headers.get("accept-encoding", "")
-    static_file, gz_file = await asyncio.to_thread(_resolve)
+    static_file, gz_file = await asyncio.to_thread(
+        _resolve_static, static_file_path
+    )
     if static_file:
         if gz_file and accepts_gzip:
-            # Precompressed sibling from the build — ~70% smaller on the wire
-            # (385KB JS -> 116KB, 11MB player -> ~3MB).
-            media_type = (
-                mimetypes.guess_type(static_file)[0] or "application/octet-stream"
-            )
-            return FileResponse(
-                gz_file,
-                media_type=media_type,
-                headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"},
-            )
-        return FileResponse(static_file_path)
+            return _gz_response(static_file, gz_file)
+        return FileResponse(static_file)
 
-    index_exists = await asyncio.to_thread(
-        lambda: os.path.exists("app/static/index.html")
-    )
-    if index_exists:
+    if await asyncio.to_thread(_spa_index_exists):
         return FileResponse("app/static/index.html", headers=NO_CACHE_HEADERS)
 
     return JSONResponse(status_code=404, content={"detail": "Not found"})

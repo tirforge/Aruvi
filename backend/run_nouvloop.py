@@ -63,8 +63,13 @@ config = uvicorn.Config(
 server = uvs.Server(config)
 
 
+# Module-level ref so the task is never garbage-collected mid-run.
+_housekeeping_task = None
+
+
 async def run():
-    asyncio.create_task(_periodic_housekeeping())
+    global _housekeeping_task
+    _housekeeping_task = asyncio.create_task(_periodic_housekeeping())
     await server.serve()
 
 

@@ -286,9 +286,26 @@ async def upload_streaming(
     tmp = GDRIVE_UPLOAD_DIR / f"{msg.id}_{int(time.time())}.tmp"
 
     try:
-        # Pre-allocate temp file
-        with open(tmp, "wb") as f:
-            f.truncate(total)
+        # Pre-allocate temp file (off the event loop: slow disks stall it)
+        def _preallocate():
+            with open(tmp, "wb") as f:
+                f.truncate(total)
+
+        _pre_task = asyncio.create_task(asyncio.to_thread(_preallocate))
+        try:
+            await _pre_task
+        except asyncio.CancelledError:
+            # Worker can't be cancelled — wait for creation so the outer
+            # finally can unlink the file instead of orphaning it.
+            try:
+                await asyncio.shield(_pre_task)
+            except asyncio.CancelledError:
+                _log.debug(
+                    "GDrive preallocate shield wait interrupted; "
+                    "propagating cancellation"
+                )
+                raise
+            raise
 
         downloaded = 0
         last_ts = 0
@@ -298,7 +315,34 @@ async def upload_streaming(
         # (and the whole service) for the duration of the task-gather. Page
         # cache + one final fsync below gives the same durability without the
         # per-chunk stall.
-        fd = os.open(tmp, os.O_RDWR | os.O_CREAT, 0o644)
+        fd = None
+        _open_task = asyncio.create_task(
+            asyncio.to_thread(os.open, tmp, os.O_RDWR | os.O_CREAT, 0o644)
+        )
+        try:
+            fd = await _open_task
+        except asyncio.CancelledError:
+            # Worker can't be cancelled — retain its result so a descriptor
+            # returned after cancellation is closed, not leaked.
+            leaked = None
+            try:
+                leaked = await asyncio.shield(_open_task)
+            except asyncio.CancelledError:
+                if _open_task.done() and not _open_task.cancelled():
+                    try:
+                        leaked = _open_task.result()
+                    except Exception:
+                        leaked = None
+                if leaked is not None:
+                    await asyncio.to_thread(os.close, leaked)
+                _log.debug(
+                    "GDrive open shield wait interrupted; "
+                    "propagating cancellation"
+                )
+                raise
+            if leaked is not None:
+                await asyncio.to_thread(os.close, leaked)
+            raise
 
         # Split file into 1MB slots — each slot is one _byte_accurate_file_stream call
         SLOT_SIZE = 1024 * 1024
@@ -424,7 +468,9 @@ async def upload_streaming(
             uploaded = 0
             last_report = 0
             resp = None
-            with open(tmp, "rb") as f:
+            # Open off the event loop; reads below are already in to_thread.
+            f = await asyncio.to_thread(open, tmp, "rb")
+            with f:
                 while True:
                     chunk = await asyncio.to_thread(f.read, CHUNK_SIZE)
                     if not chunk:

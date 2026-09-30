@@ -52,10 +52,13 @@ jobs:
         if: matrix.platform == 'linux'
         timeout-minutes: 30
         shell: bash
+        env:
+          # via env (not ${{ }} interpolation) so a malicious url can't inject shell
+          URL: ${{ inputs.url }}
         run: |
           set -e
           ICON="$GITHUB_WORKSPACE/aruvi/frontend/public/icon-desktop.png"
-          node dist/cli.js "${{ inputs.url }}" --name Aruvi --icon "$ICON" \
+          node dist/cli.js "$URL" --name Aruvi --icon "$ICON" \
             --width 1280 --height 800 --targets deb,appimage
           # CLI copies artifacts to project root with lowercased names
           mkdir -p output/linux
@@ -67,9 +70,12 @@ jobs:
         if: matrix.platform == 'windows'
         timeout-minutes: 45
         shell: pwsh
+        env:
+          # via env (not ${{ }} interpolation) so a malicious url can't inject script
+          URL: ${{ inputs.url }}
         run: |
           $icon = "$env:GITHUB_WORKSPACE\aruvi\frontend\public\icon-desktop.ico"
-          $args = "${{ inputs.url }}", "--name", "Aruvi", "--icon", $icon,
+          $args = $env:URL, "--name", "Aruvi", "--icon", $icon,
                   "--width", "1280", "--height", "800", "--targets", "x64"
           node dist/cli.js $args
           New-Item -Path "output\windows" -ItemType Directory -Force | Out-Null

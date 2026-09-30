@@ -952,5 +952,106 @@ class TestRlsAutoLockdown:
         assert not any("service_role" in c for c in revokes)
 
 
+class TestSpaStaticAllowlist:
+    def test_builder_maps_nested_files_skips_gz(self, tmp_path):
+        from app.static_allowlist import build_static_allowlist
+
+        (tmp_path / "index.html").write_bytes(b"<html/>")
+        assets = tmp_path / "assets"
+        assets.mkdir()
+        (assets / "app-abc123.js").write_bytes(b"js")
+        (assets / "app-abc123.js.gz").write_bytes(b"gzipped")
+        (tmp_path / "sub").mkdir()
+
+        allow = build_static_allowlist(str(tmp_path))
+        assert allow["index.html"].endswith("index.html")
+        assert allow["assets/app-abc123.js"].endswith("app-abc123.js")
+        # .gz siblings are never directly addressable ...
+        assert "assets/app-abc123.js.gz" not in allow
+        # ... and directories are never servable
+        assert "sub" not in allow
+        assert "assets" not in allow
+
+    def test_builder_missing_dir_is_empty(self, tmp_path):
+        from app.static_allowlist import build_static_allowlist
+
+        assert build_static_allowlist(str(tmp_path / "nope")) == {}
+
+    def _client(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        return TestClient(app)
+
+    def _tmp_site(self, tmp_path, monkeypatch):
+        """Build a hermetic app/static tree (repo never ships the build dir)."""
+        from app import main as mainmod
+        from app.static_allowlist import build_static_allowlist
+
+        static = tmp_path / "site" / "app" / "static"
+        (static / "assets").mkdir(parents=True)
+        (static / "index.html").write_bytes(b"<html>spa</html>")
+        (static / "favicon.ico").write_bytes(b"ICO")
+        (static / "assets" / "app-abc.js").write_bytes(b"js" * 100)
+        (static / "assets" / "app-abc.js.gz").write_bytes(b"gz")
+        monkeypatch.chdir(tmp_path / "site")
+        monkeypatch.setattr(
+            mainmod, "STATIC_ALLOWLIST", build_static_allowlist("app/static")
+        )
+        return mainmod
+
+    def test_spa_fallback_and_api_guard(self, tmp_path, monkeypatch):
+        self._tmp_site(tmp_path, monkeypatch)
+        c = self._client()
+        r = c.get("/")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("text/html")
+        assert c.get("/api").status_code == 404
+        assert c.get("/api/some/route").status_code == 404
+        # unknown SPA route falls back to index, not 404
+        r = c.get("/some/client/route/that/does/not/exist")
+        assert r.status_code == 200
+
+    def test_known_static_file_served_byte_identical(self, tmp_path, monkeypatch):
+        import os
+
+        mainmod = self._tmp_site(tmp_path, monkeypatch)
+        assert mainmod.STATIC_ALLOWLIST, "tmp site must yield a non-empty allowlist"
+        rel = "favicon.ico"
+        assert rel in mainmod.STATIC_ALLOWLIST
+        c = self._client()
+        r = c.get(f"/{rel}", headers={"accept-encoding": "identity"})
+        assert r.status_code == 200
+        with open(mainmod.STATIC_ALLOWLIST[rel], "rb") as f:
+            assert r.content == f.read()
+        assert os.path.abspath(mainmod.STATIC_ALLOWLIST[rel]).startswith(
+            os.path.abspath("app/static") + os.sep
+        )
+
+    def test_traversal_probes_never_disclose(self):
+        import os
+
+        c = self._client()
+        secret = None
+        if os.path.isfile("/etc/passwd"):
+            with open("/etc/passwd", "rb") as f:
+                secret = f.read(64)
+        probes = [
+            "/..%2f..%2fetc%2fpasswd",
+            "/....//....//etc/passwd",
+            "/%2e%2e/%2e%2e/etc/passwd",
+            "/static/../../../../etc/passwd",
+            "/assets/..%2f..%2frequirements.txt",
+        ]
+        for p in probes:
+            r = c.get(p)
+            assert r.status_code in (200, 404)
+            if secret:
+                assert secret not in r.content, f"disclosure via {p}"
+            assert "root:" not in r.text or "html" in r.headers.get(
+                "content-type", ""
+            ), f"suspicious body via {p}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

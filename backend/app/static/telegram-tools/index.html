@@ -294,7 +294,7 @@
     return 'unknown';
   }
   function toPyrogram(s,apiId){
-    const fmt=detectFormat(s);
+    let fmt=detectFormat(s);
     if(fmt==='pyrogram'||fmt==='unknown')return {str:s,fmt};
     let raw=b64ToBytes(s.slice(1)),dc,port,ipLen,auth;
     if(fmt==='unknown'&&s[0]==='1'){
