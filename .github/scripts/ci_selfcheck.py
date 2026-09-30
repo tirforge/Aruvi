@@ -1,7 +1,8 @@
 """CI self-check: structural policy test for the repo's own workflows.
 
 Runs in ci-selfcheck.yml (seconds). Fails the PR if anyone reintroduces a
-known-bad pattern: unpinned opencode action, prompt-only git identity,
+known-bad pattern: unpinned opencode action, App-token exchange instead of
+use_github_token, prompt-only git identity,
 job-level matrix gating, COMPLETED wait filter, workflows:write on combo,
 missing fixer prompt guards, unparseable YAML, or bash syntax errors in
 embedded run scripts.
@@ -29,9 +30,25 @@ agent = (W / "merge-agent.yml").read_text()
 sweep = (W / "merge-sweep.yml").read_text()
 
 for name, txt in [("fullscan", full), ("combo", combo),
-                  ("agent", agent), ("sweep", sweep)]:
+                   ("agent", agent), ("sweep", sweep)]:
     check("anomalyco/opencode/github@latest" not in txt,
           f"{name}: no @latest pin")
+
+# App-token exchange backend is unreliable (502s for days); every opencode
+# step must use the repo GITHUB_TOKEN directly or the job silently no-ops
+# (sweep burned 6+ runs green-but-dead before this was caught).
+import glob as _glob
+for _f in ["opencode-fullscan.yml", "review-combo.yml",
+           "merge-agent.yml", "merge-sweep.yml"]:
+    _y = yaml.safe_load((W / _f).read_text())
+    _steps = [s for _j in _y.get("jobs", {}).values()
+              for s in ( _j.get("steps", []) if isinstance(_j, dict) else [])
+              if isinstance(s, dict)
+              and str(s.get("uses", "")).startswith("anomalyco/opencode")]
+    check(len(_steps) >= 1 and all(
+        (s.get("with") or {}).get("use_github_token") is True
+        for s in _steps),
+        f"{_f}: all opencode steps use_github_token (no App exchange)")
 
 check("timeout-minutes: 300" in full, "fullscan: 300min timeout")
 check("Configure git identity" in full
