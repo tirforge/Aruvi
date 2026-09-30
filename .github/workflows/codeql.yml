@@ -19,26 +19,26 @@ jobs:
       matrix:
         language: [python, javascript-typescript, java-kotlin]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: github/codeql-action/init@v4
+      - uses: github/codeql-action/init@7999b86c43a865dc79d8923397f35af22de63401 # v4
         with:
           languages: ${{ matrix.language }}
 
       - name: Set up JDK 17 (java-kotlin only)
         if: matrix.language == 'java-kotlin'
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
           java-version: "17"
           cache: gradle
       - name: Set up Android SDK (java-kotlin only)
         if: matrix.language == 'java-kotlin'
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
       - name: Build for CodeQL extraction (java-kotlin only)
         if: matrix.language == 'java-kotlin'
         # --rerun-tasks: Gradle build cache would serve compile tasks from cache, leaving CodeQL's tracer with nothing to observe ("no source code seen during build").
         run: ./gradlew :app:assembleMobileDebug :app:assembleTvDebug --no-daemon --rerun-tasks
         working-directory: android
 
-      - uses: github/codeql-action/analyze@v4
+      - uses: github/codeql-action/analyze@7999b86c43a865dc79d8923397f35af22de63401 # v4

@@ -1,12 +1,14 @@
 """CI self-check: structural policy test for the repo's own workflows.
 
 Runs in ci-selfcheck.yml (seconds). Fails the PR if anyone reintroduces a
-known-bad pattern: unpinned opencode action, App-token exchange instead of
-use_github_token, prompt-only git identity,
+known-bad pattern: unpinned opencode action, floating actions/* refs,
+App-token exchange instead of use_github_token, prompt-only git identity,
 job-level matrix gating, COMPLETED wait filter, workflows:write on combo,
-missing fixer prompt guards, unparseable YAML, or bash syntax errors in
-embedded run scripts.
+missing fixer prompt guards, missing combo concurrency/timeouts/fork-guard/
+error-comment, unretried gh reads, unredacted harvest, unparseable YAML,
+or bash syntax errors in embedded run scripts.
 """
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -93,6 +95,35 @@ check(len(fixer) == 1 and fixer[0].get("continue-on-error") is not True,
 check("concurrency:" in agent and "timeout-minutes: 120" in agent,
       "agent: concurrency + cap")
 check("concurrency:" in sweep, "sweep: serialization")
+check("timeout-minutes: 120" in sweep, "sweep: 120min cap")
+
+# Supply-chain: every third-party action pinned to a full commit SHA.
+# A floating @vN/@main/@latest tag is a mutable ref — a compromised tag
+# poisons all runs. SHA pins (40 hex) never match this pattern.
+FLOATING = re.compile(r"uses:.*@(v\d+|latest|main|master)([\s\"']|$)")
+for _wf in sorted((W).glob("*.yml")):
+    _txt = _wf.read_text()
+    check(not FLOATING.search(_txt), f"{_wf.name}: no floating action refs")
+
+# review-combo hardening (cloned from smooth-ai-report-review patterns)
+check("review-combo-pr-" in combo and "cancel-in-progress: true" in combo,
+      "combo: per-PR concurrency cancels superseded runs")
+check("timeout-minutes: 60" in combo and "timeout-minutes: 180" in combo,
+      "combo: review(60)/fix(180) timeouts")
+check("head.repo.full_name == github.repository" in combo,
+      "combo: fix skips fork PRs (read-only token can't push)")
+check("Post Error Comment" in combo and "if: failure()" in combo,
+      "combo: failure posts logs link to the PR")
+check("gh-retry.sh" in combo, "combo: gh reads retried (bounded, once)")
+check("redact-secrets.py" in combo, "combo: harvest scrubbed for secrets")
+_scripts = ROOT / ".github" / "scripts"
+r = subprocess.run(["bash", "-n", str(_scripts / "gh-retry.sh")],
+                   capture_output=True, text=True)
+check(r.returncode == 0, "gh-retry.sh: bash -n OK")
+r = subprocess.run([sys.executable, "-m", "py_compile",
+                    str(_scripts / "redact-secrets.py")],
+                   capture_output=True, text=True)
+check(r.returncode == 0, "redact-secrets.py: py_compile OK")
 for f in ["opencode-fullscan.yml", "review-combo.yml",
           "merge-agent.yml", "merge-sweep.yml", "ci-selfcheck.yml"]:
     yaml.safe_load((W / f).read_text())

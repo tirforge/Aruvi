@@ -27,17 +27,25 @@ on:
 permissions:
   contents: read
 
+# One combo per PR: rapid pushes cancel the superseded run so two fixers
+# never race on the same branch (ghost-run pileup seen 2026-09). The new
+# run re-harvests + re-fixes from the latest head, so cancelling is safe.
+concurrency:
+  group: review-combo-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   review:
     if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       id-token: write
       contents: read
       pull-requests: write
       issues: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
@@ -73,15 +81,19 @@ jobs:
     needs: review
     # needs.review runs even when review is skipped (never DELIBERATELY skipped
     # here — dependabot), so re-check the guard explicitly.
-    if: always() && !contains(github.event.pull_request.title, '[combo-fix]')
+    # Fork guard: fork PRs run with a read-only token that cannot push or
+    # comment, so the fix pass would only go red. Review (read-only) still
+    # covers forks; humans merge the fixes.
+    if: always() && !contains(github.event.pull_request.title, '[combo-fix]') && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     permissions:
       id-token: write
       contents: write
       pull-requests: write
       issues: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: true
@@ -99,7 +111,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          MSG=$(gh api repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }} --jq '.commit.message')
+          MSG=$(bash .github/scripts/gh-retry.sh api repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }} --jq '.commit.message')
           if printf '%s' "$MSG" | grep -q '\[combo-fix\]'; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "Head is a combo-fix commit — nothing to do."
@@ -118,8 +130,10 @@ jobs:
           # every run. Under bash -e a failed `gh pr checks` must not clobber
           # a valid zero: only empty output falls back to "still pending".
           # After 60 tries fail loud instead of harvesting incomplete data.
+          # gh-retry: one bounded retry per poll — a transient API blip must
+          # not burn a whole 20s slot or, worse, read as "still pending".
           for i in $(seq 1 60); do
-            if ! PENDING=$(gh pr checks ${{ github.event.pull_request.number }} --json name,state --jq '[.[] | select(.name=="SonarCloud Code Analysis" or .name=="CodeQL" or (.name|startswith("analyze"))) | select(.state!="SUCCESS" and .state!="FAILURE" and .state!="CANCELLED" and .state!="SKIPPED")] | length'); then
+            if ! PENDING=$(bash .github/scripts/gh-retry.sh pr checks ${{ github.event.pull_request.number }} --json name,state --jq '[.[] | select(.name=="SonarCloud Code Analysis" or .name=="CodeQL" or (.name|startswith("analyze"))) | select(.state!="SUCCESS" and .state!="FAILURE" and .state!="CANCELLED" and .state!="SKIPPED")] | length'); then
               [ -n "$PENDING" ] || PENDING='?'
             fi
             [ "$PENDING" = "0" ] && break
@@ -143,12 +157,14 @@ jobs:
           # that break --jq object filters, and any API hiccup under bash -e
           # kills the whole step. So: fetch raw (never fail), then filter
           # locally with null-safe recursion that handles flat or paged shapes.
-          gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate > findings/issues-raw.json \
+          # gh-retry: one bounded retry on transient blips (reads only —
+          # writes are never retried blind, a 5xx can't say if it landed).
+          bash .github/scripts/gh-retry.sh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate > findings/issues-raw.json \
             || echo '[]' > findings/issues-raw.json
           jq -r '[.. | objects | select(.user?.login=="github-actions") | .body] | join("\n---\n")' findings/issues-raw.json > findings/opencode.md
           # 2. CodeRabbit (issue + inline review comments)
           jq -r '[.. | objects | select(.user?.login=="coderabbitai[bot]" or .user?.login=="coderabbitai") | .body] | join("\n---\n")' findings/issues-raw.json > findings/rabbit-main.md
-          gh api "repos/${{ github.repository }}/pulls/$PR/comments" --paginate > findings/pull-raw.json \
+          bash .github/scripts/gh-retry.sh api "repos/${{ github.repository }}/pulls/$PR/comments" --paginate > findings/pull-raw.json \
             || echo '[]' > findings/pull-raw.json
           jq -r '[.. | objects | select(.user?.login=="coderabbitai[bot]" or .user?.login=="coderabbitai") | ("`"+(.path // "?")+":"+([.line,.original_line]|map(values)|join(","))+"` "+.body)] | join("\n---\n")' findings/pull-raw.json > findings/rabbit-inline.md
           # 3. SonarCloud open issues on this PR. Download to a file first,
@@ -163,6 +179,13 @@ jobs:
             || echo '{"issues":[]}' > findings/sonar.json
           python3 -c "import json; raw=open('findings/sonar.json').read().strip() or '{\"issues\":[]}'; d=json.loads(raw); print('\n---\n'.join(f\"[{i['severity']}] {i['component'].split(':')[-1]}:{i.get('line','?')} {i['rule']} — {i['message']}\" for i in d.get('issues',[])) or 'CLEAN: no open Sonar issues.')" > findings/sonar.md
           wc -c findings/*.md
+
+      # Model output is untrusted text: a review that quotes a leaked secret
+      # must not propagate it into the summary, artifacts, or PR comments.
+      # Scrub credential-shaped literals (keeps file:line + rule intact).
+      - name: Redact secrets from harvest
+        if: steps.guard.outputs.skip == 'false'
+        run: python3 .github/scripts/redact-secrets.py findings/
 
       # gitlab-opencode port: every run leaves downloadable evidence
       # (.jsonl/.out there). Here the harvest dir IS the evidence: publish
@@ -182,7 +205,7 @@ jobs:
 
       - name: Upload findings artifact
         if: always() && steps.guard.outputs.skip == 'false'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: combo-findings-pr-${{ github.event.pull_request.number }}-${{ github.run_number }}
           path: findings/
@@ -247,3 +270,17 @@ jobs:
             goes in your report comment for a human instead of a commit.
             Never commit findings/ or any other harvest/evidence files — they
             are workspace scratch for your analysis only, not PR content.
+
+      # A dead fixer must be VISIBLE, not just red: point the PR author at
+      # the logs. failure() only (success/skip stay quiet). || true because
+      # the comment itself is best-effort (fork runs can't post).
+      - name: Post Error Comment
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LOGS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >
+          gh pr comment ${{ github.event.pull_request.number }} --body
+          "❌ **review-combo failed** — the fix pass did not complete. Check the
+          [workflow logs]($LOGS_URL), or re-run the failed job. Findings so far
+          (if any) are in the step summary + combo-findings artifact." || true
