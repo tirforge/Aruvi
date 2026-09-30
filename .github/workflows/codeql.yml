@@ -25,4 +25,19 @@ jobs:
         with:
           languages: ${{ matrix.language }}
 
+      - name: Set up JDK 17 (java-kotlin only)
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - name: Set up Android SDK (java-kotlin only)
+        if: matrix.language == 'java-kotlin'
+        uses: android-actions/setup-android@v4
+      - name: Build for CodeQL extraction (java-kotlin only)
+        if: matrix.language == 'java-kotlin'
+        run: ./gradlew :app:assembleMobileDebug :app:assembleTvDebug --no-daemon
+        working-directory: android
+
       - uses: github/codeql-action/analyze@v4
