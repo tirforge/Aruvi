@@ -1,0 +1,38 @@
+# ci-selfcheck: seconds-fast gate on the repo's own workflows.
+# actionlint (syntax/expressions) + ci_selfcheck.py (known-bad-pattern policy).
+# Runs before anything expensive; live runs only validate what survives this.
+name: ci-selfcheck
+
+on:
+  pull_request:
+    paths:
+      - ".github/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  selfcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      # Pinned upstream download script (no third-party wrapper action to rot).
+      - name: actionlint
+        run: |
+          curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash -o /tmp/dl-actionlint.bash
+          mkdir -p /tmp/bin
+          bash /tmp/dl-actionlint.bash 1.7.12 /tmp/bin
+          /tmp/bin/actionlint -no-color
+
+      - name: Policy test (known-bad CI patterns)
+        run: |
+          python3 -c "import yaml" 2>/dev/null || pip install -q pyyaml
+          python3 .github/scripts/ci_selfcheck.py
