@@ -983,10 +983,28 @@ class TestSpaStaticAllowlist:
 
         return TestClient(app)
 
-    def test_spa_fallback_and_api_guard(self):
+    def _tmp_site(self, tmp_path, monkeypatch):
+        """Build a hermetic app/static tree (repo never ships the build dir)."""
+        from app import main as mainmod
+        from app.static_allowlist import build_static_allowlist
+
+        static = tmp_path / "site" / "app" / "static"
+        (static / "assets").mkdir(parents=True)
+        (static / "index.html").write_bytes(b"<html>spa</html>")
+        (static / "favicon.ico").write_bytes(b"ICO")
+        (static / "assets" / "app-abc.js").write_bytes(b"js" * 100)
+        (static / "assets" / "app-abc.js.gz").write_bytes(b"gz")
+        monkeypatch.chdir(tmp_path / "site")
+        monkeypatch.setattr(
+            mainmod, "STATIC_ALLOWLIST", build_static_allowlist("app/static")
+        )
+        return mainmod
+
+    def test_spa_fallback_and_api_guard(self, tmp_path, monkeypatch):
+        self._tmp_site(tmp_path, monkeypatch)
         c = self._client()
         r = c.get("/")
-        assert r.status_code == 200  # index.html exists in repo
+        assert r.status_code == 200
         assert r.headers["content-type"].startswith("text/html")
         assert c.get("/api").status_code == 404
         assert c.get("/api/some/route").status_code == 404
@@ -994,22 +1012,19 @@ class TestSpaStaticAllowlist:
         r = c.get("/some/client/route/that/does/not/exist")
         assert r.status_code == 200
 
-    def test_known_static_file_served_byte_identical(self):
+    def test_known_static_file_served_byte_identical(self, tmp_path, monkeypatch):
         import os
-        from app.main import STATIC_ALLOWLIST
 
-        assert STATIC_ALLOWLIST, "repo ships app/static, allowlist must be non-empty"
-        rel = next(
-            r
-            for r in STATIC_ALLOWLIST
-            if r.endswith((".png", ".ico", ".html")) and "/" not in r
-        )
+        mainmod = self._tmp_site(tmp_path, monkeypatch)
+        assert mainmod.STATIC_ALLOWLIST, "tmp site must yield a non-empty allowlist"
+        rel = "favicon.ico"
+        assert rel in mainmod.STATIC_ALLOWLIST
         c = self._client()
         r = c.get(f"/{rel}", headers={"accept-encoding": "identity"})
         assert r.status_code == 200
-        with open(STATIC_ALLOWLIST[rel], "rb") as f:
+        with open(mainmod.STATIC_ALLOWLIST[rel], "rb") as f:
             assert r.content == f.read()
-        assert os.path.abspath(STATIC_ALLOWLIST[rel]).startswith(
+        assert os.path.abspath(mainmod.STATIC_ALLOWLIST[rel]).startswith(
             os.path.abspath("app/static") + os.sep
         )
 
