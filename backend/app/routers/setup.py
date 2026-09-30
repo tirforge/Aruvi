@@ -36,7 +36,7 @@ def _cleanup_expired() -> None:
         entry = _pending.pop(k, None)
         if entry:
             try:
-                asyncio.get_event_loop().create_task(entry["client"].disconnect())
+                asyncio.get_running_loop().create_task(entry["client"].disconnect())
             except Exception:
                 pass
 
@@ -56,6 +56,11 @@ def _check_key(provided: str | None) -> None:
 def _get_client(token: str):
     entry = _pending.get(token)
     if not entry:
+        raise HTTPException(404, "Login attempt expired or unknown token — start again")
+    # Belt-and-braces TTL: _cleanup_expired() normally purges these first, but
+    # an entry that expired since the last cleanup must never be usable.
+    if time.time() - entry["ts"] > _TTL_SECONDS:
+        _pending.pop(token, None)
         raise HTTPException(404, "Login attempt expired or unknown token — start again")
     return entry
 

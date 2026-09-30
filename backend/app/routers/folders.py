@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import defer
 
 from ..database import get_db
@@ -182,7 +183,15 @@ async def create_folder(
         parent_id=folder_data.parent_id,
     )
     db.add(folder)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Lost a concurrent-create race with the same name (the pre-check
+        # above passed for both) — report 400, not 500.
+        await db.rollback()
+        raise HTTPException(
+            status_code=400, detail="Folder with this name already exists"
+        )
     await db.refresh(folder)
 
     return FolderResponse(
@@ -333,14 +342,20 @@ async def delete_folder(
 
             await db.execute(
                 update(File)
-                .where(File.folder_id.in_(all_folder_ids))
+                .where(
+                    File.folder_id.in_(all_folder_ids),
+                    File.user_id == current_user.id,
+                )
                 .values(folder_id=target_folder_id)
             )
     else:
         if all_folder_ids:
             file_query = (
                 select(File)
-                .where(File.folder_id.in_(all_folder_ids))
+                .where(
+                    File.folder_id.in_(all_folder_ids),
+                    File.user_id == current_user.id,
+                )
                 .options(defer(File.thumbnail_data))
             )
             file_result = await db.execute(file_query)
@@ -352,12 +367,22 @@ async def delete_folder(
             if storage_message_ids:
                 invalidate_message_cache_batch(storage_message_ids)
 
-            await db.execute(delete(File).where(File.folder_id.in_(all_folder_ids)))
+            await db.execute(
+                delete(File).where(
+                    File.folder_id.in_(all_folder_ids),
+                    File.user_id == current_user.id,
+                )
+            )
 
     # Delete all descendant folder rows explicitly — ORM cascade only fires
     # for loaded children, and SQLite FK cascade needs PRAGMA foreign_keys=ON
     if all_folder_ids:
-        await db.execute(delete(Folder).where(Folder.id.in_(all_folder_ids)))
+        await db.execute(
+            delete(Folder).where(
+                Folder.id.in_(all_folder_ids),
+                Folder.user_id == current_user.id,
+            )
+        )
     await db.commit()
 
     # Best-effort cleanup from the Telegram storage channel — run AFTER the

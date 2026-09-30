@@ -115,14 +115,22 @@ def get_cpu() -> float:
             return 0.0
 
 
+_MEM_DEFAULT_BYTES = 16 * 1024**3
+
+
 def _parse_mem_env(val: str) -> int:
-    val = val.strip().upper()
-    for suffix in ["GIB", "GI", "GB", "G", "MIB", "MI", "MB", "M"]:
-        if val.endswith(suffix):
-            return int(
-                float(val[: -len(suffix)]) * (1024**3 if suffix[0] == "G" else 1024**2)
-            )
-    return int(val)
+    try:
+        val = val.strip().upper()
+        for suffix in ["GIB", "GI", "GB", "G", "MIB", "MI", "MB", "M"]:
+            if val.endswith(suffix):
+                return int(
+                    float(val[: -len(suffix)]) * (1024**3 if suffix[0] == "G" else 1024**2)
+                )
+        return int(val)
+    except (ValueError, TypeError, AttributeError):
+        # Operator typo in $MEMORY must not 500 the status endpoint — fall
+        # back to the documented default.
+        return _MEM_DEFAULT_BYTES
 
 
 def _cgroup_memory_max() -> int | None:

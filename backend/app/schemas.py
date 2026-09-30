@@ -52,11 +52,11 @@ class FolderBase(BaseModel):
 
 
 class FolderCreate(FolderBase):
-    pass
+    name: str = Field(min_length=1, max_length=200)
 
 
 class FolderUpdate(BaseModel):
-    name: Optional[str] = None
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     parent_id: Optional[int] = None
 
 
@@ -135,8 +135,8 @@ class WatchProgressBase(BaseModel):
 
 
 class WatchProgressUpdate(BaseModel):  # QB
-    position: int  # PT
-    duration: Optional[int] = None  # XB
+    position: int = Field(ge=0)  # PT
+    duration: Optional[int] = Field(default=None, ge=0)  # XB
     completed: Optional[bool] = None  # QZ
 
     model_config = ConfigDict(extra="ignore")  # Android client sends extra fields
@@ -209,7 +209,7 @@ class BotInfoResponse(BaseModel):
 
 
 class BatchMoveRequest(BaseModel):
-    ids: list[int]
+    ids: list[int] = Field(max_length=500)
     folder_id: Optional[int] = None
 
 

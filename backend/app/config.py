@@ -32,7 +32,19 @@ def _auto_jwt_secret() -> str:
                 return stored
         _JWT_SECRET_FILE.parent.mkdir(parents=True, exist_ok=True)
         generated = secrets.token_hex(32)
-        _JWT_SECRET_FILE.write_text(generated)
+        # Create with 0o600 atomically: write_text() creates the file under the
+        # process umask (typically world-readable 644) and only chmods after,
+        # leaving a window where the JWT secret is readable by other users.
+        fd = os.open(_JWT_SECRET_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(generated)
+        except BaseException:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            raise
         try:
             os.chmod(_JWT_SECRET_FILE, 0o600)
         except OSError:

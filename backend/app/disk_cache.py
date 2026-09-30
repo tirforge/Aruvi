@@ -36,6 +36,23 @@ def _parse_key(dir_name: str) -> tuple[int, int] | None:
         return None
 
 
+def _safe_mtime(p: Path) -> float:
+    """mtime that never raises: a concurrent put replace/unlink mid-sort must
+    not abort the whole sweep."""
+    try:
+        return p.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _safe_size(p: Path) -> int:
+    """st_size that never raises (same concurrent-mutation races)."""
+    try:
+        return p.stat().st_size
+    except OSError:
+        return 0
+
+
 class DiskChunkCache:
     def __init__(self, cache_dir: Path | None = None):
         self.cache_dir = cache_dir or CACHE_DIR
@@ -63,12 +80,19 @@ class DiskChunkCache:
             return frozenset()
         d = self._movie_dir(chat_id, message_id)
         try:
-            return frozenset(
-                int(entry.name[:-4])
-                for entry in os.scandir(d)
-                if entry.is_file() and entry.name.endswith(".bin")
-            )
-        except (OSError, ValueError):
+            indices = set()
+            with os.scandir(d) as it:
+                for entry in it:
+                    # Skip (don't abort on) one bad name: a single non-numeric
+                    # *.bin must not discard every other valid cached chunk.
+                    if not entry.is_file() or not entry.name.endswith(".bin"):
+                        continue
+                    try:
+                        indices.add(int(entry.name[:-4]))
+                    except ValueError:
+                        continue
+            return frozenset(indices)
+        except OSError:
             return frozenset()
 
     def touch(self, chat_id: int, message_id: int):
@@ -181,6 +205,7 @@ class DiskChunkCache:
             return 0
         now = time.time()
         total = 0
+        freed = 0
         entries: list[tuple[float, Path, int]] = []
         for d in self.cache_dir.iterdir():
             if not d.is_dir():
@@ -202,6 +227,7 @@ class DiskChunkCache:
             if now - active_ts > DISK_CACHE_TTL:
                 self._remove_dir(d)
                 total -= size
+                freed += size
             else:
                 entries.append((active_ts, d, size))
         # Drop activity bookkeeping for dirs that no longer exist so the map
@@ -224,20 +250,24 @@ class DiskChunkCache:
                         for f in d.iterdir()
                         if f.is_file() and not f.name.endswith(".tmp")
                     ),
-                    key=lambda p: p.stat().st_mtime,
+                    # Guarded stat: a concurrent put replace/unlink must not
+                    # abort the whole sweep mid-sort.
+                    key=lambda p: _safe_mtime(p),
                 )
-                size = sum(f.stat().st_size for f in files)
+                size = sum(_safe_size(f) for f in files)
             except OSError:
                 continue
             over = size - DISK_CACHE_PER_VIDEO_BYTES
             for f in files:
                 if over <= 0:
                     break
+                size_before = _safe_size(f)
                 try:
-                    over -= f.stat().st_size
                     f.unlink()
                 except OSError:
-                    pass
+                    continue
+                over -= size_before
+                freed += size_before
         # Recompute totals now that per-video caps may have shrunk dirs.
         entries = []
         total = 0
@@ -262,7 +292,6 @@ class DiskChunkCache:
             total += size
             entries.append((self._activity_time(chat_id, message_id, d), d, size))
         entries.sort(key=lambda x: x[0])
-        freed = 0
         while total > DISK_CACHE_MAX_BYTES and entries:
             _, d, size = entries.pop(0)
             self._remove_dir(d)

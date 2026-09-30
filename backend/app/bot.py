@@ -1497,7 +1497,9 @@ async def handle_callback(client, callback: CallbackQuery):
 
             # Check if folder has files
             files_count = await db.execute(
-                select(func.count()).where(File.folder_id == folder_id)
+                select(func.count()).where(
+                    File.folder_id == folder_id, File.user_id == folder.user_id
+                )
             )
             count = files_count.scalar() or 0
 
@@ -1550,7 +1552,9 @@ async def handle_callback(client, callback: CallbackQuery):
             from sqlalchemy import update
 
             await db.execute(
-                update(File).where(File.folder_id == folder_id).values(folder_id=None)
+                update(File)
+                .where(File.folder_id == folder_id, File.user_id == folder.user_id)
+                .values(folder_id=None)
             )
 
             # Delete folder

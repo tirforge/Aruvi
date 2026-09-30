@@ -145,7 +145,7 @@ async def tv_recent_files(
 
 @router.get("/search")
 async def tv_search(
-    q: str = Query(..., min_length=1),
+    q: str = Query(..., min_length=1, max_length=200),
     limit: int = Query(30, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),

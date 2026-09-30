@@ -80,7 +80,10 @@ class CompressibleGZipMiddleware:
                         headers = [
                             (k, v)
                             for k, v in start.get("headers", [])
-                            if k.lower() != b"content-length"
+                            # content-length is recomputed below; etag describes
+                            # the UNCOMPRESSED body and must not be served with
+                            # the gzip bytes (cache poison on revalidation).
+                            if k.lower() not in (b"content-length", b"etag")
                         ]
                         headers += [
                             (b"content-length", str(len(compressed)).encode()),

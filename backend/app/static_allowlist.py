@@ -28,6 +28,9 @@ def build_static_allowlist(base: str = "app/static") -> dict:
         for name in files:
             if name.endswith(".gz"):
                 continue
+            # Dotfiles (e.g. .DS_Store, editor backups) are never servable.
+            if name.startswith("."):
+                continue
             abs_path = os.path.join(root, name)
             # Never allowlist a symlink — FileResponse would follow it out
             # of base at serve time.

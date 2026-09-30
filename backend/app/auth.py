@@ -24,6 +24,19 @@ def _utcnow():
 
 # telegram_id → monotonic time of last last_active DB write (throttle)
 _last_active_touch: dict[int, float] = {}
+_LAST_ACTIVE_PRUNE_AT = 0.0
+
+
+def _prune_active_touch(now: float) -> None:
+    """Bound the throttle map: drop entries idle for over an hour. Runs at
+    most once per hour so the steady-state cost is O(1)."""
+    global _LAST_ACTIVE_PRUNE_AT
+    if now - _LAST_ACTIVE_PRUNE_AT < 3600:
+        return
+    _LAST_ACTIVE_PRUNE_AT = now
+    for uid, ts in list(_last_active_touch.items()):
+        if now - ts > 3600:
+            _last_active_touch.pop(uid, None)
 
 settings = get_settings()
 security = HTTPBearer(auto_error=False)
@@ -102,7 +115,14 @@ def verify_token(token: str, token_type: str = "access") -> Optional[int]:
         return None
 
     sub = payload.get("sub")
-    return int(sub) if sub is not None else None
+    if sub is None:
+        return None
+    try:
+        return int(sub)
+    except (TypeError, ValueError):
+        # Forged token with a non-numeric sub must fail closed (None → 401),
+        # not raise through as a 500.
+        return None
 
 
 async def get_current_user_opt(
@@ -202,6 +222,7 @@ async def get_current_user(
     last = _last_active_touch.get(user.id, 0.0)
     if now - last > 300:
         _last_active_touch[user.id] = now
+        _prune_active_touch(now)
         try:
             await db.execute(
                 update(User).where(User.id == user.id).values(last_active=_utcnow())

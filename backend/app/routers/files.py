@@ -211,13 +211,17 @@ async def update_file(
 
     await db.commit()
 
-    # Re-fetch with relationships
+    # Re-fetch with relationships. Keeps the user predicate (defense in
+    # depth) and tolerates a concurrent delete — scalar_one() would 500.
     result = await db.execute(
         select(File)
-        .where(File.id == file_id)
+        .where(File.id == file_id, File.user_id == current_user.id)
         .options(selectinload(File.watch_progress))
     )
-    file = result.scalar_one()
+    file = result.scalar_one_or_none()
+
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
 
     return FileResponse(**add_urls_to_file(file))
 
@@ -280,6 +284,10 @@ async def batch_delete_files(
     current_user: User = Depends(get_current_user),
 ):
     """Delete multiple files."""
+    if len(file_ids) > 500:
+        raise HTTPException(
+            status_code=400, detail="Too many files (max 500 per request)"
+        )
     # Fetch all files
     result = await db.execute(
         select(File)
@@ -438,13 +446,16 @@ async def share_file(
 
     await db.commit()
 
-    # Re-fetch with relationships
+    # Re-fetch with relationships (user-scoped; tolerates concurrent delete)
     result = await db.execute(
         select(File)
-        .where(File.id == file_id)
+        .where(File.id == file_id, File.user_id == current_user.id)
         .options(selectinload(File.watch_progress))
     )
-    file = result.scalar_one()
+    file = result.scalar_one_or_none()
+
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
 
     return FileResponse(**add_urls_to_file(file))
 
@@ -470,13 +481,16 @@ async def revoke_share(
 
     await db.commit()
 
-    # Re-fetch with relationships
+    # Re-fetch with relationships (user-scoped; tolerates concurrent delete)
     result = await db.execute(
         select(File)
-        .where(File.id == file_id)
+        .where(File.id == file_id, File.user_id == current_user.id)
         .options(selectinload(File.watch_progress))
     )
-    file = result.scalar_one()
+    file = result.scalar_one_or_none()
+
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
 
     return FileResponse(**add_urls_to_file(file))
 

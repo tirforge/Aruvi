@@ -161,6 +161,16 @@ async def start_one_client(i, c):
                         f"Client {i}: already connected (caught) — treating as started"
                     )
                     return
+                # Other ConnectionErrors are transient (flaky DC, socket reset)
+                # — back off and retry like every other transient error instead
+                # of abandoning the remaining attempts.
+                if attempt < max_attempts:
+                    delay = 2**attempt
+                    diag_log(
+                        f"Client {i}: connection error (attempt {attempt}): {e}. Retrying in {delay}s..."
+                    )
+                    await asyncio.sleep(delay)
+                    continue
                 raise
             except Exception as e:
                 err_str = str(e).lower()
@@ -232,6 +242,13 @@ async def reconnect_client(client: Client) -> bool:
         # two concurrent starts strand the loser in connect()'s
         # "already connected" guard.
         async with get_start_lock(idx):
+            # Re-check the cooldown INSIDE the lock: it may have tripped while
+            # this waiter was queued. The disconnect itself stays unconditional
+            # — callers invoke this precisely when the auth key is dead, and a
+            # dead key still reports is_connected == True.
+            if _reconnect_cooldown_until.get(idx, 0) > time.monotonic():
+                diag_log(f"Client {idx}: reconnect on cooldown (post-lock), skipping")
+                return False
             if client.is_connected:
                 await client.disconnect()
             await client.start()

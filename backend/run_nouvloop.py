@@ -34,10 +34,9 @@ async def _periodic_housekeeping():
         _libc.malloc_trim(0)
         try:
             now = time.monotonic()
-            # Active streams — never evict
-            active = {
-                (info["chat_id"], mid) for mid, info in list(_forward_streams.items())
-            }
+            # Active streams — never evict. Keys ARE (chat_id, message_id)
+            # tuples (see streaming._forward_streams), so use them directly.
+            active = set(_forward_streams.keys())
             # Recently finished streams — keep for CACHE_TTL (10min) for resume after network drop
             for key, finished_at in list(_cache_finished_at.items()):
                 if now - finished_at < CACHE_TTL:

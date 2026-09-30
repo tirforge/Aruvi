@@ -247,6 +247,12 @@ def _do_restart():
     _pending_restart = None
     _forward_streams.clear()
     _cache_finished_at.clear()
+    # Cancel orphaned ahead-prefetch loops first: they run against the maps
+    # cleared below and would otherwise keep fetching into cleared state.
+    for task in list(_prefetch_tasks.values()):
+        task.cancel()
+    _prefetch_tasks.clear()
+    _prefetch_last_activity.clear()
     _prefetch_size.clear()
     _prefetch_hwm.clear()
     _prefetch_cursor.clear()
@@ -622,9 +628,9 @@ async def _ahead_prefetch_loop(key: tuple[int, int], file_size: int):
         # and trigger duplicate prefetch loops on the next playhead tick.
         if _prefetch_tasks.get(key) is this_task:
             _prefetch_tasks.pop(key, None)
-        _prefetch_hwm.pop(key, None)
-        _prefetch_cursor.pop(key, None)
-        _prefetch_last_activity.pop(key, None)
+            _prefetch_hwm.pop(key, None)
+            _prefetch_cursor.pop(key, None)
+            _prefetch_last_activity.pop(key, None)
 
 
 def start_ahead_prefetch(chat_id: int, message_id: int, file_size: int):
@@ -992,7 +998,11 @@ _MSG_CACHE_MAX = 4096
 
 
 def _prune_msg_state():
-    if len(_msg_cache) <= _MSG_CACHE_MAX:
+    if (
+        len(_msg_cache) <= _MSG_CACHE_MAX
+        and len(_msg_last_force) <= _MSG_CACHE_MAX
+        and len(_msg_refresh_locks) <= _MSG_CACHE_MAX
+    ):
         return
     by_age = sorted(_msg_cache.items(), key=lambda x: x[1][0])
     to_remove = len(_msg_cache) - int(_MSG_CACHE_MAX * 0.8)
@@ -1001,6 +1011,13 @@ def _prune_msg_state():
         _msg_refresh_locks.pop(key, None)
         _msg_last_force.pop(key, None)
         _msg_poisoned.discard(key)
+    # Bookkeeping keys with no cached message (force-throttle/lock entries for
+    # movies long evicted) would otherwise grow without bound between prunes.
+    for key in list(_msg_last_force):
+        if key not in _msg_cache:
+            _msg_last_force.pop(key, None)
+            _msg_refresh_locks.pop(key, None)
+            _msg_poisoned.discard(key)
 
 
 def _get_msg_refresh_lock(key: tuple[int, int, int]) -> asyncio.Lock:
@@ -1027,6 +1044,10 @@ async def _fetch_message(client, chat_id: int, message_id: int, force: bool = Fa
     now = time.monotonic()
     if force:
         async with _get_msg_refresh_lock(key):
+            # Re-read the clock INSIDE the lock: a waiter queued behind a slow
+            # force-refetch would otherwise throttle on a stale timestamp and
+            # return a dead cached Message instead of refreshing.
+            now = time.monotonic()
             if now - _msg_last_force.get(key, 0) < _MSG_REFRESH_MIN_INTERVAL:
                 entry = _msg_cache.get(key)
                 # If the cached Message is the dead one that produced the
@@ -1427,6 +1448,11 @@ async def parallel_stream_generator(
                     ):
                         d.extend(part)
                 data = bytes(d)
+                if not data:
+                    # Telegram yielded nothing for this chunk — treat as a
+                    # fetch failure so the caller retries instead of resolving
+                    # (and later yielding) an empty chunk as valid data.
+                    return None
                 video_cache.put(chunk_offset, data)
                 _schedule_disk_write(chat_id, message_id, chunk_offset, data)
                 return data
@@ -1607,11 +1633,14 @@ async def parallel_stream_generator(
                                     client, chat_id, message_id, force=True
                                 )
                                 async with semaphore:
-                                    d = bytearray()
-                                    async for part in client.stream_media(
-                                        local_msg, limit=1, offset=chunk_offset
-                                    ):
-                                        d.extend(part)
+                                    # Bounded like _fetch_one: a stuck media session
+                                    # must not wedge this fallback worker forever.
+                                    async with asyncio.timeout(STREAM_CHUNK_TIMEOUT_S):
+                                        d = bytearray()
+                                        async for part in client.stream_media(
+                                            local_msg, limit=1, offset=chunk_offset
+                                        ):
+                                            d.extend(part)
                                 data = bytes(d)
                                 video_cache.put(chunk_offset, data)
                                 await _resolve_chunk_now(chunk_offset, data)
@@ -1636,11 +1665,15 @@ async def parallel_stream_generator(
                                             client, chat_id, message_id, force=True
                                         )
                                         async with semaphore:
-                                            d = bytearray()
-                                            async for part in client.stream_media(
-                                                local_msg, limit=1, offset=chunk_offset
-                                            ):
-                                                d.extend(part)
+                                            # Bounded like _fetch_one: a stuck media
+                                            # session must not wedge this fallback
+                                            # worker forever.
+                                            async with asyncio.timeout(STREAM_CHUNK_TIMEOUT_S):
+                                                d = bytearray()
+                                                async for part in client.stream_media(
+                                                    local_msg, limit=1, offset=chunk_offset
+                                                ):
+                                                    d.extend(part)
                                         data = bytes(d)
                                         video_cache.put(chunk_offset, data)
                                         await _resolve_chunk_now(chunk_offset, data)
@@ -1674,11 +1707,15 @@ async def parallel_stream_generator(
                                             client, chat_id, message_id, force=True
                                         )
                                         async with semaphore:
-                                            d = bytearray()
-                                            async for part in client.stream_media(
-                                                local_msg, limit=1, offset=chunk_offset
-                                            ):
-                                                d.extend(part)
+                                            # Bounded like _fetch_one: a stuck media
+                                            # session must not wedge this fallback
+                                            # worker forever.
+                                            async with asyncio.timeout(STREAM_CHUNK_TIMEOUT_S):
+                                                d = bytearray()
+                                                async for part in client.stream_media(
+                                                    local_msg, limit=1, offset=chunk_offset
+                                                ):
+                                                    d.extend(part)
                                         data = bytes(d)
                                         video_cache.put(chunk_offset, data)
                                         await _resolve_chunk_now(chunk_offset, data)
@@ -1761,7 +1798,10 @@ async def parallel_stream_generator(
     async def _prebuffer_chunk(cidx):
         if cidx in disk_resident and not results[cidx].done():
             ddata = await asyncio.to_thread(_disk_cache.get, chat_id, message_id, cidx)
-            if ddata is not None:
+            if ddata is not None and not results[cidx].done():
+                # Re-checked after the await: a worker may have resolved this
+                # future while the disk read was in flight (set_result on a
+                # done future raises InvalidStateError and aborts the stream).
                 results[cidx].set_result(ddata)
                 return
         try:
@@ -1895,6 +1935,13 @@ async def parallel_stream_generator(
                 fwd_key = (chat_id, message_id)
                 if fwd_key in _forward_streams:
                     _forward_streams[fwd_key]["updated_at"] = time.monotonic()
+                # Keep the disk tier alive for long streams: TTL counts from
+                # the last touch, so a >30min movie would otherwise go stale
+                # mid-stream and have its chunks swept while still reading.
+                try:
+                    _disk_cache.touch(chat_id, message_id)
+                except Exception:
+                    pass
     finally:
         # Diagnose WHY a stream ended short: log the pending exception type so a
         # mid-stream abort is never silent (normally an asyncio.TimeoutError from

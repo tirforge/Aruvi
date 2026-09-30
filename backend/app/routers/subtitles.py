@@ -35,6 +35,10 @@ router = APIRouter(prefix="/subtitles", tags=["Subtitles"])
 
 _OS_URL = "https://api.opensubtitles.com/api/v1"
 
+# Largest provider subtitle payload we will buffer (5 MB — a real subtitle is
+# tens of KB; anything bigger is abuse or a mislabeled binary).
+_MAX_SUBTITLE_BYTES = 5 * 1024 * 1024
+
 # dogpile-cache 1.5.0 changed CacheRegion internals; subliminal's unconfigured
 # `region` breaks on the first get_or_create unless we back it explicitly.
 _configured_region = False
@@ -251,7 +255,23 @@ async def _os_download(sub_id: str, file_id: int | None) -> tuple[str, str]:
                 raise HTTPException(
                     status_code=502, detail="OpenSubtitles returned no download link"
                 )
-            content = (await client.get(link, headers=_os_headers())).content
+            # Capped streaming read: a subtitle is kilobytes — a multi-MB
+            # "subtitle" is abuse/mislabel, and .content would buffer all of it
+            # in RAM. Abort past the cap instead.
+            chunks: list[bytes] = []
+            total = 0
+            async with client.stream(
+                "GET", link, headers=_os_headers()
+            ) as resp:
+                resp.raise_for_status()
+                async for piece in resp.aiter_bytes(64 * 1024):
+                    total += len(piece)
+                    if total > _MAX_SUBTITLE_BYTES:
+                        raise HTTPException(
+                            status_code=502, detail="Subtitle file too large"
+                        )
+                    chunks.append(piece)
+            content = b"".join(chunks)
     except HTTPException:
         raise
     except Exception as exc:

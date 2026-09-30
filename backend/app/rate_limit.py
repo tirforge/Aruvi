@@ -7,7 +7,7 @@ def _is_ip(value: str) -> bool:
     try:
         ipaddress.ip_address(value.strip())
         return True
-    except ValueError:
+    except (ValueError, TypeError, AttributeError):
         return False
 
 
@@ -21,7 +21,10 @@ def _rate_limit_key(request) -> str:
     directly, so those headers are never trusted for them; the peer address
     is used instead (unspoofable)."""
     peer = request.client.host if request.client is not None else None
-    if peer in ("127.0.0.1", "::1"):
+    # IPv4-mapped IPv6 loopback (::ffff:127.0.0.1) is still localhost — without
+    # it a proxied stack falls into the shared get_remote_address bucket and
+    # one client's limit trips everyone else's.
+    if peer in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
         cf_ip = request.headers.get("Cf-Connecting-Ip")
         if cf_ip and _is_ip(cf_ip):
             return cf_ip.strip()

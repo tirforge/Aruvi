@@ -225,24 +225,40 @@ async def init_db():
         ).scalar()
         if done:
             return
-        rows = (
-            await conn.execute(
-                text("SELECT id, file_name, mime_type, file_type FROM files")
-            )
-        ).all()
+        # Batched scan: loading the whole files table with .all() OOMs on
+        # large libraries. UPDATEs only touch file_type in place, so a
+        # LIMIT/OFFSET walk is stable across batches.
         changed = 0
-        for fid, fname, mime, ftype in rows:
-            effective = classify_file_type(fname, mime)
-            if effective != ftype:
+        offset = 0
+        batch_size = 1000
+        while True:
+            rows = (
                 await conn.execute(
-                    text("UPDATE files SET file_type = :t WHERE id = :id"),
-                    {"t": effective, "id": fid},
+                    text(
+                        "SELECT id, file_name, mime_type, file_type FROM files "
+                        "ORDER BY id LIMIT :limit OFFSET :offset"
+                    ),
+                    {"limit": batch_size, "offset": offset},
                 )
-                changed += 1
-                logger.info("Reclassified file %s: %s -> %s", fid, ftype, effective)
+            ).all()
+            if not rows:
+                break
+            for fid, fname, mime, ftype in rows:
+                effective = classify_file_type(fname, mime)
+                if effective != ftype:
+                    await conn.execute(
+                        text("UPDATE files SET file_type = :t WHERE id = :id"),
+                        {"t": effective, "id": fid},
+                    )
+                    changed += 1
+                    logger.info("Reclassified file %s: %s -> %s", fid, ftype, effective)
+            offset += len(rows)
+            if len(rows) < batch_size:
+                break
         await conn.execute(
             text(
-                "INSERT INTO app_meta (key, value) VALUES ('file_type_reclassified', '1')"
+                "INSERT INTO app_meta (key, value) VALUES ('file_type_reclassified', '1') "
+                "ON CONFLICT (key) DO NOTHING"
             )
         )
         if changed:

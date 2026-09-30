@@ -37,6 +37,15 @@ from ..telegram import tg_client
 _bot_info_cache = {"data": None, "ts": 0}
 _BOT_INFO_TTL_SECONDS = 3600
 
+
+def _is_expired(expires_at: datetime) -> bool:
+    """TZ-safe expiry check. Columns are naive datetimes, but a Postgres
+    ``timestamptz`` round-trip comes back tz-aware — comparing naive with
+    aware raises TypeError (500). Normalize to naive UTC first."""
+    if expires_at is not None and getattr(expires_at, "tzinfo", None) is not None:
+        expires_at = expires_at.replace(tzinfo=None)
+    return expires_at < datetime.now(timezone.utc).replace(tzinfo=None)
+
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
@@ -69,8 +78,10 @@ async def get_bot_info_endpoint():
 
 
 @router.post("/refresh", response_model=Token)
+@limiter.limit("30/minute")
 async def refresh_token(
-    request: RefreshTokenRequest,
+    request: Request,
+    body: RefreshTokenRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """Refresh access token using refresh token.
@@ -80,8 +91,11 @@ async def refresh_token(
     replayed token no longer matches any stored session, so it dies immediately
     instead of remaining valid for its full lifetime.
     """
-    payload = verify_token_payload(request.refresh_token, token_type="refresh")
-    telegram_id = int(payload.get("sub")) if payload and payload.get("sub") else None
+    payload = verify_token_payload(body.refresh_token, token_type="refresh")
+    try:
+        telegram_id = int(payload.get("sub")) if payload and payload.get("sub") else None
+    except (TypeError, ValueError):
+        telegram_id = None
     token_version = payload.get("ver") if payload else None
 
     if not telegram_id:
@@ -99,7 +113,7 @@ async def refresh_token(
             status_code=401, detail="Refresh token has been invalidated"
         )
 
-    presented_hash = sha256(request.refresh_token.encode()).hexdigest()
+    presented_hash = sha256(body.refresh_token.encode()).hexdigest()
     session_result = await db.execute(
         select(RefreshSession).where(
             RefreshSession.token_hash == presented_hash,
@@ -114,7 +128,7 @@ async def refresh_token(
         raise HTTPException(
             status_code=401, detail="Refresh token has been invalidated"
         )
-    if session.expires_at < datetime.now(timezone.utc).replace(tzinfo=None):
+    if _is_expired(session.expires_at):
         await db.delete(session)
         await db.commit()
         raise HTTPException(status_code=401, detail="Refresh token has expired")
@@ -288,7 +302,7 @@ async def _verify_login_code_once(
         # deadline turns this into the terminal 202.
         return None
 
-    if login_code.expires_at < datetime.now(timezone.utc).replace(tzinfo=None):
+    if _is_expired(login_code.expires_at):
         await db.delete(login_code)
         await db.commit()
         # Same response as unclaimed — don't reveal code existed

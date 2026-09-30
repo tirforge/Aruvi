@@ -74,13 +74,15 @@ async def _user_from_download_token(request: Request, file_id: int, db: AsyncSes
     return None
 
 
-def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
+def parse_range_header(range_header: str, file_size: int) -> tuple[int, int] | None:
     """Parse HTTP Range header for video seeking support.
 
     For a zero-byte file there is no body to satisfy, so the caller answers
     ``0, -1`` + a 200 against a 0 length instead of a bogus 416. Multipart
     ranges (``bytes=a-b,c-d``) are rejected with ``None`` — the caller turns
     that into a 416 rather than silently serving only the first range.
+    An unparseable single range is likewise rejected with ``None`` (416)
+    instead of silently serving the full file.
     """
     if range_header:
         if "," in range_header:
@@ -96,7 +98,7 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
 
         match = re.match(r"bytes=(\d+)-(\d*)", range_header)
         if not match:
-            return 0, file_size - 1
+            return None
 
         start = int(match.group(1))
         end = int(match.group(2)) if match.group(2) else file_size - 1
@@ -457,11 +459,23 @@ async def stream_file(
 
 
 async def _download_thumb(msg, thumb_obj):
-    """Download thumbnail; on AUTH_BYTES_INVALID retry with fresh message."""
+    """Download thumbnail; on stale-reference/auth errors retry once with a fresh message."""
     try:
         return await tg_client.download_media(thumb_obj.file_id, in_memory=True)
     except Exception as e:
-        if "AUTH_BYTES_INVALID" not in str(e):
+        err = str(e).upper()
+        # A literal "AUTH_BYTES_INVALID" match missed sibling failures
+        # (expired file references, dead auth keys) that the same
+        # re-fetch-and-retry recovers from — all propagate as 500 otherwise.
+        if not any(
+            marker in err
+            for marker in (
+                "AUTH_BYTES_INVALID",
+                "FILE_REFERENCE",
+                "FILEREFERENCE",
+                "AUTH_KEY_UNREGISTERED",
+            )
+        ):
             raise
         # stale file reference — re-fetch bypassing cache
         refreshed = await tg_client.get_messages(msg.chat.id, msg.id)
@@ -764,7 +778,23 @@ async def _probe_cast_streams(message, file_size: int, request: Request):
                     pass
 
         feed_task = asyncio.create_task(_feed())
-        out, _ = await proc.communicate()
+        try:
+            # Bounded: ffprobe reads until it has parsed the header, then exits
+            # and _feed aborts on the closed pipe — but a hung ffprobe must not
+            # hang this request forever.
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=60)
+        except asyncio.TimeoutError:
+            logger.warning("cast probe timed out after 60s — killing ffprobe")
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            feed_task.cancel()
+            try:
+                await feed_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            return None
         await feed_task
         data = json.loads(out.decode(errors="ignore"))
         return _parse_cast_probe(data)
@@ -1050,6 +1080,17 @@ async def stream_for_cast(
                     pass
 
         feed_task = asyncio.create_task(feed_stdin())
+        # Drain stderr concurrently: ffmpeg's warnings go to a 64KB pipe and
+        # nobody was reading it, so a chatty file stalled ffmpeg forever while
+        # the handler below blocked on stdout (classic pipe deadlock).
+        async def _drain_stderr():
+            try:
+                while await proc.stderr.read(64 * 1024):
+                    pass
+            except Exception:
+                pass
+
+        stderr_task = asyncio.create_task(_drain_stderr())
         try:
             while True:
                 out = await proc.stdout.read(64 * 1024)
@@ -1059,14 +1100,29 @@ async def stream_for_cast(
             await feed_task
             rc = await proc.wait()
             if rc != 0:
-                err = (await proc.stderr.read()).decode(errors="ignore")[:2000]
-                logger.warning("ffmpeg remux exited %d: %s", rc, err)
+                logger.warning("ffmpeg remux exited %d", rc)
         finally:
+            stderr_task.cancel()
             feed_task.cancel()
+            try:
+                await feed_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            try:
+                await stderr_task
+            except (asyncio.CancelledError, Exception):
+                pass
             try:
                 proc.terminate()
             except Exception:
                 pass
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except (asyncio.TimeoutError, Exception):
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
 
     return StreamingResponse(
         ffmpeg_remux_stream(),
