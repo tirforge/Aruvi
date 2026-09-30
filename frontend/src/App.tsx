@@ -73,12 +73,6 @@ navigate('/', { replace: true });
     );
 }
 
-// Add Key icon to imports if not already imported (it's not, need to check imports)
-// Wait, I can't easily add imports here without multiple replace.
-// I'll stick to simple UI for now or check imports first.
-// App.tsx imports: Routes, Route, Navigate, useSearchParams, useNavigate (react-router-dom); useEffect, useState (react); useCurrentUser (./lib/api); FileBrowser
-// It does NOT import lucide-react icons. I'll use text or existing SVG.
-
 function LoginPage() {
     const { mutate: loginByCode, isPending: isVerifying } = useLoginWithCode();
     const { mutate: generateCode, isPending: isGenerating } = useGenerateLoginCode();
@@ -192,9 +186,10 @@ function LoginPage() {
 
     const handleManualLogin = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!code) return;
+        const trimmed = code.trim();
+        if (!trimmed) return;
 
-        loginByCode(code, {
+        loginByCode(trimmed, {
             onSuccess: (data) => {
 if (!('access_token' in data)) {
                     setError(data.status === 'pending'
@@ -262,7 +257,7 @@ if (!('access_token' in data)) {
                             </div>
                             <button
                                 type="submit"
-                                disabled={code.length < 6 || isVerifying}
+                                disabled={code.trim().length < 6 || isVerifying}
                                 className="btn-primary w-full py-3 text-base disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {isVerifying ? (

@@ -46,6 +46,11 @@ export default function GlobalContextMenu() {
     // Close menu on escape; restore focus to the opener (card button) so
     // keyboard users don't drop to <body> after every menu action. The menu
     // is permanently mounted, so capture on open, restore on close-cleanup.
+    // Keyed on open-state + item identity, NOT the whole menu object:
+    // in-menu updates (share/revoke replace the item) must not re-run the
+    // focus capture/restore, which would yank focus back to the card button
+    // mid-menu.
+    const menuKey = activeContextMenu ? `${activeContextMenu.type}:${activeContextMenu.item.id}` : null;
     const menuOpenerRef = useRef<HTMLElement | null>(null);
     useEffect(() => {
         const handleEscape = (e: KeyboardEvent) => {
@@ -65,7 +70,9 @@ export default function GlobalContextMenu() {
                 menuOpenerRef.current = null;
             }
         };
-    }, [activeContextMenu, setActiveContextMenu]);
+        // (exhaustive-deps is off repo-wide, so no disable directive is needed
+        // for the intentionally minimal dep list.)
+    }, [menuKey, setActiveContextMenu]);
 
     if (!activeContextMenu) return null;
 
@@ -132,7 +139,10 @@ export default function GlobalContextMenu() {
             const { data } = await api.post(`/files/${file.id}/share`);
             if (data.public_stream_url) {
                 if (activeContextMenu && activeContextMenu.type === 'file') {
-                    setActiveContextMenu({ ...activeContextMenu, item: data });
+                    // Merge: the share endpoint may return a partial payload —
+                    // replacing the item wholesale would drop id/file_name and
+                    // break subsequent menu actions (same as handleRevokeShare).
+                    setActiveContextMenu({ ...activeContextMenu, item: { ...file, ...data } });
                 }
                 return `${window.location.protocol}//${window.location.host}${data.public_stream_url}`;
             }

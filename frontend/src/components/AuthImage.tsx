@@ -100,7 +100,7 @@ export default function AuthImage({ src, alt, className }: AuthImageProps) {
             .then((res) => {
                 if (!res.ok) throw new Error('Auth failed');
                 const contentLength = res.headers.get('content-length');
-                if (contentLength && parseInt(contentLength) > MAX_THUMBNAIL_BYTES) {
+                if (contentLength && parseInt(contentLength, 10) > MAX_THUMBNAIL_BYTES) {
                     throw new Error('Thumbnail too large');
                 }
                 return res.blob();

@@ -41,7 +41,6 @@ export default function RenameModal({ isOpen, onClose, onRename, currentName, it
             wasOpenRef.current = true;
             openerRef.current = document.activeElement as HTMLElement | null;
             // Snapshot props at open; later parent re-renders must not clobber.
-            // eslint-disable-next-line react-hooks/exhaustive-deps
             setName(currentName);
             const snapName = currentName;
             const snapType = itemType;
@@ -77,7 +76,8 @@ export default function RenameModal({ isOpen, onClose, onRename, currentName, it
                 focusTimerRef.current = null;
             }
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint exhaustive-deps is off repo-wide (.eslintrc.cjs); the deps
+        // above are intentionally minimal (see NOTE at the top of this effect).
     }, [isOpen]);
 
     // Escape closes the modal. Separate effect: the open-transition effect

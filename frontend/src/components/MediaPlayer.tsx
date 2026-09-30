@@ -55,7 +55,9 @@ function loadMoviPlayer(): Promise<boolean> {
         s.type = 'module';
         s.src = MOVI_PLAYER_URL;
         s.onload = () => resolve(true);
-        s.onerror = () => resolve(false);
+        // Don't cache the failure: a transient network error must not break
+        // playback until reload — the next open retries the fetch.
+        s.onerror = () => { moviLoadPromise = null; resolve(false); };
         document.head.appendChild(s);
     });
     return moviLoadPromise;
@@ -172,8 +174,8 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         const reader = new FileReader();
         reader.onload = () => {
             let text = reader.result as string;
-            // Convert SRT to VTT if needed
-            if (file.name.endsWith('.srt')) {
+            // Convert SRT to VTT if needed (case-insensitive: *.SRT is common)
+            if (file.name.toLowerCase().endsWith('.srt')) {
                 text = srtToVtt(text);
             }
             const blob = new Blob([text], { type: 'text/vtt' });
@@ -294,7 +296,42 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         return `${base}${sep}token=${reactiveToken}`;
     }, [file.stream_url, file.id, isImage, reactiveToken, authorizedStreamUrl]);
     const externalUrl = getAbsoluteUrl((extendedFile || file).public_stream_url || '') || authorizedStreamUrl;
-    const vlcUrl = `vlc://${externalUrl}`;
+
+    // External handoffs (clipboard, VLC) must never carry the account-wide
+    // JWT: clipboard URLs end up in logs/chat history and VLC is an external
+    // app. Prefer the public link; otherwise mint a short-lived file-bound
+    // download token (same policy as GlobalContextMenu's VLC/copy actions).
+    const mintExternalUrl = useCallback(async (): Promise<string> => {
+        const pub = (extendedFile || file).public_stream_url;
+        if (pub) return getAbsoluteUrl(pub);
+        // Grabbed files may already carry a `?token=` download link, so pick
+        // the separator instead of appending a second `?` (same rule as
+        // authorizedStreamUrl above).
+        const base = getAbsoluteUrl(file.stream_url || '');
+        const sep = base.includes('?') ? '&' : '?';
+        return `${base}${sep}token=${encodeURIComponent(await getFileDownloadToken(file.id))}`;
+    }, [extendedFile, file]);
+
+    const handleCopyExternalUrl = useCallback(() => {
+        void (async () => {
+            try {
+                await navigator.clipboard.writeText(await mintExternalUrl());
+                addToast('URL copied to clipboard', 'success');
+            } catch {
+                addToast('Copy failed (browser blocked clipboard)', 'error');
+            }
+        })();
+    }, [mintExternalUrl, addToast]);
+
+    const handleOpenVlc = useCallback(() => {
+        void (async () => {
+            try {
+                window.open(`vlc://${await mintExternalUrl()}`, '_blank');
+            } catch {
+                addToast('Could not open VLC — copy the URL instead', 'error');
+            }
+        })();
+    }, [mintExternalUrl, addToast]);
 
     // If the access token rotates mid-playback (refresh interceptor), the
     // frozen authorizedStreamUrl would 401 on the next request with no way to
@@ -754,16 +791,16 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
                         <p className="text-dark-300 mb-6">{error}</p>
 
                         <div className="flex flex-col gap-3">
-                            <a
-                                href={vlcUrl}
+                            <button
+                                onClick={handleOpenVlc}
                                 className="btn-primary flex items-center justify-center gap-2"
                             >
                                 <ExternalLink className="w-4 h-4" />
                                 Open in VLC
-                            </a>
+                            </button>
                             <div className="flex gap-3">
                                 <Button
-                                    onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(externalUrl).then(() => { addToast('URL copied to clipboard', 'success'); }).catch(() => { addToast('Copy failed (browser blocked clipboard)', 'error'); }); }}
+                                    onClick={(e) => { e.stopPropagation(); handleCopyExternalUrl(); }}
                                     className="flex-1 btn-secondary flex items-center justify-center gap-2"
                                 >
                                     <Copy className="w-4 h-4" />

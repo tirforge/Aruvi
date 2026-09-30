@@ -82,8 +82,8 @@ export default function FileBrowser() {
     const { data: filesList, isLoading: filesLoading, isError: filesError, refetch: refetchFiles } = useFiles(currentFolderId, fileTypeFilter || undefined, searchQuery || undefined, page, filesSectionActive);
     // Only fetch these when their section is active — otherwise every browse
     // view pays for two extra authorized requests (and refetches on focus).
-    const { data: recentFiles, isLoading: recentLoading, refetch: refetchRecent } = useRecentFiles(50, activeSection === 'recent');
-    const { data: cwFiles, isLoading: cwLoading, refetch: refetchCW } = useContinueWatching(50, activeSection === 'continue_watching');
+    const { data: recentFiles, isLoading: recentLoading, isError: recentError, refetch: refetchRecent } = useRecentFiles(50, activeSection === 'recent');
+    const { data: cwFiles, isLoading: cwLoading, isError: cwError, refetch: refetchCW } = useContinueWatching(50, activeSection === 'continue_watching');
     
 
 
@@ -108,6 +108,14 @@ export default function FileBrowser() {
 
     // Combined loading state
     isLoading = isLoading || (activeSection === 'files' && foldersLoading);
+
+    // Fetch error for the active section. A failed fetch must not masquerade
+    // as an empty library — the content area renders an error panel with a
+    // retry instead (only when there is nothing to show; stale rows stay).
+    const sectionError = activeSection === 'files' ? filesError
+        : activeSection === 'recent' ? recentError
+        : activeSection === 'continue_watching' ? cwError
+        : false;
     
     // Mutations
     const deleteFilesMutation = useDeleteFiles();
@@ -257,12 +265,13 @@ export default function FileBrowser() {
                 }
                 setClipboard(null);
             } else if (clipboard.mode === 'copy') {
-                alert("Copying files is not yet supported. Only Move (Cut) is supported.");
+                addToast('Copying files is not supported yet — use Cut to move instead', 'info');
             }
         } catch (error) {
             console.error('Paste failed:', error);
+            addToast('Failed to paste items', 'error');
         }
-    }, [clipboard, currentFolderId, moveFilesMutation, moveFoldersMutation, setClipboard]);
+    }, [clipboard, currentFolderId, moveFilesMutation, moveFoldersMutation, setClipboard, addToast]);
 
 
     // Selection Box Logic
@@ -752,6 +761,19 @@ export default function FileBrowser() {
                 >
                     {activeSection === 'grab' ? (
 <GrabSearch />
+                    ) : sectionError && !displayFiles?.length ? (
+                        <div className="h-full flex flex-col items-center justify-center text-center pb-20 animate-fade-in">
+                            <h3 className="text-xl font-bold text-white mb-2">Couldn't load files</h3>
+                            <p className="text-dark-400 max-w-xs mb-6">
+                                Check your connection and try again
+                            </p>
+                            <button
+                                onClick={handleRefresh}
+                                className="btn-primary py-2 px-4 text-sm"
+                            >
+                                Retry
+                            </button>
+                        </div>
                     ) : isLoading && !displayFiles?.length ? (
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 animate-fade-in">
                             {[...Array(10)].map((_, i) => (
