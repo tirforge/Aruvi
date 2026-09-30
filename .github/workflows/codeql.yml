@@ -37,7 +37,8 @@ jobs:
         uses: android-actions/setup-android@v4
       - name: Build for CodeQL extraction (java-kotlin only)
         if: matrix.language == 'java-kotlin'
-        run: ./gradlew :app:assembleMobileDebug :app:assembleTvDebug --no-daemon
+        # --rerun-tasks: Gradle build cache would serve compile tasks from cache, leaving CodeQL's tracer with nothing to observe ("no source code seen during build").
+        run: ./gradlew :app:assembleMobileDebug :app:assembleTvDebug --no-daemon --rerun-tasks
         working-directory: android
 
       - uses: github/codeql-action/analyze@v4
