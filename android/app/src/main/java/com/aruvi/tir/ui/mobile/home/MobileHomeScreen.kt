@@ -560,9 +560,9 @@ fun ContinueWatchingCard(file: FileItem, serverUrl: String, onClick: (Int) -> Un
                 modifier = Modifier.align(Alignment.Center).size(48.dp)
             )
             
-            // Progress Bar (Fake for now or use real data)
+            // Progress Bar (real watch progress)
             LinearProgressIndicator(
-                progress = { 0.5f },
+                progress = { (file.progressPercent / 100f).coerceIn(0f, 1f) },
                 modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter),
                 color = MaterialTheme.colorScheme.primary,
                 trackColor = Color.Transparent

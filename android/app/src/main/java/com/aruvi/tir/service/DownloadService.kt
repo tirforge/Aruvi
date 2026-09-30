@@ -89,7 +89,7 @@ override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val pausedDownloads = tasks.values.filter { it.status == DownloadStatus.PAUSED }
 
         // Clear notifications for tasks that are no longer active/paused
-        val visibleIds = (activeDownloads + pausedDownloads).map { (NOTIFICATION_ID_BASE + it.id).toInt() }.toSet()
+        val visibleIds = (activeDownloads + pausedDownloads).map { notifIdFor(it.id) }.toSet()
         activeNotifIds.filterNot { it in visibleIds }.forEach {
             notificationManager.cancel(it)
         }
@@ -130,7 +130,7 @@ override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
 
         // Update individual download notifications
         for (task in activeDownloads) {
-            val notifId = (NOTIFICATION_ID_BASE + task.id).toInt()
+            val notifId = notifIdFor(task.id)
             val progress = if (task.totalBytes > 0) {
                 ((task.downloadedBytes * 100) / task.totalBytes).toInt()
             } else 0
@@ -152,7 +152,7 @@ override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
 
         // Show paused notifications
         for (task in pausedDownloads) {
-            val notifId = (NOTIFICATION_ID_BASE + task.id).toInt()
+            val notifId = notifIdFor(task.id)
             val progress = if (task.totalBytes > 0) {
                 ((task.downloadedBytes * 100) / task.totalBytes).toInt()
             } else 0
@@ -170,8 +170,12 @@ override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         }
     }
 
-    private fun buildSummaryNotification(text: String): Notification {
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+    // Long download ids would overflow Int on (BASE + id).toInt() and could
+    // collide with SUMMARY_NOTIFICATION_ID — fold into a safe Int range.
+    private fun notifIdFor(downloadId: Long): Int =
+        (NOTIFICATION_ID_BASE + (downloadId % 100_000)).toInt()
+
+    private fun buildSummaryNotification(text: String): Notification {        return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle("Aruvi Downloads")
             .setContentText(text)
@@ -198,8 +202,8 @@ override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
 
     private fun formatSpeed(bytesPerSec: Long): String {
         return when {
-            bytesPerSec >= 1_000_000 -> "%.1f MB/s".format(bytesPerSec / 1_000_000.0)
-            bytesPerSec >= 1_000 -> "%.0f KB/s".format(bytesPerSec / 1_000.0)
+            bytesPerSec >= 1_000_000 -> "%.1f MB/s".format(java.util.Locale.US, bytesPerSec / 1_000_000.0)
+            bytesPerSec >= 1_000 -> "%.0f KB/s".format(java.util.Locale.US, bytesPerSec / 1_000.0)
             else -> "$bytesPerSec B/s"
         }
     }
@@ -207,9 +211,9 @@ override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     private fun formatBytes(bytes: Long): String {
         return when {
             bytes < 0 -> "?"
-            bytes >= 1_000_000_000 -> "%.1f GB".format(bytes / 1_000_000_000.0)
-            bytes >= 1_000_000 -> "%.1f MB".format(bytes / 1_000_000.0)
-            bytes >= 1_000 -> "%.0f KB".format(bytes / 1_000.0)
+            bytes >= 1_000_000_000 -> "%.1f GB".format(java.util.Locale.US, bytes / 1_000_000_000.0)
+            bytes >= 1_000_000 -> "%.1f MB".format(java.util.Locale.US, bytes / 1_000_000.0)
+            bytes >= 1_000 -> "%.0f KB".format(java.util.Locale.US, bytes / 1_000.0)
             else -> "$bytes B"
         }
     }

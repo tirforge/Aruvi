@@ -67,6 +67,8 @@ class LoginViewModel @Inject constructor(
             if (url.isNotEmpty()) {
                 fetchBotInfo()
                 generateLoginCode()
+            } else {
+                _uiState.value = _uiState.value.copy(isLoading = false, showServerConfig = true)
             }
         }
     }
@@ -84,7 +86,8 @@ class LoginViewModel @Inject constructor(
                     ?: _uiState.value.botUsername
                 _uiState.value = _uiState.value.copy(
                     botUsername = username,
-                    botName = botInfo.name.orEmpty()
+                    botName = botInfo.name.orEmpty(),
+                    error = null
                 )
                 if (botInfo.username.isNotBlank()) {
                     settingsRepository.setBotUsername(botInfo.username)
@@ -115,7 +118,7 @@ class LoginViewModel @Inject constructor(
 
     fun saveAndRestart() {
         viewModelScope.launch {
-            val url = _uiState.value.serverUrl
+            val url = _uiState.value.serverUrl.trim().trimEnd('/')
             if (url.isNotEmpty()) {
                 settingsRepository.setServerUrl(url)
                 // DynamicBaseUrlInterceptor picks the new server up on the
@@ -131,7 +134,16 @@ class LoginViewModel @Inject constructor(
         stopPolling()
 
         viewModelScope.launch {
-            settingsRepository.setServerUrl(_uiState.value.serverUrl)
+            val serverUrl = _uiState.value.serverUrl.trim().trimEnd('/')
+            if (serverUrl.isBlank()) {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    error = "Enter a server URL first",
+                    showServerConfig = true
+                )
+                return@launch
+            }
+            settingsRepository.setServerUrl(serverUrl)
 
             _uiState.value = _uiState.value.copy(
                 isLoading = true,
@@ -160,8 +172,13 @@ class LoginViewModel @Inject constructor(
                             botName = response.botName ?: _uiState.value.botName
                         )
                         val url = "https://t.me/$bot?start=${response.code}"
-                        val qrBitmap = withContext(Dispatchers.Default) {
-                            generateQrCode(url, 600)
+                        val qrBitmap = try {
+                            withContext(Dispatchers.Default) {
+                                generateQrCode(url, 600)
+                            }
+                        } catch (e: Exception) {
+                            Log.w("LoginViewModel", "QR generation failed", e)
+                            null
                         }
                         _uiState.value = _uiState.value.copy(
                             loginCode = response.code,

@@ -42,7 +42,13 @@ object NetworkModule {
         // - Longer read timeout for large files
         // - Auth interceptor for automatic token handling
         val downloadLogging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.HEADERS
+            // HEADERS in release would log stream URLs (bearer-equivalent
+            // public hashes), Range headers and sizes to logcat.
+            level = if (BuildConfig.DEBUG) {
+                HttpLoggingInterceptor.Level.HEADERS
+            } else {
+                HttpLoggingInterceptor.Level.NONE
+            }
             redactHeader("Authorization")
         }
         val downloadClient = OkHttpClient.Builder()

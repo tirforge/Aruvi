@@ -352,7 +352,6 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
     // must be removable or each playback session leaks one listener (and the
     // ViewModel it captures) into the shared player forever.
     private var exoPlayerListener: Player.Listener? = null
-    private var castExecutor: java.util.concurrent.ExecutorService? = null
 
     private val castPlayerListener = object : Player.Listener {
         override fun onDeviceInfoChanged(deviceInfo: DeviceInfo) {
@@ -715,7 +714,7 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
         if (track == null) return null
         val lang = track.language?.takeIf { it.isNotBlank() }
         return if (lang != null) {
-            "audio_lang=" + java.net.URLEncoder.encode(lang, "UTF-8")
+            "audio_lang=" + java.net.URLEncoder.encode(lang, Charsets.UTF_8)
         } else {
             "audio=${track.index}"
         }
@@ -1096,28 +1095,24 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 file != null -> {
                     val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
                     val publicLinkResult = filesRepository.getPublicLink(file.id, serverUrl)
+                    // Never hand a bearer token (?token=) to a third-party
+                    // player — prefer the public link, else the plain URL.
                     publicLinkResult.getOrElse {
-                        val token = authRepository.getAccessToken()
-                        if (token != null) {
-                            "$serverUrl/api/stream/${file.id}?token=$token"
-                        } else {
-                            "$serverUrl/api/stream/${file.id}"
-                        }
+                        "$serverUrl/api/stream/${file.id}"
                     }
                 }
                 else -> return@launch
             }
 
+            val mime = file?.mimeType?.takeIf { it.contains("/") } ?: "video/*"
             val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(Uri.parse(streamUrl), "video/*")
+                setDataAndType(Uri.parse(streamUrl), mime)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
 
-            if (context.packageManager.resolveActivity(intent, 0) == null) {
-                Toast.makeText(context, "No external player found", Toast.LENGTH_SHORT).show()
-                return@launch
-            }
-
+            // No resolveActivity() check: on API 30+ it returns null without
+            // a <queries> manifest entry even when a player exists. Rely on
+            // the ActivityNotFoundException catch below instead.
             try {
                 context.startActivity(intent)
             } catch (e: android.content.ActivityNotFoundException) {
@@ -1604,7 +1599,10 @@ while (isActive) {
     fun saveProgress(completed: Boolean = false) {
         val p = activePlayer()
         val position = (p.currentPosition / 1000).toInt()
-        val duration = (p.duration / 1000).toInt().takeIf { it > 0 }
+        // p.duration is C.TIME_UNSET (Long.MIN_VALUE) when unknown — guard
+        // before the /1000 + toInt() which would otherwise overflow.
+        val durationMs = p.duration.takeIf { it > 0 } ?: C.TIME_UNSET
+        val duration = if (durationMs > 0) (durationMs / 1000).toInt().takeIf { it > 0 } else null
 
         if (position <= 0 && !completed) return
         if (currentFileId <= 0) return
@@ -1653,10 +1651,6 @@ while (isActive) {
             try { exoPlayer.removeListener(it) } catch (_: Throwable) {}
         }
         exoPlayerListener = null
-        castExecutor?.let {
-            try { it.shutdown() } catch (_: Throwable) {}
-        }
-        castExecutor = null
         castPlayer?.let {
             try { it.removeListener(castPlayerListener) } catch (_: Throwable) {}
             try { it.release() } catch (_: Throwable) {}

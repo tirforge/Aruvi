@@ -95,7 +95,7 @@ fun search() {
         // storage channel and inserts a DB row). Ignore taps while in flight.
         if (grabJob?.isActive == true) return
         val idx = item.row * 100 + item.col + (item.msgId % 1000) * 100000
-        _state.value = _state.value.copy(grabbingIdx = idx, grabResult = null)
+        _state.value = _state.value.copy(grabbingIdx = idx, grabResult = null, error = null)
         grabJob = viewModelScope.launch {
             try {
                 val resp = api.grabSelect(GrabSelectRequest(

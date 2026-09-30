@@ -125,7 +125,9 @@ class DetailsViewModel @Inject constructor(
                 val downloadsDir = Environment.getExternalStoragePublicDirectory(
                     Environment.DIRECTORY_DOWNLOADS
                 )
-                File(downloadsDir, fileName).takeIf { it.exists() && it.length() > 0 }
+                // Sanitize the server-provided name so "../" cannot escape
+                // the Downloads directory (path traversal).
+                File(downloadsDir, File(fileName).name).takeIf { it.exists() && it.length() > 0 }
             }
             if (localFile != null) {
                 _uiState.value = _uiState.value.copy(
@@ -148,14 +150,14 @@ class DetailsViewModel @Inject constructor(
      * Get thumbnail URL.
      */
     fun getThumbnailUrl(): String {
-        return "${_uiState.value.serverUrl}/api/stream/$fileId/thumbnail"
+        return "${_uiState.value.serverUrl.trimEnd('/')}/api/stream/$fileId/thumbnail"
     }
 
     /**
      * Get stream URL.
      */
     fun getStreamUrl(): String {
-        return "${_uiState.value.serverUrl}/api/stream/$fileId"
+        return "${_uiState.value.serverUrl.trimEnd('/')}/api/stream/$fileId"
     }
 
     /**
@@ -222,7 +224,7 @@ class DetailsViewModel @Inject constructor(
      */
     fun startDownload(context: Context) {
         val file = _uiState.value.file ?: return
-        val serverUrl = _uiState.value.serverUrl
+        val serverUrl = _uiState.value.serverUrl.trimEnd('/')
         if (serverUrl.isBlank()) return
 
         // Prevent multiple downloads
@@ -248,7 +250,13 @@ class DetailsViewModel @Inject constructor(
                                 val progress = if (task.totalBytes > 0)
                                     (task.downloadedBytes * 100 / task.totalBytes).toInt()
                                 else 0
+                                // Release the started-guard on terminal states
+                                // so a FAILED/CANCELLED download can be retried.
+                                val terminal = task.status == DownloadStatus.FAILED ||
+                                    task.status == DownloadStatus.CANCELLED
                                 _uiState.value = _uiState.value.copy(
+                                    downloadStarted = if (terminal) false else _uiState.value.downloadStarted,
+                                    downloadId = if (terminal) null else _uiState.value.downloadId,
                                     downloadStatus = when (task.status) {
                                         DownloadStatus.RUNNING -> DownloadManager.STATUS_RUNNING
                                         DownloadStatus.PENDING -> DownloadManager.STATUS_PENDING

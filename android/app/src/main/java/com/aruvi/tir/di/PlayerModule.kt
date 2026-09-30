@@ -9,6 +9,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DefaultLoadControl
 import com.aruvi.tir.data.api.AuthInterceptor
+import com.aruvi.tir.data.api.DynamicBaseUrlInterceptor
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
 import dagger.Module
 import dagger.Provides
@@ -52,9 +53,13 @@ object PlayerModule {
     @Singleton
     fun provideDataSourceFactory(
         @ApplicationContext context: Context,
-        authInterceptor: AuthInterceptor
+        authInterceptor: AuthInterceptor,
+        dynamicBaseUrlInterceptor: DynamicBaseUrlInterceptor
     ): DefaultDataSource.Factory {
         val streamingClient = OkHttpClient.Builder()
+            // URL rewrite must run before auth so ExoPlayer follows server
+            // changes just like the Retrofit API client does.
+            .addInterceptor(dynamicBaseUrlInterceptor)
             .addInterceptor(authInterceptor)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)

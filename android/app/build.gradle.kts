@@ -40,6 +40,7 @@ android {
         minSdk = 28
 
         val serverUrl = localProperties.getProperty("TELEGRAM_TV_SERVER_URL", "http://localhost:7680")
+            .replace("\\", "").replace("\"", "").replace("\n", "").replace("\r", "").trim()
         buildConfigField("String", "DEFAULT_SERVER_URL", "\"$serverUrl\"")
     }
 

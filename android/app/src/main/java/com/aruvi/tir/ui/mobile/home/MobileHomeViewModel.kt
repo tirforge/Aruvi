@@ -282,26 +282,29 @@ class MobileHomeViewModel @Inject constructor(
     
     fun logout() {
         viewModelScope.launch {
-            authRepository.clearAuth()
+            // Revoke the server-side refresh token; clearAuth() alone would
+            // leave the session usable until expiry.
+            try {
+                authRepository.logout()
+            } catch (e: Exception) {
+                authRepository.clearAuth()
+            }
         }
     }
 
     fun openInExternalPlayer(file: FileItem) {
         viewModelScope.launch {
-            val serverUrl = settingsRepository.getServerUrl()
+            val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
             val publicLinkResult = filesRepository.getPublicLink(file.id, serverUrl)
+            // Never hand a bearer token (?token=) to a third-party player.
             val streamUrl = publicLinkResult.getOrElse {
-                val token = authRepository.getAccessToken()
-                if (token != null) {
-                    "$serverUrl/api/stream/${file.id}?token=$token"
-                } else {
-                    "$serverUrl/api/stream/${file.id}"
-                }
+                "$serverUrl/api/stream/${file.id}"
             }
-            
+            val mime = file.mimeType?.takeIf { it.contains("/") } ?: "video/*"
+
             try {
                 val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(Uri.parse(streamUrl), "video/*")
+                    setDataAndType(Uri.parse(streamUrl), mime)
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 }
                 context.startActivity(intent)
@@ -338,14 +341,14 @@ class MobileHomeViewModel @Inject constructor(
 
     fun copyDownloadLink(file: FileItem) {
         viewModelScope.launch {
-            val serverUrl = settingsRepository.getServerUrl()
-            val token = authRepository.getAccessToken()
-            val downloadUrl = if (token != null) {
-                "$serverUrl/api/stream/${file.id}?token=$token"
-            } else {
-                "$serverUrl/api/stream/${file.id}"
+            val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
+            // Never copy a bearer token (?token=) to the clipboard.
+            val link = filesRepository.getPublicLink(file.id, serverUrl).getOrNull()
+            if (link == null) {
+                Toast.makeText(context, "Generate a public link first", Toast.LENGTH_SHORT).show()
+                return@launch
             }
-            copyToClipboard("Download Link", downloadUrl)
+            copyToClipboard("Download Link", link)
             Toast.makeText(context, "Download link copied to clipboard", Toast.LENGTH_SHORT).show()
         }
     }

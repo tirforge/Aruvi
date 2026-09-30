@@ -84,6 +84,7 @@ class FileDownloader(
      */
     fun enqueue(fileId: Int, fileName: String, url: String, mimeType: String? = null): Long {
         val id = nextId.getAndIncrement()
+        val safeName = sanitizeFileName(fileName)
 
         // Register the task immediately so the UI sees it; the MediaStore
         // insert (a provider round-trip) happens off the caller thread —
@@ -91,7 +92,7 @@ class FileDownloader(
         val task = DownloadTask(
             id = id,
             fileId = fileId,
-            fileName = fileName,
+            fileName = safeName,
             url = url,
             mimeType = mimeType,
             status = DownloadStatus.PENDING,
@@ -100,14 +101,28 @@ class FileDownloader(
         updateTask(task)
 
         scope.launch(Dispatchers.IO) {
-            val ready = task.copy(localPath = createDestination(fileName, mimeType))
+            val ready = task.copy(localPath = createDestination(safeName, mimeType))
+            // A pause()/cancel() that landed while the MediaStore insert was
+            // in flight must win — otherwise the download is resurrected.
+            val current = _tasks.value[id]
+            if (current == null || current.status == DownloadStatus.PAUSED ||
+                current.status == DownloadStatus.CANCELLED) {
+                return@launch
+            }
             updateTask(ready)
             // Start foreground service to keep downloads alive in background
-            try { DownloadService.start(context) } catch (_: Exception) {}
+            try { DownloadService.start(context) } catch (e: Exception) {
+                android.util.Log.w("FileDownloader", "Could not start DownloadService", e)
+            }
             startDownload(ready)
         }
 
         return id
+    }
+
+    private fun sanitizeFileName(name: String): String {
+        val base = File(name).name.ifBlank { "download" }
+        return base.replace(Regex("[/\\\\]"), "_")
     }
 
     /**
@@ -193,6 +208,9 @@ class FileDownloader(
     fun resume(id: Long) {
         val task = _tasks.value[id] ?: return
         if (task.status != DownloadStatus.PAUSED && task.status != DownloadStatus.FAILED) return
+        // Guard against double-tap resume spawning two writers on the same
+        // file (the second overwrites activeJobs[id] and the first leaks).
+        if (activeJobs.containsKey(id)) return
 
         // existingBytes() stats the partial file (disk / content provider) —
         // keep that off the main thread.
@@ -208,7 +226,9 @@ class FileDownloader(
             startDownload(updatedTask)
 
             // Start foreground service to keep downloads alive in background
-            try { DownloadService.start(context) } catch (_: Exception) {}
+            try { DownloadService.start(context) } catch (e: Exception) {
+                android.util.Log.w("FileDownloader", "Could not start DownloadService", e)
+            }
         }
     }
 
@@ -216,8 +236,8 @@ class FileDownloader(
      * Cancel and remove a download, deleting any partial file.
      */
     fun cancel(id: Long) {
-        activeJobs[id]?.cancel()
-        activeJobs.remove(id)
+        val job = activeJobs.remove(id)
+        job?.cancel()
         lastBytesMap.remove(id)
         lastTimeMap.remove(id)
 
@@ -226,9 +246,13 @@ class FileDownloader(
         currentTasks.remove(id)
         _tasks.value = currentTasks
 
-        // Delete the (possibly partial) file off the main thread
+        // Join the writer before deleting so the file is not recreated
+        // after the delete (or deleted while still open).
         if (task != null && task.status != DownloadStatus.COMPLETED) {
-            scope.launch(Dispatchers.IO) { deleteDestination(task) }
+            scope.launch(Dispatchers.IO) {
+                try { job?.join() } catch (_: Exception) {}
+                deleteDestination(task)
+            }
         }
     }
 
@@ -236,11 +260,16 @@ class FileDownloader(
      * Delete a completed download's file.
      */
     fun deleteFile(id: Long) {
+        val job = activeJobs.remove(id)
+        job?.cancel()
         val task = _tasks.value[id] ?: return
         val currentTasks = _tasks.value.toMutableMap()
         currentTasks.remove(id)
         _tasks.value = currentTasks
-        scope.launch(Dispatchers.IO) { deleteDestination(task) }
+        scope.launch(Dispatchers.IO) {
+            try { job?.join() } catch (_: Exception) {}
+            deleteDestination(task)
+        }
     }
 
     /**
@@ -249,6 +278,9 @@ class FileDownloader(
      * connection keeps making progress instead of dying after a few MB.
      */
     private fun startDownload(task: DownloadTask) {
+        // Cancel a stale job for the same id before starting (double resume
+        // would otherwise run two writers on one file).
+        activeJobs[task.id]?.cancel()
         val job = scope.launch(Dispatchers.IO) {
             try {
                 var attempt = 0
@@ -311,11 +343,27 @@ class FileDownloader(
         }
 
         try {
-            val response = okHttpClient.newCall(requestBuilder.build()).execute()
+            okHttpClient.newCall(requestBuilder.build()).execute().use { response ->
 
             if (!response.isSuccessful && response.code != 206) {
+                // Pause-at-completion resumes with Range: bytes=total- which
+                // the server answers with 416. Treat it as done when we
+                // already hold bytes, instead of a permanent FAILED.
+                if (response.code == 416 && existing > 0) {
+                    updateTask(task.copy(
+                        status = DownloadStatus.RUNNING,
+                        downloadedBytes = existing,
+                        totalBytes = existing
+                    ))
+                    updateTask(_tasks.value[task.id]?.copy(
+                        status = DownloadStatus.COMPLETED,
+                        downloadedBytes = existing,
+                        totalBytes = existing,
+                        speed = 0L
+                    ) ?: return false)
+                    return true
+                }
                 val retryable = response.code == 429 || response.code >= 500
-                response.close()
                 if (retryable) {
                     throw DownloadRetryableException("HTTP ${response.code}: ${response.message}")
                 }
@@ -352,24 +400,22 @@ class FileDownloader(
                 totalBytes = totalBytes
             ))
 
-            // Open d/ Open destination: MediaStore row via content resolver (API 29+),
-            // otherwise the raw file. RandomAccessFile supports both paths.
-            val output: java.nio.channels.FileChannel = if (contentUri != null) {
-                val pfd = context.contentResolver.openFileDescriptor(
-                    Uri.parse(contentUri), if (startOffset > 0) "rw" else "w"
-                ) ?: return false
-                java.io.FileOutputStream(pfd.fileDescriptor).channel
+            // Open destination: MediaStore row via content resolver (API 29+),
+            // otherwise the raw file. Both the ParcelFileDescriptor and the
+            // RandomAccessFile/FileOutputStream are closed explicitly below
+            // (closing a FileChannel alone does not release the fd).
+            val contentUriParsed = contentUri?.let { Uri.parse(it) }
+            val pfd = if (contentUriParsed != null) {
+                context.contentResolver.openFileDescriptor(
+                    contentUriParsed, if (startOffset > 0) "rw" else "w"
+                )
             } else {
-                val file = File(task.localPath ?: return false)
-                file.parentFile?.mkdirs()
-                val channel = RandomAccessFile(file, "rw").channel
-                // A full 200 response overwrites from the start - truncate any stale
-                // trailing bytes left from a larger partial file.
-                if (startOffset == 0L) channel.truncate(0)
-                channel
+                null
             }
-
-            // Write using RandomAccessFile for seek support
+            if (contentUriParsed != null && pfd == null) return false
+            var fos: java.io.FileOutputStream? = null
+            var raf: RandomAccessFile? = null
+            // Write using FileChannel for seek support
             val buffer = ByteArray(65536) // 64KB buffer for good throughput
             var bytesWritten = startOffset
             val inputStream = body.byteStream()
@@ -378,44 +424,68 @@ class FileDownloader(
             lastTimeMap[task.id] = System.currentTimeMillis()
             var lastUpdateTime = System.currentTimeMillis()
 
-            inputStream.use { stream ->
-                output.use { channel ->
-                    channel.position(startOffset)
+            try {
+                val channel: java.nio.channels.FileChannel = if (pfd != null) {
+                    fos = java.io.FileOutputStream(pfd.fileDescriptor)
+                    fos.channel
+                } else {
+                    raf = RandomAccessFile(File(task.localPath ?: return false).also {
+                        it.parentFile?.mkdirs()
+                    }, "rw")
+                    // A full 200 response overwrites from the start - truncate any stale
+                    // trailing bytes left from a larger partial file.
+                    if (startOffset == 0L) raf.channel.truncate(0)
+                    raf.channel
+                }
+                channel.position(startOffset)
 
-                    while (coroutineContext.isActive) {
-                        val bytesRead = stream.read(buffer)
-                        if (bytesRead == -1) break
+                while (coroutineContext.isActive) {
+                    val bytesRead = inputStream.read(buffer)
+                    if (bytesRead == -1) break
 
-                        channel.write(java.nio.ByteBuffer.wrap(buffer, 0, bytesRead))
-                        bytesWritten += bytesRead
+                    // FileChannel.write may write fewer bytes than requested.
+                    val buf = java.nio.ByteBuffer.wrap(buffer, 0, bytesRead)
+                    while (buf.hasRemaining()) {
+                        channel.write(buf)
+                    }
+                    bytesWritten += bytesRead
 
-                        // Throttle UI updates to every 500ms to avoid excessive StateFlow emissions
-                        val now = System.currentTimeMillis()
-                        if (now - lastUpdateTime >= 500) {
-                            val lastBytes = lastBytesMap[task.id] ?: bytesWritten
-                            val lastTime = lastTimeMap[task.id] ?: now
-                            val timeDelta = (now - lastTime).coerceAtLeast(1)
-                            val speed = ((bytesWritten - lastBytes) * 1000) / timeDelta
+                    // Throttle UI updates to every 500ms to avoid excessive StateFlow emissions
+                    val now = System.currentTimeMillis()
+                    if (now - lastUpdateTime >= 500) {
+                        val lastBytes = lastBytesMap[task.id] ?: bytesWritten
+                        val lastTime = lastTimeMap[task.id] ?: now
+                        val timeDelta = (now - lastTime).coerceAtLeast(1)
+                        val speed = ((bytesWritten - lastBytes) * 1000) / timeDelta
 
-                            lastBytesMap[task.id] = bytesWritten
-                            lastTimeMap[task.id] = now
-                            lastUpdateTime = now
+                        lastBytesMap[task.id] = bytesWritten
+                        lastTimeMap[task.id] = now
+                        lastUpdateTime = now
 
-                            updateTask(_tasks.value[task.id]?.copy(
-                                status = DownloadStatus.RUNNING,
-                                downloadedBytes = bytesWritten,
-                                totalBytes = totalBytes,
-                                speed = speed
-                            ) ?: return false)
-                        }
+                        updateTask(_tasks.value[task.id]?.copy(
+                            status = DownloadStatus.RUNNING,
+                            downloadedBytes = bytesWritten,
+                            totalBytes = totalBytes,
+                            speed = speed
+                        ) ?: return false)
                     }
                 }
+            } finally {
+                try { inputStream.close() } catch (_: Exception) {}
+                try { fos?.close() } catch (_: Exception) {}
+                try { raf?.close() } catch (_: Exception) {}
+                try { pfd?.close() } catch (_: Exception) {}
             }
-
-            response.close()
 
             // Check if completed or cancelled
             if (!coroutineContext.isActive) return false
+
+            // A truncated stream that ends early must not be marked COMPLETED.
+            if (totalBytes > 0 && bytesWritten != totalBytes) {
+                throw DownloadRetryableException(
+                    "Incomplete download ($bytesWritten/$totalBytes bytes)"
+                )
+            }
 
             // Publish the MediaStore entry so it shows up in the Downloads app
             if (contentUri != null) {
@@ -432,6 +502,7 @@ class FileDownloader(
                 speed = 0L
             ) ?: return false)
             return true
+            } // end response.use — connection is always released
         } catch (e: CancellationException) {
             throw e
         } catch (e: IOException) {

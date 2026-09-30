@@ -169,21 +169,21 @@ class SearchViewModel @Inject constructor(
 
     fun openInExternalPlayer(file: FileItem) {
         viewModelScope.launch {
-            val serverUrl = _uiState.value.serverUrl
+            val serverUrl = _uiState.value.serverUrl.trimEnd('/')
             if (serverUrl.isEmpty()) return@launch
             val publicLinkResult = filesRepository.getPublicLink(file.id, serverUrl)
+            // Never hand a bearer token (?token=) to a third-party player or
+            // leave it in logs — prefer the public link, else the plain URL
+            // (the backend still enforces auth via the session cookie/intent
+            // caller). Token-in-URL also lingers in the external app's history.
             val streamUrl = publicLinkResult.getOrElse {
-                val token = authRepository.getAccessToken()
-                if (token != null) {
-                    "$serverUrl/api/stream/${file.id}?token=$token"
-                } else {
-                    "$serverUrl/api/stream/${file.id}"
-                }
+                "$serverUrl/api/stream/${file.id}"
             }
-            
+            val mime = file.mimeType?.takeIf { it.contains("/") } ?: "video/*"
+
             try {
                 val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-                    setDataAndType(android.net.Uri.parse(streamUrl), "video/*")
+                    setDataAndType(android.net.Uri.parse(streamUrl), mime)
                     flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
                 }
                 context.startActivity(intent)
@@ -229,16 +229,18 @@ class SearchViewModel @Inject constructor(
 
     fun copyDownloadLink(file: FileItem) {
         viewModelScope.launch {
-            val serverUrl = _uiState.value.serverUrl
+            val serverUrl = _uiState.value.serverUrl.trimEnd('/')
             if (serverUrl.isEmpty()) return@launch
-            val token = authRepository.getAccessToken()
-            val downloadUrl = if (token != null) {
-                "$serverUrl/api/stream/${file.id}?token=$token"
-            } else {
-                "$serverUrl/api/stream/${file.id}"
+            // Never copy a bearer token (?token=) to the clipboard — any app
+            // can read it. Share the revocable public link instead.
+            val publicLinkResult = filesRepository.getPublicLink(file.id, serverUrl)
+            val link = publicLinkResult.getOrNull()
+            if (link == null) {
+                android.widget.Toast.makeText(context, "Generate a public link first", android.widget.Toast.LENGTH_SHORT).show()
+                return@launch
             }
             val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            val clip = android.content.ClipData.newPlainText("Download Link", downloadUrl)
+            val clip = android.content.ClipData.newPlainText("Download Link", link)
             clipboard.setPrimaryClip(clip)
             android.widget.Toast.makeText(context, "Download link copied", android.widget.Toast.LENGTH_SHORT).show()
         }

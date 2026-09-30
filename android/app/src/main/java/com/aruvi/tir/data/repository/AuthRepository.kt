@@ -120,8 +120,16 @@ class AuthRepository @Inject constructor(
                         null
                     }
                 } else {
-                    // Refresh rejected (invalid/expired session) - clear auth
-                    clearAuth()
+                    // Only clear auth when the server says the session itself
+                    // is invalid (bad/expired/unknown refresh token). Transient
+                    // failures (429 rate-limit, 5xx) must keep the stored
+                    // tokens so a later refresh can retry instead of logging
+                    // the user out.
+                    val code = response.code()
+                    if (code == 400 || code == 401 || code == 403 ||
+                        code == 404 || code == 410 || code == 422) {
+                        clearAuth()
+                    }
                     null
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -192,6 +200,8 @@ class AuthRepository @Inject constructor(
     suspend fun logout() {
         try {
             api.logout()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             // Ignore logout API errors
         }
