@@ -1,11 +1,13 @@
 name: opencode-commands
 
 # Chat-ops for the pipeline. Comment on a PR (OWNER/MEMBER/COLLABORATOR only):
-#   /fix   — re-run ONLY the failed review-combo jobs for this PR's head
-#            (smart rerun: no duplicate review burn when review already passed)
-#   /merge — dispatch merge-agent (green-checks merge, never bypasses protection)
-#   /close — dispatch merge-agent to close with a reason
-#   /sweep — dispatch merge-sweep (bot-PR pass)
+#   /fix    — re-run ONLY the failed review-combo jobs for this PR's head
+#             (smart rerun: no duplicate review burn when review already passed)
+#   /retest — re-run failed jobs of every OTHER workflow on this head
+#             (CI, Sonar, CodeQL...). Combo failures use /fix, not this.
+#   /merge  — dispatch merge-agent (green-checks merge, never bypasses protection)
+#   /close  — dispatch merge-agent to close with a reason
+#   /sweep  — dispatch merge-sweep (bot-PR pass)
 # Fork comments are ignored (read-only token can't act). Unknown commands are
 # ignored silently so humans can discuss freely.
 on:
@@ -32,7 +34,7 @@ jobs:
         env:
           BODY: ${{ github.event.comment.body }}
         run: |
-          CMD=$(printf '%s' "$BODY" | head -n 1 | grep -oE '^/(fix|merge|close|sweep)\b' || true)
+          CMD=$(printf '%s' "$BODY" | head -n 1 | grep -oE '^/(fix|retest|merge|close|sweep)\b' || true)
           echo "cmd=$CMD" >> "$GITHUB_OUTPUT"
           [ -n "$CMD" ] || echo "No command on first line — ignoring."
 
@@ -62,6 +64,28 @@ jobs:
           else
             bash .github/scripts/gh-retry.sh run rerun --failed "$1"
             gh pr comment "$PR" --body "🔁 **/fix**: re-running failed jobs from run \`$1\` on \`$HEAD\`." || true
+          fi
+
+      - name: /retest — rerun failed non-combo runs for this head
+        if: steps.cmd.outputs.cmd == '/retest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR=${{ github.event.issue.number }}
+          HEAD=$(bash .github/scripts/gh-retry.sh pr view "$PR" --json headRefName -q .headRefName)
+          IDS=$(bash .github/scripts/gh-retry.sh run list --branch "$HEAD" --limit 20 \
+            --json databaseId,conclusion,workflowName \
+            -q '[.[] | select(.conclusion=="failure" and .workflowName!="review-combo" and .workflowName!="opencode-commands") | .databaseId] | join(" ")')
+          N=0
+          for ID in $IDS; do
+            [ "$N" -lt 5 ] || break
+            gh run rerun --failed "$ID" || true
+            N=$((N + 1))
+          done
+          if [ "$N" = "0" ]; then
+            gh pr comment "$PR" --body "✅ **/retest**: no failed non-combo runs on \`$HEAD\` — nothing to rerun (combo failures use \`/fix\`)." || true
+          else
+            gh pr comment "$PR" --body "🔁 **/retest**: re-ran failed jobs on $N run(s) for \`$HEAD\`." || true
           fi
 
       - name: /merge or /close — dispatch merge-agent

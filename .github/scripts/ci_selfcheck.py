@@ -131,6 +131,9 @@ cmds = (W / "opencode-commands.yml").read_text()
 check("'/fix'" in cmds and "'/merge'" in cmds
       and "'/close'" in cmds and "'/sweep'" in cmds,
       "commands: all four chat-ops routed")
+check("'/retest'" in cmds and "run rerun --failed" in cmds,
+      "commands: /retest reruns failed non-combo runs")
+check("needs-human" in combo, "combo: needs-human escalation wired")
 check("OWNER" in cmds and "COLLABORATOR" in cmds
       and "author_association" in cmds,
       "commands: collaborator-only gate")
@@ -141,6 +144,10 @@ check("workflow_call:" in combo and "sonar_project_key" in combo,
       "combo: reusable packaging (workflow_call + sonar key)")
 check("inputs.model ||" in combo and "inputs.variant ||" in combo,
       "combo: model/variant parameterized with fallbacks")
+check("skills_path" in combo and "verify_commands" in combo,
+      "combo: language-agnostic (skills_path + verify_commands)")
+check("OPENCODE_API_KEY" in combo and "ANTHROPIC_API_KEY" in combo,
+      "combo: model key passthrough declared + mapped")
 check("COMBO_MAX_ROUNDS" in combo, "combo: spend guard in fixer prompt")
 hy = (W / "pr-hygiene.yml").read_text()
 check("auto-close" in hy.lower() and "NEVER auto-closed" in hy,

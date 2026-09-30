@@ -1,8 +1,8 @@
 # Example: consume review-combo as a reusable workflow (copy into YOUR repo).
-# One `uses:` line + one secret = the full review -> fix -> verify loop.
+# One `uses:` line + secrets = the full review -> fix -> verify loop.
 # Path filtering lives HERE (workflow_call has no paths:), so list the dirs
 # you want reviewed. Same-org callers may use `secrets: inherit`; cross-org
-# callers map SONAR_TOKEN explicitly (inherit is same-org only).
+# callers map each secret explicitly (inherit is same-org only).
 name: review-combo
 
 on:
@@ -16,9 +16,19 @@ jobs:
   combo:
     uses: tirforge/Aruvi/.github/workflows/review-combo.yml@v1
     with:
-      sonar_project_key: "myorg_myrepo" # SonarCloud project key
-      enable_coderabbit: false # set true if the CodeRabbit app is installed
+      # Any language works: tell the fixer how YOUR repo verifies.
+      verify_commands: "npm run lint; npm test; npm run build"
+      # If you keep agent skills elsewhere (or have none — built-in rigor applies):
+      # skills_path: ".agents/skills"
+      # Any opencode model (keys below must match). Free default, no key needed:
       # model: "opencode/muse-spark-1.3-contributor-free"
       # variant: "xhigh"
+      sonar_project_key: "myorg_myrepo" # SonarCloud project key
+      enable_coderabbit: false # set true if the CodeRabbit app is installed
     secrets:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }} # omit if you don't use Sonar
+      # Map ONLY the keys your `model` needs; the rest stay empty and unrouted:
+      # OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}   # opencode/* Zen models
+      # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
