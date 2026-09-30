@@ -45,7 +45,7 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         working-directory: backend
         run: |
-          pip install -r requirements.txt pytest-cov
+          pip install -r requirements.txt pytest-cov pytest-asyncio
           python -m pytest tests/test_fixes.py tests/test_cast_remux.py -q --cov=app --cov-report=xml:coverage.xml
         env:
           JWT_SECRET: ci-dummy-secret

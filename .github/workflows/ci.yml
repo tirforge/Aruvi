@@ -21,7 +21,7 @@ jobs:
           cache-dependency-path: backend/requirements.txt
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt pytest pytest-asyncio
 
       - name: Compile check (matches AGENTS.md rule)
         run: python -m compileall -q app

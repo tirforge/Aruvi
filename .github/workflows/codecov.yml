@@ -29,7 +29,7 @@ jobs:
           cache-dependency-path: backend/requirements.txt
 
       - name: Install dependencies + pytest-cov
-        run: pip install -r requirements.txt pytest-cov
+        run: pip install -r requirements.txt pytest-cov pytest-asyncio
 
       - name: Run tests with coverage
         run: python -m pytest tests/test_fixes.py tests/test_cast_remux.py -q --cov=app --cov-report=xml:coverage.xml
