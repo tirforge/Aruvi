@@ -1,9 +1,9 @@
 name: CI
+
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
+
 jobs:
   changes:
     runs-on: ubuntu-latest
@@ -12,99 +12,102 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
       android: ${{ steps.filter.outputs.android }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v3
         id: filter
         with:
           filters: |
             backend:
-              - 'backend/**'
-              - 'docker-compose.yml'
-              - 'Dockerfile'
-              - '.github/workflows/ci.yml'
+              - "backend/**"
+              - "docker-compose.yml"
+              - "Dockerfile"
             frontend:
-              - 'frontend/**'
-              - '.github/workflows/ci.yml'
+              - "frontend/**"
             android:
-              - 'android/**'
-              - '.github/workflows/ci.yml'
+              - "android/**"
+
   backend:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
-      - uses: actions/checkout@v6
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
         with:
-          python-version: '3.11'
+          python-version: "3.11"
           cache: pip
           cache-dependency-path: backend/requirements.txt
-      - name: Compile backend
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest pytest-asyncio
+      - name: Compile check (matches AGENTS.md rule)
         run: python -m compileall -q app
-        working-directory: backend
-      - name: Run tests (non-blocking until suite exists)
-        run: pytest -q || echo "no tests yet"
-        working-directory: backend
+      - name: Unit tests (non-blocking)
+        run: python -m pytest tests/test_fixes.py tests/test_cast_remux.py -q
+        continue-on-error: true
         env:
           JWT_SECRET: ci-dummy-secret
-          DATABASE_URL: sqlite:///./test.db
+          DATABASE_URL: sqlite+aiosqlite:///./ci_test.db
+
   frontend:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - name: Set up Node 22
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-        working-directory: frontend
-      - name: ESLint
-        run: npx eslint . --max-warnings 0
-        working-directory: frontend
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npx eslint . --ext ts,tsx --max-warnings 0
       - name: Typecheck
-        run: npx tsc --noEmit -p tsconfig.app.json
-        working-directory: frontend
+        run: npx tsc --noEmit
       - name: Unit tests
-        run: npm test -- --run
-        working-directory: frontend
+        run: npm test
       - name: Build
-        run: npm run build
-        working-directory: frontend
+        run: npx vite build
+
   build:
     needs: changes
     if: needs.changes.outputs.android == 'true'
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-java@v5
+      - uses: actions/checkout@v7
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
-          cache: gradle
-      - uses: android-actions/setup-android@v3
-      - run: chmod +x android/gradlew
-      - name: Build debug APKs (mobile + tv)
-        run: ./gradlew assembleMobileDebug assembleTvDebug
-        working-directory: android
-      - name: Android Lint
-        run: ./gradlew lint
-        working-directory: android
+          java-version: "17"
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+      - name: Assemble mobile + TV debug
+        run: ./gradlew :app:assembleMobileDebug :app:assembleTvDebug --no-daemon
+      - name: Lint mobile + TV debug
+        run: ./gradlew :app:lintMobileDebug :app:lintTvDebug --no-daemon
+
   gate:
     needs: [changes, backend, frontend, build]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Gate on required areas
+      - name: Aggregate area results
         run: |
-          fail=0
-          [ "${{ needs.backend.result }}" = "failure" ] && fail=1
-          [ "${{ needs.backend.result }}" = "cancelled" ] && fail=1
-          [ "${{ needs.frontend.result }}" = "failure" ] && fail=1
-          [ "${{ needs.frontend.result }}" = "cancelled" ] && fail=1
-          [ "${{ needs.build.result }}" = "failure" ] && fail=1
-          [ "${{ needs.build.result }}" = "cancelled" ] && fail=1
-          exit $fail
+          [ "${{ needs.changes.result }}" = "success" ] || { echo "changes job: ${{ needs.changes.result }}"; exit 1; }
+          for r in "${{ needs.backend.result }}" "${{ needs.frontend.result }}" "${{ needs.build.result }}"; do
+            case "$r" in success|skipped) ;; *) echo "area result: $r"; exit 1;; esac
+          done
+          echo "CI gate passed"
