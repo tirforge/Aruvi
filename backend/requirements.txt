@@ -30,7 +30,7 @@ python-dotenv>=1.0.0
 slowapi>=0.1.9
 
 # Monitor proxy (internal use)
-httpx>=0.27.0
+httpx>=0.28.1
 
 # Google Drive
 google-api-python-client>=2.200.0
