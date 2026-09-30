@@ -300,7 +300,11 @@ async def upload_streaming(
             try:
                 await asyncio.shield(_pre_task)
             except asyncio.CancelledError:
-                pass
+                _log.debug(
+                    "GDrive preallocate shield wait interrupted; "
+                    "propagating cancellation"
+                )
+                raise
             raise
 
         downloaded = 0
@@ -324,7 +328,18 @@ async def upload_streaming(
             try:
                 leaked = await asyncio.shield(_open_task)
             except asyncio.CancelledError:
-                pass
+                if _open_task.done() and not _open_task.cancelled():
+                    try:
+                        leaked = _open_task.result()
+                    except Exception:
+                        leaked = None
+                if leaked is not None:
+                    await asyncio.to_thread(os.close, leaked)
+                _log.debug(
+                    "GDrive open shield wait interrupted; "
+                    "propagating cancellation"
+                )
+                raise
             if leaked is not None:
                 await asyncio.to_thread(os.close, leaked)
             raise

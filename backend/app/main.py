@@ -6,6 +6,7 @@ import asyncio
 import ctypes
 import gc
 import logging
+import mimetypes
 import os
 from contextlib import asynccontextmanager
 
@@ -403,10 +404,49 @@ async def download_page():
 STATIC_ALLOWLIST = build_static_allowlist()
 
 
+def _is_spa_bypass(full_path: str) -> bool:
+    """Reject API routes and traversal payloads before the allowlist lookup."""
+    return (
+        full_path == "api"
+        or full_path.startswith("api/")
+        or ".." in full_path
+    )
+
+
+def _resolve_static(static_file_path: str | None) -> tuple[str | None, str | None]:
+    """Resolve an allowlisted path to (plain, gz-or-None), re-checking symlinks."""
+    if static_file_path and os.path.isfile(static_file_path):
+        # Builder never allowlists symlinks, but re-check here: a link
+        # planted after startup (or a symlinked .gz sibling) would
+        # otherwise be followed by FileResponse out of app/static.
+        if os.path.islink(static_file_path):
+            return None, None
+        gz = static_file_path + ".gz"
+        if os.path.isfile(gz) and not os.path.islink(gz):
+            return static_file_path, gz
+        return static_file_path, None
+    return None, None
+
+
+def _spa_index_exists() -> bool:
+    """Check the SPA fallback exists (runs off the event loop via to_thread)."""
+    return os.path.exists("app/static/index.html")
+
+
+def _gz_response(static_file: str, gz_file: str) -> FileResponse:
+    """Build the precompressed-sibling response (~70% smaller on the wire)."""
+    media_type = mimetypes.guess_type(static_file)[0] or "application/octet-stream"
+    return FileResponse(
+        gz_file,
+        media_type=media_type,
+        headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"},
+    )
+
+
 @app.get("/{full_path:path}")
 async def serve_spa(request: Request, full_path: str):
     """Serve the React SPA for any non-API routes."""
-    if full_path == "api" or full_path.startswith("api/") or ".." in full_path:
+    if _is_spa_bypass(full_path):
         raise HTTPException(status_code=404, detail="Not found")
 
     # Stats + precompressed lookups off the event loop (slow disks under
@@ -415,41 +455,17 @@ async def serve_spa(request: Request, full_path: str):
     # the startup map, never from user input, so "..", absolute paths and
     # symlink escapes can't reach FileResponse.
     static_file_path = STATIC_ALLOWLIST.get(full_path or "")
-    import mimetypes
-
-    def _resolve():
-        if static_file_path and os.path.isfile(static_file_path):
-            # Builder never allowlists symlinks, but re-check here: a link
-            # planted after startup (or a symlinked .gz sibling) would
-            # otherwise be followed by FileResponse out of app/static.
-            if os.path.islink(static_file_path):
-                return None, None
-            gz = static_file_path + ".gz"
-            if os.path.isfile(gz) and not os.path.islink(gz):
-                return static_file_path, gz
-            return static_file_path, None
-        return None, None
 
     accepts_gzip = "gzip" in request.headers.get("accept-encoding", "")
-    static_file, gz_file = await asyncio.to_thread(_resolve)
+    static_file, gz_file = await asyncio.to_thread(
+        _resolve_static, static_file_path
+    )
     if static_file:
         if gz_file and accepts_gzip:
-            # Precompressed sibling from the build — ~70% smaller on the wire
-            # (385KB JS -> 116KB, 11MB player -> ~3MB).
-            media_type = (
-                mimetypes.guess_type(static_file)[0] or "application/octet-stream"
-            )
-            return FileResponse(
-                gz_file,
-                media_type=media_type,
-                headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"},
-            )
-        return FileResponse(static_file_path)
+            return _gz_response(static_file, gz_file)
+        return FileResponse(static_file)
 
-    index_exists = await asyncio.to_thread(
-        lambda: os.path.exists("app/static/index.html")
-    )
-    if index_exists:
+    if await asyncio.to_thread(_spa_index_exists):
         return FileResponse("app/static/index.html", headers=NO_CACHE_HEADERS)
 
     return JSONResponse(status_code=404, content={"detail": "Not found"})
