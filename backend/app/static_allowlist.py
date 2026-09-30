@@ -29,6 +29,10 @@ def build_static_allowlist(base: str = "app/static") -> dict:
             if name.endswith(".gz"):
                 continue
             abs_path = os.path.join(root, name)
+            # Never allowlist a symlink — FileResponse would follow it out
+            # of base at serve time.
+            if os.path.islink(abs_path):
+                continue
             rel = os.path.relpath(abs_path, base_abs).replace(os.sep, "/")
             allow[rel] = abs_path
     return allow

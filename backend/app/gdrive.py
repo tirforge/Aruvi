@@ -291,7 +291,17 @@ async def upload_streaming(
             with open(tmp, "wb") as f:
                 f.truncate(total)
 
-        await asyncio.to_thread(_preallocate)
+        _pre_task = asyncio.create_task(asyncio.to_thread(_preallocate))
+        try:
+            await _pre_task
+        except asyncio.CancelledError:
+            # Worker can't be cancelled — wait for creation so the outer
+            # finally can unlink the file instead of orphaning it.
+            try:
+                await asyncio.shield(_pre_task)
+            except asyncio.CancelledError:
+                pass
+            raise
 
         downloaded = 0
         last_ts = 0
@@ -301,7 +311,21 @@ async def upload_streaming(
         # (and the whole service) for the duration of the task-gather. Page
         # cache + one final fsync below gives the same durability without the
         # per-chunk stall.
-        fd = await asyncio.to_thread(os.open, tmp, os.O_RDWR | os.O_CREAT, 0o644)
+        fd = None
+        _open_task = asyncio.create_task(
+            asyncio.to_thread(os.open, tmp, os.O_RDWR | os.O_CREAT, 0o644)
+        )
+        try:
+            fd = await _open_task
+        except asyncio.CancelledError:
+            # Worker can't be cancelled — retain its result so a descriptor
+            # returned after cancellation is closed, not leaked.
+            try:
+                leaked = await asyncio.shield(_open_task)
+            except asyncio.CancelledError:
+                raise
+            await asyncio.to_thread(os.close, leaked)
+            raise
 
         # Split file into 1MB slots — each slot is one _byte_accurate_file_stream call
         SLOT_SIZE = 1024 * 1024

@@ -441,7 +441,7 @@ export default function FileBrowser() {
             // here. RenameModal owns its own Escape too — these branches are
             // last-resort fallbacks if its listener ever misses.
             if (e.key === 'Escape') {
-                if (document.fullscreenElement) void document.exitFullscreen();
+                if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
                 else if (renameFile) setRenameFile(null);
                 else if (renameFolder) setRenameFolder(null);
                 else clearSelection();

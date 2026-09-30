@@ -419,8 +419,13 @@ async def serve_spa(request: Request, full_path: str):
 
     def _resolve():
         if static_file_path and os.path.isfile(static_file_path):
+            # Builder never allowlists symlinks, but re-check here: a link
+            # planted after startup (or a symlinked .gz sibling) would
+            # otherwise be followed by FileResponse out of app/static.
+            if os.path.islink(static_file_path):
+                return None, None
             gz = static_file_path + ".gz"
-            if os.path.isfile(gz):
+            if os.path.isfile(gz) and not os.path.islink(gz):
                 return static_file_path, gz
             return static_file_path, None
         return None, None
