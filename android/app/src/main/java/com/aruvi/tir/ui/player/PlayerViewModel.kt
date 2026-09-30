@@ -747,7 +747,7 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                         _uiState.value.subtitleTracks.any { castTrackId(it.groupIndex, it.index) == id }
                     }
                     val newIds = (listOf(audioId) + textIds).toLongArray()
-                    remote.setActiveTrackIds(newIds)
+                    remote.setActiveMediaTracks(newIds)
                     android.util.Log.i("PlayerViewModel", "Cast setActiveTrackIds audio=$audioId -> ${newIds.contentToString()} (Custom path)")
                     handled = true
                     // For Default this will be ignored – we still reload via remux below to make it effective
@@ -820,7 +820,7 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
                         val textId = castTrackId(trackInfo.groupIndex, trackInfo.index)
                         (audioIds + textId).toLongArray()
                     }
-                    remote.setActiveTrackIds(newIds)
+                    remote.setActiveMediaTracks(newIds)
                     android.util.Log.i("PlayerViewModel", "Cast setActiveTrackIds subtitles=${trackInfo?.let { castTrackId(it.groupIndex, it.index) } ?: "off"} -> ${newIds.contentToString()}")
                     _uiState.value = _uiState.value.copy(subtitlesEnabled = trackInfo != null,
                         subtitleTracks = _uiState.value.subtitleTracks.map { it.copy(isSelected = trackInfo != null && it.groupIndex == trackInfo.groupIndex && it.index == trackInfo.index) })
@@ -874,8 +874,8 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
             val style = com.google.android.gms.cast.TextTrackStyle().apply {
                 fontScale = size.scale
                 // Optional: keep white on black shadow for readability on Default Receiver
-                foregroundColor = com.google.android.gms.cast.TextTrackStyle.COLOR_WHITE
-                backgroundColor = com.google.android.gms.cast.TextTrackStyle.COLOR_NONE
+                foregroundColor = android.graphics.Color.WHITE
+                backgroundColor = android.graphics.Color.TRANSPARENT
                 edgeType = com.google.android.gms.cast.TextTrackStyle.EDGE_TYPE_DROP_SHADOW
             }
             client.setTextTrackStyle(style)
@@ -1154,6 +1154,7 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
             // the same MKV library plays on Default Receiver without re-encode
             // when codecs are already H264/AAC (HEVC/VP9/AV1 still play on
             // capable Cast devices like Ultra/Google TV).
+            val file = _uiState.value.file
             val isMkvSource = file?.fileName?.lowercase()?.endsWith(".mkv") == true ||
                 (file?.mimeType?.lowercase() == "video/x-matroska")
             // Mobile's selected audio → TV's default: Default Receiver ignores AUDIO
@@ -1179,7 +1180,6 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 }
             }
 
-            val file = _uiState.value.file
             val title = file?.fileName ?: "Aruvi"
 
             // Thumbnails are also fetched by the receiver, so pass the token as
@@ -1298,7 +1298,7 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                     if (remoteClient != null && castTracks.isNotEmpty()) {
                         val castMetadata = com.google.android.gms.cast.MediaMetadata(com.google.android.gms.cast.MediaMetadata.MEDIA_TYPE_MOVIE).apply {
                             putString(com.google.android.gms.cast.MediaMetadata.KEY_TITLE, title)
-                            thumbnailUrl?.let { addImage(com.google.android.gms.cast.WebImage(Uri.parse(it))) }
+                            thumbnailUrl?.let { addImage(com.google.android.gms.common.images.WebImage(Uri.parse(it))) }
                         }
                         val customData = org.json.JSONObject().apply {
                             put("ar_mode", when (_uiState.value.toggleResizeMode) {
