@@ -131,11 +131,16 @@ fun MovePickerDialog(
     var error by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        val tree = loadFolderTree()
-        rootTree = tree
-        isLoading = false
-        if (tree.isEmpty()) {
-            error = "No folders found"
+        try {
+            val tree = loadFolderTree()
+            rootTree = tree
+            if (tree.isEmpty()) {
+                error = "No folders found"
+            }
+        } catch (_: Exception) {
+            error = "Failed to load folders"
+        } finally {
+            isLoading = false
         }
     }
 

@@ -105,8 +105,16 @@ class AuthRepository @Inject constructor(
      * Returns the new access token or null if refresh failed.
      */
     suspend fun refreshAccessToken(): String? {
+        // Capture the token BEFORE the lock: a waiter that queued behind a
+        // successful refresh sees a different stored token and reuses the
+        // fresh access token instead of re-spending the rotated single-use
+        // refresh token (which would invalidate the just-issued session).
+        val observedRefresh = getRefreshToken()
         return refreshMutex.withLock {
             val refreshToken = getRefreshToken() ?: return@withLock null
+            if (observedRefresh != null && refreshToken != observedRefresh) {
+                return@withLock getAccessToken()
+            }
 
             try {
                 val response = api.refreshToken(RefreshRequest(refreshToken))

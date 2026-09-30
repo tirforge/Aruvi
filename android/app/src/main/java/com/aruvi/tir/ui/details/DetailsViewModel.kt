@@ -287,4 +287,10 @@ class DetailsViewModel @Inject constructor(
             }
         }
     }
+
+    override fun onCleared() {
+        downloadJob?.cancel()
+        downloadJob = null
+        super.onCleared()
+    }
 }

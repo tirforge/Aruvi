@@ -218,6 +218,7 @@ fun MobilePlayerScreen(
                     )
                 }
             },
+            onRelease = { it.player = null },
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer(

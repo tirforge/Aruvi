@@ -22,7 +22,6 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.aruvi.tir.data.model.FileItem
@@ -352,7 +351,6 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
     // must be removable or each playback session leaks one listener (and the
     // ViewModel it captures) into the shared player forever.
     private var exoPlayerListener: Player.Listener? = null
-    private var castExecutor: java.util.concurrent.ExecutorService? = null
 
     private val castPlayerListener = object : Player.Listener {
         override fun onDeviceInfoChanged(deviceInfo: DeviceInfo) {
@@ -1354,7 +1352,7 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 // Never swallow cast-load failures silently: a rejected load
                 // leaves the receiver idle ("no media selected") with no clue
                 // why. Surface it in logcat under the cast tag.
-                android.util.Log.w("PlayerViewModel", "castToDevice load failed url=$url", e)
+                android.util.Log.w("PlayerViewModel", "castToDevice load failed", e)
             }
         }
     }
@@ -1653,10 +1651,6 @@ while (isActive) {
             try { exoPlayer.removeListener(it) } catch (_: Throwable) {}
         }
         exoPlayerListener = null
-        castExecutor?.let {
-            try { it.shutdown() } catch (_: Throwable) {}
-        }
-        castExecutor = null
         castPlayer?.let {
             try { it.removeListener(castPlayerListener) } catch (_: Throwable) {}
             try { it.release() } catch (_: Throwable) {}

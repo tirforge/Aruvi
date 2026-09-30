@@ -11,6 +11,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
@@ -115,10 +116,22 @@ class FileDownloader(
      * created (scoped storage forbids raw writes to public Downloads); below that the
      * legacy raw file path is used.
      */
+    /**
+     * Strip path components and characters a server-controlled fileName could
+     * use to escape the Downloads directory ("../", "/", absolute paths).
+     */
+    private fun sanitizeFileName(name: String): String {
+        val base = name.substringAfterLast('/').substringAfterLast('\\')
+        val cleaned = base.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim()
+        if (cleaned.isBlank() || cleaned == "." || cleaned == "..") return "download"
+        return cleaned.takeLast(255)
+    }
+
     private fun createDestination(fileName: String, mimeType: String?): String {
+        val safeName = sanitizeFileName(fileName)
         if (Build.VERSION.SDK_INT >= 29) {
             val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                put(MediaStore.Downloads.DISPLAY_NAME, safeName)
                 put(MediaStore.Downloads.MIME_TYPE, mimeType)
                 put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                 put(MediaStore.Downloads.IS_PENDING, 1)
@@ -128,7 +141,7 @@ class FileDownloader(
             )
             if (uri != null) return uri.toString()
         }
-        return legacyPath(fileName)
+        return legacyPath(safeName)
     }
 
     private fun legacyPath(fileName: String): String =
@@ -220,9 +233,7 @@ class FileDownloader(
         lastTimeMap.remove(id)
 
         val task = _tasks.value[id]
-        val currentTasks = _tasks.value.toMutableMap()
-        currentTasks.remove(id)
-        _tasks.value = currentTasks
+        _tasks.update { it - id }
 
         // Delete the (possibly partial) file off the main thread
         if (task != null && task.status != DownloadStatus.COMPLETED) {
@@ -235,9 +246,7 @@ class FileDownloader(
      */
     fun deleteFile(id: Long) {
         val task = _tasks.value[id] ?: return
-        val currentTasks = _tasks.value.toMutableMap()
-        currentTasks.remove(id)
-        _tasks.value = currentTasks
+        _tasks.update { it - id }
         scope.launch(Dispatchers.IO) { deleteDestination(task) }
     }
 
@@ -440,6 +449,6 @@ class FileDownloader(
     }
 
     private fun updateTask(task: DownloadTask) {
-        _tasks.value = _tasks.value + (task.id to task)
+        _tasks.update { it + (task.id to task) }
     }
 }

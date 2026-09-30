@@ -247,6 +247,7 @@ fun PlayerScreen(
                     )
                 }
             },
+            onRelease = { it.player = null },
             modifier = Modifier.fillMaxSize()
         )
 
