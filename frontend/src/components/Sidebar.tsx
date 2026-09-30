@@ -2,7 +2,7 @@ import { Files, Clock, PlayCircle, LogOut, HardDrive, X, Users, Zap, Shield, Sea
 import logo from '../assets/logo.png';
 import { useAppStore } from '../lib/store';
 import { useStorageStats, formatFileSize, useLogoutAll, useCurrentUser } from '../lib/api';
-import { memo, useCallback, useState, type ComponentType } from 'react';
+import { memo, useCallback, useEffect, useState, type ComponentType } from 'react';
 
 interface SidebarProps {
     isOpen: boolean;
@@ -20,6 +20,21 @@ function Sidebar({ isOpen, onClose }: SidebarProps) {
     const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
     const [showLogoutAllConfirm, setShowLogoutAllConfirm] = useState(false);
     const logoutAllMutation = useLogoutAll();
+
+    // Every other modal closes on Escape/backdrop — these two had neither, so
+    // keyboard users were trapped until they tabbed to Cancel.
+    useEffect(() => {
+        if (!showLogoutConfirm && !showLogoutAllConfirm) return;
+        const handler = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                e.stopPropagation();
+                setShowLogoutConfirm(false);
+                setShowLogoutAllConfirm(false);
+            }
+        };
+        document.addEventListener('keydown', handler);
+        return () => document.removeEventListener('keydown', handler);
+    }, [showLogoutConfirm, showLogoutAllConfirm]);
 
     const handleLogout = () => {
         localStorage.removeItem('access_token');
@@ -140,7 +155,10 @@ function Sidebar({ isOpen, onClose }: SidebarProps) {
 
             {/* Logout Modal */}
             {showLogoutConfirm && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+                <div
+                    className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in"
+                    onClick={(e) => { if (e.target === e.currentTarget) setShowLogoutConfirm(false); }}
+                >
                     <div className="bg-dark-900 border border-white/10 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl animate-scale-in">
                         <div className="p-6 text-center">
                             <div className="w-12 h-12 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -171,7 +189,10 @@ function Sidebar({ isOpen, onClose }: SidebarProps) {
 
             {/* Logout All Modal */}
             {showLogoutAllConfirm && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+                <div
+                    className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in"
+                    onClick={(e) => { if (e.target === e.currentTarget) setShowLogoutAllConfirm(false); }}
+                >
                     <div className="bg-dark-900 border border-white/10 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl animate-scale-in">
                         <div className="p-6 text-center">
                             <div className="w-12 h-12 bg-orange-500/10 rounded-full flex items-center justify-center mx-auto mb-4">

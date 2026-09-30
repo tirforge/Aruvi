@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMemo, useRef, useEffect, useCallback } from 'react';
 import { X, Play, Pause, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, Music, Film, ChevronDown, ChevronUp, Subtitles, Search, Loader2 } from 'lucide-react';
-import { TelegramFile, formatDuration, useUpdateProgress, useFile, getFileDownloadToken, useAccessToken, searchInternetSubtitles, fetchSubtitleContent, SubtitleCandidate } from '../lib/api';
+import { TelegramFile, formatDuration, useUpdateProgress, useFile, getFileDownloadToken, useAccessToken, searchInternetSubtitles, fetchSubtitleContent, SubtitleCandidate, API_BASE } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import AuthImage from './AuthImage';
 
@@ -171,8 +171,10 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         const reader = new FileReader();
         reader.onload = () => {
             let text = reader.result as string;
-            // Convert SRT to VTT if needed
-            if (file.name.endsWith('.srt')) {
+            // Convert SRT to VTT if needed (case-insensitive: cameras/Windows
+            // often save SUB.SRT and the strict check skipped the conversion,
+            // attaching a mislabeled track that never renders).
+            if (file.name.toLowerCase().endsWith('.srt')) {
                 text = srtToVtt(text);
             }
             const blob = new Blob([text], { type: 'text/vtt' });
@@ -255,6 +257,9 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
             if (ok) {
                 setIsLoading(false);
             } else {
+                // Clear the spinner too: it renders above the error panel
+                // (z-20 over z-10) and would stack on top of it forever.
+                setIsLoading(false);
                 setError('The playback engine failed to load. Check your connection and try again.');
             }
         });
@@ -263,7 +268,14 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
     const getAbsoluteUrl = (url: string) => {
         if (!url) return '';
         if (url.startsWith('http')) return url;
-        return `${window.location.origin}${url}`;
+        // Same guard as AuthImage: respect split frontend/backend deploys
+        // (__BACKEND_URL__) and tolerate relative paths missing the leading
+        // slash (naive origin-concatenation mangles those into host+path).
+        try {
+            return new URL(url, API_BASE || window.location.origin).href;
+        } catch {
+            return `${window.location.origin}/${url.replace(/^\/+/, '')}`;
+        }
     };
 
     // Capture the authorized stream URL once per file so a token refresh
@@ -272,10 +284,10 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
     // link already in stream_url, so a second `?` would swallow both tokens
     // into one malformed query value and the stream comes back "not authed".
     const authorizedStreamUrl = useMemo(() => {
-        const token = localStorage.getItem('access_token');
+        const token = localStorage.getItem('access_token') || '';
         const base = getAbsoluteUrl(file.stream_url || '');
         const sep = base.includes('?') ? '&' : '?';
-        return `${base}${sep}token=${token}`;
+        return `${base}${sep}token=${encodeURIComponent(token)}`;
     }, [file.id, file.stream_url]);
     // Still images don't risk restarting playback, so use the reactive token:
     // if it rotates mid-viewing, the <img> re-renders with a fresh token instead
@@ -285,7 +297,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         if (!isImage) return authorizedStreamUrl;
         const base = getAbsoluteUrl(file.stream_url || '');
         const sep = base.includes('?') ? '&' : '?';
-        return `${base}${sep}token=${reactiveToken}`;
+        return `${base}${sep}token=${encodeURIComponent(reactiveToken)}`;
     }, [file.stream_url, file.id, isImage, reactiveToken, authorizedStreamUrl]);
     const externalUrl = getAbsoluteUrl((extendedFile || file).public_stream_url || '') || authorizedStreamUrl;
     const vlcUrl = `vlc://${externalUrl}`;
@@ -311,7 +323,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         // would replay the stale token the rotation just invalidated.
         const base = getAbsoluteUrl(file.stream_url || '');
         const sep = base.includes('?') ? '&' : '?';
-        const freshUrl = `${base}${sep}token=${reactiveToken}`;
+        const freshUrl = `${base}${sep}token=${encodeURIComponent(reactiveToken)}`;
         el.source({
             video: { src: freshUrl, type: 'video/mp4' },
         });
@@ -657,8 +669,15 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         if (!el || subtitleTracks.length === 0) return;
         const prevTime = el.currentTime || 0;
         const activeIdxRef = activeSubKeyRef.current === null ? -1 : subtitleTracks.findIndex((t) => t.key === activeSubKeyRef.current);
+        // Re-source with the CURRENT token, not the frozen
+        // authorizedStreamUrl: if the token rotated since mount, the stale
+        // URL 401s and attaching subtitles kills playback.
+        const freshToken = localStorage.getItem('access_token') || '';
+        const freshBase = getAbsoluteUrl(file.stream_url || '');
+        const freshSep = freshBase.includes('?') ? '&' : '?';
+        const freshSrc = `${freshBase}${freshSep}token=${encodeURIComponent(freshToken)}`;
         el.source({
-            video: { src: authorizedStreamUrl, type: 'video/mp4' },
+            video: { src: freshSrc, type: 'video/mp4' },
             subtitles: subtitleTracks.map((t, i) => ({
                 src: t.url,
                 lang: `s${i}`,
@@ -757,7 +776,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
                             </a>
                             <div className="flex gap-3">
                                 <Button
-                                    onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(externalUrl); }}
+                                    onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(externalUrl).catch(() => { /* clipboard unavailable — no-op */ }); }}
                                     className="flex-1 btn-secondary flex items-center justify-center gap-2"
                                 >
                                     <Copy className="w-4 h-4" />

@@ -217,12 +217,16 @@ export default function GlobalContextMenu() {
                                             handleAction(() => {});
                                             // Short-lived file-bound token: the URL is handed to an
                                             // external app — never embed the account-wide JWT.
+                                            // Grabbed files already carry a `?token=` download link,
+                                            // so pick the separator instead of appending a second `?`.
                                             (async () => {
                                                 try {
                                                     const baseUrl = `${window.location.protocol}//${window.location.host}`;
+                                                    const streamPath = f.stream_url;
+                                                    const sep = streamPath.includes('?') ? '&' : '?';
                                                     const url = f.public_stream_url
                                                         ? `${baseUrl}${f.public_stream_url}`
-                                                        : `${baseUrl}${f.stream_url}?token=${await getFileDownloadToken(f.id)}`;
+                                                        : `${baseUrl}${streamPath}${sep}token=${encodeURIComponent(await getFileDownloadToken(f.id))}`;
                                                     window.open(`vlc://${url}`, '_blank');
                                                 } catch (err) {
                                                     console.error('Failed to mint stream token:', err);
@@ -236,12 +240,15 @@ export default function GlobalContextMenu() {
                                             handleAction(() => {});
                                             // Clipboard URLs end up in logs/chat history — mint a
                                             // short-lived file-bound token, not the account JWT.
+                                            // (Same `?` vs `&` separator guard as Play in VLC.)
                                             (async () => {
                                                 try {
                                                     const baseUrl = `${window.location.protocol}//${window.location.host}`;
+                                                    const streamPath = f.stream_url;
+                                                    const sep = streamPath.includes('?') ? '&' : '?';
                                                     const url = f.public_stream_url
                                                         ? `${baseUrl}${f.public_stream_url}`
-                                                        : `${baseUrl}${f.stream_url}?token=${await getFileDownloadToken(f.id)}`;
+                                                        : `${baseUrl}${streamPath}${sep}token=${encodeURIComponent(await getFileDownloadToken(f.id))}`;
                                                     await navigator.clipboard.writeText(url);
                                                 } catch (err) {
                                                     console.error('Failed to mint stream token:', err);

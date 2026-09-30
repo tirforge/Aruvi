@@ -6,10 +6,17 @@
  * small on the wire. Dependency-free (node zlib).
  */
 import { gzipSync } from 'node:zlib';
-import { readdirSync, statSync, readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join, extname } from 'node:path';
 
 const OUT_DIR = new URL('../../backend/app/static/', import.meta.url).pathname;
+
+// The outDir lives outside this package (backend build output): if it was
+// never created, readdirSync throws and postbuild fails the whole build.
+if (!existsSync(OUT_DIR)) {
+  console.log('gzip-assets: outDir missing, skipping');
+  process.exit(0);
+}
 
 const COMPRESSIBLE = new Set(['.js', '.css', '.html', '.svg', '.json', '.webmanifest', '.ico', '.txt']);
 

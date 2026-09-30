@@ -83,9 +83,9 @@ function FolderCardImpl({ folder, viewMode, selected, onSelect, onOpen, onFileDr
             const plain = e.dataTransfer.getData('text/plain').trim();
             if (/^\d+$/.test(plain)) {
                 onFileDrop(Number(plain), folder.id);
-            } else {
-                console.error('Invalid drop data');
             }
+            // Anything else (e.g. an OS file drag with no JSON payload) is
+            // silently ignored — it used to log a console error per drop.
         }
     };
 

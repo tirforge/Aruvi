@@ -261,8 +261,9 @@ export default function FileBrowser() {
             }
         } catch (error) {
             console.error('Paste failed:', error);
+            addToast('Failed to move items', 'error');
         }
-    }, [clipboard, currentFolderId, moveFilesMutation, moveFoldersMutation, setClipboard]);
+    }, [clipboard, currentFolderId, moveFilesMutation, moveFoldersMutation, setClipboard, addToast]);
 
 
     // Selection Box Logic

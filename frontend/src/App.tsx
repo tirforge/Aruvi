@@ -47,8 +47,14 @@ navigate('/', { replace: true });
                         <p className="text-dark-400 text-sm mb-2">Token received (click to copy):</p>
                         <button
                             onClick={() => {
-                                navigator.clipboard.writeText(token);
-                                setStatus('Token copied! Open browser DevTools console and run:\nlocalStorage.setItem("access_token", "paste-token-here")');
+                                // Clipboard can reject (non-secure context, denied
+                                // permission) — handle it instead of leaving an
+                                // unhandled rejection and a false "copied" status.
+                                navigator.clipboard.writeText(token).then(() => {
+                                    setStatus('Token copied! Open browser DevTools console and run:\nlocalStorage.setItem("access_token", "paste-token-here")');
+                                }).catch(() => {
+                                    setStatus('Copy failed — long-press the token above and copy it manually.');
+                                });
                             }}
                             className="text-xs text-primary-400 break-all text-left hover:text-primary-300"
                         >
@@ -348,11 +354,13 @@ function BotLink({ code }: { code?: string }) {
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-    const { isLoading, error, refetch } = useCurrentUser();
     // Reactive token: re-renders when another tab rotates/clears it. A bare
     // localStorage.getItem() here never re-rendered, so a logged-out tab kept
     // showing the app on a dead token until hard reload.
     const token = useAccessToken();
+    // Gated on the token: firing /auth/me with no token 401s, kicks the
+    // refresh interceptor, and hard-redirects — all before <Navigate> wins.
+    const { isLoading, error, refetch } = useCurrentUser(!!token);
 
     if (!token) {
         return <Navigate to="/login" replace />;
