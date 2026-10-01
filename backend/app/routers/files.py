@@ -27,7 +27,6 @@ from ..telegram import (
     invalidate_message_cache,
     invalidate_message_cache_batch,
 )
-from ..config import get_settings
 from ..services import (
     escape_like,
     add_urls_to_file,
@@ -35,9 +34,11 @@ from ..services import (
     fetch_continue_watching_files,
 )
 from ..utils import sanitize_filename
+import logging
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/files", tags=["Files"])
-settings = get_settings()
 
 
 @router.get("", response_model=FileListResponse)
@@ -214,7 +215,7 @@ async def update_file(
     # Re-fetch with relationships
     result = await db.execute(
         select(File)
-        .where(File.id == file_id)
+        .where(File.id == file_id, File.user_id == current_user.id)
         .options(selectinload(File.watch_progress))
     )
     file = result.scalar_one()
@@ -267,8 +268,8 @@ async def delete_file(
     # Best-effort cleanup from Telegram storage channel
     try:
         await delete_from_storage_channel(channel_message_id)
-    except Exception:
-        pass
+    except Exception as e:
+        _log.warning("Telegram cleanup failed for msg %s: %s", channel_message_id, e)
 
     return {"message": "File deleted successfully"}
 
@@ -280,6 +281,10 @@ async def batch_delete_files(
     current_user: User = Depends(get_current_user),
 ):
     """Delete multiple files."""
+    if not file_ids:
+        raise HTTPException(status_code=400, detail="No file IDs provided")
+    if len(file_ids) > 1000:
+        raise HTTPException(status_code=400, detail="Too many file IDs (max 1000)")
     # Fetch all files
     result = await db.execute(
         select(File)
@@ -305,8 +310,8 @@ async def batch_delete_files(
             batch = msg_ids[i : i + chunk_size]
             try:
                 await delete_from_storage_channel(batch)
-            except Exception:
-                pass
+            except Exception as e:
+                _log.warning("Telegram batch cleanup failed: %s", e)
 
     return {"message": f"Deleted {len(files)} files"}
 
@@ -441,7 +446,7 @@ async def share_file(
     # Re-fetch with relationships
     result = await db.execute(
         select(File)
-        .where(File.id == file_id)
+        .where(File.id == file_id, File.user_id == current_user.id)
         .options(selectinload(File.watch_progress))
     )
     file = result.scalar_one()
@@ -473,7 +478,7 @@ async def revoke_share(
     # Re-fetch with relationships
     result = await db.execute(
         select(File)
-        .where(File.id == file_id)
+        .where(File.id == file_id, File.user_id == current_user.id)
         .options(selectinload(File.watch_progress))
     )
     file = result.scalar_one()

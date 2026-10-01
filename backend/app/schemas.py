@@ -47,7 +47,7 @@ class AdminStats(BaseModel):
 
 
 class FolderBase(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=255)
     parent_id: Optional[int] = None
 
 
@@ -56,7 +56,7 @@ class FolderCreate(FolderBase):
 
 
 class FolderUpdate(BaseModel):
-    name: Optional[str] = None
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     parent_id: Optional[int] = None
 
 
@@ -78,8 +78,8 @@ class FolderWithChildren(FolderResponse):
 
 
 class FileBase(BaseModel):
-    file_name: str
-    file_size: int
+    file_name: str = Field(min_length=1, max_length=255)
+    file_size: int = Field(ge=0)
     mime_type: Optional[str] = None
     file_type: str  # video, audio, document, image
     duration: Optional[int] = None
@@ -96,7 +96,7 @@ class FileCreate(FileBase):
 
 
 class FileUpdate(BaseModel):
-    file_name: Optional[str] = None
+    file_name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     folder_id: Optional[int] = None
 
 
@@ -135,8 +135,8 @@ class WatchProgressBase(BaseModel):
 
 
 class WatchProgressUpdate(BaseModel):  # QB
-    position: int  # PT
-    duration: Optional[int] = None  # XB
+    position: int = Field(ge=0, le=2**53)  # PT
+    duration: Optional[int] = Field(default=None, ge=0, le=2**53)  # XB
     completed: Optional[bool] = None  # QZ
 
     model_config = ConfigDict(extra="ignore")  # Android client sends extra fields
@@ -209,7 +209,7 @@ class BotInfoResponse(BaseModel):
 
 
 class BatchMoveRequest(BaseModel):
-    ids: list[int]
+    ids: list[int] = Field(min_length=1, max_length=1000)
     folder_id: Optional[int] = None
 
 

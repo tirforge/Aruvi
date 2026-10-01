@@ -69,7 +69,7 @@ async def _user_from_download_token(request: Request, file_id: int, db: AsyncSes
     token_version = payload.get("ver")
     result = await db.execute(select(User).where(User.telegram_id == tid))
     user = result.scalar_one_or_none()
-    if user and (token_version is None or token_version >= user.auth_version):
+    if user and (token_version is not None and token_version >= user.auth_version):
         return user
     return None
 
@@ -378,8 +378,8 @@ async def stream_file(
         }
         return Response(status_code=200, content=b"", headers=headers)
 
-    # Validate range
-    if (until_bytes > file_size) or (from_bytes < 0) or (from_bytes > until_bytes):
+    # Validate range (until_bytes is inclusive; max valid is file_size - 1)
+    if (until_bytes >= file_size) or (from_bytes < 0) or (from_bytes > until_bytes):
         return Response(
             status_code=416,
             content="416: Range not satisfiable",

@@ -15,18 +15,21 @@ import asyncio
 import os
 import secrets
 import time
-import uuid
+import logging
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..rate_limit import limiter
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter()
 
 # token -> {"client": Client, "phone": str, "hash": str, "ts": float}
 _pending: dict = {}
 _TTL_SECONDS = 600
+_PENDING_MAX = 100
 
 
 def _cleanup_expired() -> None:
@@ -36,9 +39,18 @@ def _cleanup_expired() -> None:
         entry = _pending.pop(k, None)
         if entry:
             try:
-                asyncio.get_event_loop().create_task(entry["client"].disconnect())
+                asyncio.get_running_loop().create_task(
+                    entry["client"].disconnect()
+                )
+            except RuntimeError:
+                pass
             except Exception:
                 pass
+    # Bound memory: evict oldest when over cap (request-driven cleanup only).
+    if len(_pending) > _PENDING_MAX:
+        oldest = sorted(_pending.items(), key=lambda kv: kv[1]["ts"])
+        for k, _ in oldest[: len(_pending) - _PENDING_MAX]:
+            _pending.pop(k, None)
 
 
 def _check_key(provided: str | None) -> None:
@@ -61,17 +73,17 @@ def _get_client(token: str):
 
 
 class SendCodeIn(BaseModel):
-    setup_key: str
-    api_id: int
-    api_hash: str
-    phone: str
+    setup_key: str = Field(max_length=256)
+    api_id: int = Field(ge=1, le=2**31 - 1)
+    api_hash: str = Field(min_length=1, max_length=256)
+    phone: str = Field(min_length=1, max_length=32)
 
 
 class SignInIn(BaseModel):
-    setup_key: str
-    token: str
-    code: str
-    password: str | None = None
+    setup_key: str = Field(max_length=256)
+    token: str = Field(min_length=1, max_length=64)
+    code: str = Field(min_length=1, max_length=32)
+    password: str | None = Field(default=None, max_length=256)
 
 
 @router.post("/setup/send-code")
@@ -81,7 +93,7 @@ async def setup_send_code(request: Request, body: SendCodeIn):
     _cleanup_expired()
     from pyrogram import Client  # deferred: heavy import only when actually used
 
-    token = uuid.uuid4().hex[:16]
+    token = secrets.token_hex(16)
     client = Client(
         f"setup_{token}",
         api_id=body.api_id,
@@ -96,7 +108,8 @@ async def setup_send_code(request: Request, body: SendCodeIn):
             await client.disconnect()
         except Exception:
             pass
-        raise HTTPException(400, f"Telegram rejected the request: {e}")
+        _log.warning("setup send-code rejected: %s", e)
+        raise HTTPException(400, "Telegram rejected the request")
 
     _pending[token] = {
         "client": client,
@@ -125,9 +138,11 @@ async def setup_sign_in(request: Request, body: SignInIn):
         try:
             await client.check_password(body.password)
         except Exception as e:
-            raise HTTPException(403, f"Wrong 2FA password: {e}")
+            _log.warning("setup 2FA failed: %s", e)
+            raise HTTPException(403, "Wrong 2FA password")
     except Exception as e:
-        raise HTTPException(400, f"Sign-in failed: {e}")
+        _log.warning("setup sign-in failed: %s", e)
+        raise HTTPException(400, "Sign-in failed")
 
     session_string = await client.export_session_string()
     try:

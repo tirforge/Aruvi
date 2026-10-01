@@ -3,7 +3,7 @@ TV-specific API endpoints optimized for Android TV clients.
 """
 
 import asyncio
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, func
 from sqlalchemy.orm import selectinload, defer
@@ -11,7 +11,6 @@ from sqlalchemy.orm import selectinload, defer
 from ..database import get_db, async_session
 from ..models import File, User, Folder
 from ..auth import get_current_user
-from ..config import get_settings
 from ..services import (
     escape_like,
     add_urls_to_file,
@@ -20,7 +19,6 @@ from ..services import (
 )
 
 router = APIRouter(prefix="/tv", tags=["TV"])
-settings = get_settings()
 
 
 async def _fetch_top_level_folders(user_id: int) -> list:
@@ -145,7 +143,7 @@ async def tv_recent_files(
 
 @router.get("/search")
 async def tv_search(
-    q: str = Query(..., min_length=1),
+    q: str = Query(..., min_length=1, max_length=200),
     limit: int = Query(30, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -198,8 +196,6 @@ async def tv_folder_detail(
     Get folder details with files and subfolders for TV client.
     Returns folder info, subfolders, files, and parent path for navigation.
     """
-    from fastapi import HTTPException
-
     # Get the folder
     folder_result = await db.execute(
         select(Folder).where(Folder.id == folder_id, Folder.user_id == current_user.id)
@@ -236,29 +232,28 @@ async def tv_folder_detail(
     )
     total_files = total_result.scalar() or 0
 
-    # Build parent path for breadcrumb navigation — single query
+    # Build parent path for breadcrumb navigation — walk parents iteratively
+    # with a depth cap instead of loading the user's entire folder table.
     parent_path = []
     if folder.parent_id:
-        all_folders_result = await db.execute(
-            select(Folder).where(Folder.user_id == current_user.id)
-        )
-        folder_map: dict[int, Folder] = {
-            f.id: f for f in all_folders_result.scalars().all()
-        }
-        current = folder
-        chain: list[int] = []
+        chain: list[Folder] = []
         seen: set[int] = {folder.id}
-        while (
-            current.parent_id
-            and current.parent_id in folder_map
-            and current.parent_id not in seen
-        ):
-            # `seen` guards against a corrupted parent chain looping forever.
-            seen.add(current.parent_id)
-            chain.append(current.parent_id)
-            current = folder_map[current.parent_id]
-        for pid in reversed(chain):
-            a = folder_map[pid]
+        current_id: int | None = folder.parent_id
+        for _ in range(100):
+            if current_id is None or current_id in seen:
+                break
+            seen.add(current_id)
+            parent_result = await db.execute(
+                select(Folder).where(
+                    Folder.id == current_id, Folder.user_id == current_user.id
+                )
+            )
+            parent = parent_result.scalar_one_or_none()
+            if parent is None:
+                break
+            chain.append(parent)
+            current_id = parent.parent_id
+        for a in reversed(chain):
             parent_path.append(
                 {
                     "id": a.id,

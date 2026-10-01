@@ -75,6 +75,7 @@ class Settings(BaseSettings):
         try:
             return [int(u.strip()) for u in v.split(",") if u.strip()]
         except ValueError:
+            logger.warning("Ignoring malformed AUTH_USERS value: %r", v)
             return []
 
     @property
@@ -85,6 +86,7 @@ class Settings(BaseSettings):
         try:
             return {int(u.strip()) for u in v.split(",") if u.strip()}
         except ValueError:
+            logger.warning("Ignoring malformed ADMIN_IDS value: %r", v)
             return set()
 
     @property

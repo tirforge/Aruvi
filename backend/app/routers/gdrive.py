@@ -79,7 +79,7 @@ def _page(
     icon_svg: str, title: str, body: str, extra: str = "", is_error: bool = False
 ) -> str:
     cls = " error" if is_error else ""
-    home = settings.web_base_url
+    home = html_escape(settings.web_base_url, quote=True)
     title = html_escape(title)
     body = html_escape(body)
     return f"""\

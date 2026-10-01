@@ -1724,8 +1724,8 @@ async def grab_selected(
             file_type = "audio"
             mime_type = mime_type or "audio/mpeg"
         else:
-            mime_type = mime_type or "video/mp4"
             file_type = classify_file_type(file_name, mime_type)
+            mime_type = mime_type or "video/mp4"
 
         # Sanity-check the delivered file against the button the user picked —
         # the bot can link a label to a completely different movie or a worse

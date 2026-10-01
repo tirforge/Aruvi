@@ -193,7 +193,8 @@ async def start_one_client(i, c):
 async def start_all_clients():
     logger.info("Starting %d Telegram client(s)...", len(clients))
     tasks = [start_one_client(i, c) for i, c in enumerate(clients)]
-    await asyncio.gather(*tasks)
+    # One bot's ConnectionError must not abort the whole boot gather.
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def stop_one_client(c):

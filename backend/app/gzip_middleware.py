@@ -76,7 +76,12 @@ class CompressibleGZipMiddleware:
                 if state.get("compress") and len(body) >= self.minimum_size:
                     compressed = gzip.compress(body, compresslevel=6)
                     if len(compressed) < len(body):
-                        start = state.pop("start")
+                        start = state.pop("start", None)
+                        if start is None:
+                            # Start already flushed for a streamed body — send
+                            # the tail raw instead of crashing on KeyError.
+                            await send(message)
+                            return
                         headers = [
                             (k, v)
                             for k, v in start.get("headers", [])

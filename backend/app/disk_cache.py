@@ -268,11 +268,19 @@ class DiskChunkCache:
             self._remove_dir(d)
             total -= size
             freed += size
+        # Sweep freed space — invalidate the cached total so status/diag
+        # polls don't under-report for up to 15s after freeing GBs.
+        with self._lock:
+            self._used_at = None
         return freed
 
     @staticmethod
     def _remove_dir(d: Path):
         for f in d.iterdir():
+            # Never unlink in-flight .tmp writes; the writer's os.replace
+            # falls back to unlink and the chunk is simply not cached.
+            if f.name.endswith(".tmp"):
+                continue
             try:
                 f.unlink()
             except OSError:

@@ -230,12 +230,17 @@ async def update_folder(
 
             descendants_cte = (
                 select(Folder.id)
-                .where(Folder.id == folder_id)
+                .where(
+                    Folder.id == folder_id, Folder.user_id == current_user.id
+                )
                 .cte(name="descendants", recursive=True)
             )
             d_alias = aliased(Folder)
             descendants_cte = descendants_cte.union_all(
-                select(d_alias.id).where(d_alias.parent_id == descendants_cte.c.id)
+                select(d_alias.id).where(
+                    d_alias.parent_id == descendants_cte.c.id,
+                    d_alias.user_id == current_user.id,
+                )
             )
             desc_result = await db.execute(select(descendants_cte.c.id))
             descendant_ids = set(desc_result.scalars().all())
@@ -299,12 +304,15 @@ async def delete_folder(
 
     subfolders_cte = (
         select(Folder.id)
-        .where(Folder.id == folder_id)
+        .where(Folder.id == folder_id, Folder.user_id == current_user.id)
         .cte(name="subfolders", recursive=True)
     )
     f_alias = aliased(Folder)
     subfolders_cte = subfolders_cte.union_all(
-        select(f_alias.id).where(f_alias.parent_id == subfolders_cte.c.id)
+        select(f_alias.id).where(
+            f_alias.parent_id == subfolders_cte.c.id,
+            f_alias.user_id == current_user.id,
+        )
     )
     all_ids_result = await db.execute(select(subfolders_cte.c.id))
     all_folder_ids = list(all_ids_result.scalars().all())
@@ -333,14 +341,20 @@ async def delete_folder(
 
             await db.execute(
                 update(File)
-                .where(File.folder_id.in_(all_folder_ids))
+                .where(
+                    File.folder_id.in_(all_folder_ids),
+                    File.user_id == current_user.id,
+                )
                 .values(folder_id=target_folder_id)
             )
     else:
         if all_folder_ids:
             file_query = (
                 select(File)
-                .where(File.folder_id.in_(all_folder_ids))
+                .where(
+                    File.folder_id.in_(all_folder_ids),
+                    File.user_id == current_user.id,
+                )
                 .options(defer(File.thumbnail_data))
             )
             file_result = await db.execute(file_query)
@@ -352,25 +366,38 @@ async def delete_folder(
             if storage_message_ids:
                 invalidate_message_cache_batch(storage_message_ids)
 
-            await db.execute(delete(File).where(File.folder_id.in_(all_folder_ids)))
+            await db.execute(
+                delete(File).where(
+                    File.folder_id.in_(all_folder_ids),
+                    File.user_id == current_user.id,
+                )
+            )
 
     # Delete all descendant folder rows explicitly — ORM cascade only fires
     # for loaded children, and SQLite FK cascade needs PRAGMA foreign_keys=ON
     if all_folder_ids:
-        await db.execute(delete(Folder).where(Folder.id.in_(all_folder_ids)))
+        await db.execute(
+            delete(Folder).where(
+                Folder.id.in_(all_folder_ids),
+                Folder.user_id == current_user.id,
+            )
+        )
     await db.commit()
 
     # Best-effort cleanup from the Telegram storage channel — run AFTER the
     # commit so a slow batch of network deletes never holds the DB transaction
     # (and a checked-out pool connection) open.
     if storage_message_ids:
+        import logging
+
+        _log = logging.getLogger(__name__)
         chunk_size = 100
         for i in range(0, len(storage_message_ids), chunk_size):
             batch = storage_message_ids[i : i + chunk_size]
             try:
                 await delete_from_storage_channel(batch)
-            except Exception:
-                pass
+            except Exception as e:
+                _log.warning("Telegram folder cleanup failed: %s", e)
 
     return {"message": "Folder deleted successfully"}
 
@@ -382,6 +409,10 @@ async def batch_delete_folders(
     current_user: User = Depends(get_current_user),
 ):
     """Delete multiple folders."""
+    if not folder_ids:
+        raise HTTPException(status_code=400, detail="No folder IDs provided")
+    if len(folder_ids) > 1000:
+        raise HTTPException(status_code=400, detail="Too many folder IDs (max 1000)")
     # Fetch all folders
     result = await db.execute(
         select(Folder).where(
@@ -401,12 +432,17 @@ async def batch_delete_folders(
     message_ids: list[int] = []
     subfolders_cte = (
         select(Folder.id)
-        .where(Folder.id.in_(folder_id_list))
+        .where(
+            Folder.id.in_(folder_id_list), Folder.user_id == current_user.id
+        )
         .cte(name="subfolders", recursive=True)
     )
     f_alias = aliased(Folder)
     subfolders_cte = subfolders_cte.union_all(
-        select(f_alias.id).where(f_alias.parent_id == subfolders_cte.c.id)
+        select(f_alias.id).where(
+            f_alias.parent_id == subfolders_cte.c.id,
+            f_alias.user_id == current_user.id,
+        )
     )
     folder_result = await db.execute(select(subfolders_cte.c.id))
     all_affected_folder_ids = folder_result.scalars().all()
@@ -415,7 +451,10 @@ async def batch_delete_folders(
         # Get files to delete from Telegram
         file_query = (
             select(File)
-            .where(File.folder_id.in_(all_affected_folder_ids))
+            .where(
+                File.folder_id.in_(all_affected_folder_ids),
+                File.user_id == current_user.id,
+            )
             .options(defer(File.thumbnail_data))
         )
         file_result = await db.execute(file_query)
@@ -430,13 +469,19 @@ async def batch_delete_folders(
 
         # Delete files from DB
         await db.execute(
-            sqlalchemy_delete(File).where(File.folder_id.in_(all_affected_folder_ids))
+            sqlalchemy_delete(File).where(
+                File.folder_id.in_(all_affected_folder_ids),
+                File.user_id == current_user.id,
+            )
         )
 
     # Delete all affected folder rows explicitly (ORM cascade only fires for loaded children)
     if all_affected_folder_ids:
         await db.execute(
-            sqlalchemy_delete(Folder).where(Folder.id.in_(all_affected_folder_ids))
+            sqlalchemy_delete(Folder).where(
+                Folder.id.in_(all_affected_folder_ids),
+                Folder.user_id == current_user.id,
+            )
         )
 
     await db.commit()
@@ -444,13 +489,16 @@ async def batch_delete_folders(
     # Best-effort cleanup from Telegram storage channel — AFTER the commit so
     # the DB transaction is never held across slow network deletes.
     if message_ids:
+        import logging
+
+        _log = logging.getLogger(__name__)
         chunk_size = 100
         for i in range(0, len(message_ids), chunk_size):
             batch = message_ids[i : i + chunk_size]
             try:
                 await delete_from_storage_channel(batch)
-            except Exception:
-                pass
+            except Exception as e:
+                _log.warning("Telegram batch folder cleanup failed: %s", e)
 
     return {"message": f"Deleted {len(folders)} folders and their content"}
 
@@ -478,12 +526,17 @@ async def batch_move_folders(
 
         descendants_cte = (
             select(Folder.id)
-            .where(Folder.id.in_(folder_ids))
+            .where(
+                Folder.id.in_(folder_ids), Folder.user_id == current_user.id
+            )
             .cte(name="descendants", recursive=True)
         )
         d_alias = aliased(Folder)
         descendants_cte = descendants_cte.union_all(
-            select(d_alias.id).where(d_alias.parent_id == descendants_cte.c.id)
+            select(d_alias.id).where(
+                d_alias.parent_id == descendants_cte.c.id,
+                d_alias.user_id == current_user.id,
+            )
         )
         desc_result = await db.execute(select(descendants_cte.c.id))
         descendant_ids = set(desc_result.scalars().all())

@@ -57,7 +57,7 @@ class PatchedClient(PyroClient):
             msg = await self.get_messages(chat_id=chat_id, message_ids=message_id)
             if msg.empty:  # type: ignore
                 raise ValueError("message id is invalid")
-            if not msg.from_user.is_self:  # type: ignore
+            if not getattr(msg.from_user, "is_self", False):  # type: ignore
                 raise ValueError("cannot use self message")
             # if not await self.check_cbd(msg.reply_markup):  # type: ignore
             #     raise TypeError("message type invalid [no callback button]")
@@ -66,7 +66,7 @@ class PatchedClient(PyroClient):
             key = inline_message_id
         else:
             raise TypeError("chat_id or inline_message_id is required")
-        future = self.loop.create_future()
+        future = asyncio.get_running_loop().create_future()
         entry = {"future": future, "filters": filters}
         self.listeners.setdefault(key, deque()).append(entry)
         future.add_done_callback(functools.partial(self._forget_listener, key, entry))
@@ -86,7 +86,7 @@ class PatchedClient(PyroClient):
             chat = await self.get_chat(chat_id)
             chat_id = chat.id  # type: ignore
         key = str(chat_id)
-        future = self.loop.create_future()
+        future = asyncio.get_running_loop().create_future()
         entry = {"future": future, "filters": filters}
         self.listeners.setdefault(key, deque()).append(entry)
         future.add_done_callback(functools.partial(self._forget_listener, key, entry))
@@ -103,7 +103,7 @@ class PatchedClient(PyroClient):
         timeout: Optional[int] = None,
     ):
         key = str(user_id)
-        future = self.loop.create_future()
+        future = asyncio.get_running_loop().create_future()
         entry = {"future": future, "filters": filters}
         self.listeners.setdefault(key, deque()).append(entry)
         future.add_done_callback(functools.partial(self._forget_listener, key, entry))
@@ -120,7 +120,7 @@ class PatchedClient(PyroClient):
         timeout: Optional[int] = None,
     ):
         key = str(user_id)
-        future = self.loop.create_future()
+        future = asyncio.get_running_loop().create_future()
         entry = {"future": future, "filters": filters}
         self.listeners.setdefault(key, deque()).append(entry)
         future.add_done_callback(functools.partial(self._forget_listener, key, entry))

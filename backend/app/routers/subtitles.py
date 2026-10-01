@@ -88,7 +88,10 @@ def _video_from_name(name: str) -> object:
     )
     kwargs = {k: v for k, v in info.items() if k in _KEYS and v is not None}
     year = kwargs.pop("year", None) or info.get("year")
-    common = dict(year=int(year)) if year else {}
+    try:
+        common = dict(year=int(year)) if year else {}
+    except (TypeError, ValueError):
+        common = {}
 
     if info.get("type") == "episode":
         season = info.get("season")
@@ -247,11 +250,42 @@ async def _os_download(sub_id: str, file_id: int | None) -> tuple[str, str]:
                     detail="OpenSubtitles free download quota reached for today",
                 )
             link = dl.get("link")
-            if not link:
+            if not link or not isinstance(link, str):
                 raise HTTPException(
                     status_code=502, detail="OpenSubtitles returned no download link"
                 )
-            content = (await client.get(link, headers=_os_headers())).content
+            # Provider-supplied URL: only follow https links to the expected
+            # OpenSubtitles hosts/CDN; never blindly fetch internal URLs.
+            from urllib.parse import urlparse
+
+            parsed = urlparse(link)
+            if parsed.scheme != "https" or not parsed.hostname:
+                raise HTTPException(
+                    status_code=502, detail="OpenSubtitles returned an invalid link"
+                )
+            host = parsed.hostname.lower()
+            if not (
+                host == "api.opensubtitles.com"
+                or host.endswith(".opensubtitles.com")
+                or host.endswith(".opensubtitles.org")
+            ):
+                # Allow the documented download CDN hosts too; anything else
+                # (internal/LAN, plain http) is rejected as a potential SSRF.
+                raise HTTPException(
+                    status_code=502, detail="OpenSubtitles returned an invalid link"
+                )
+            content_resp = await client.get(link, headers=_os_headers())
+            content_resp.raise_for_status()
+            # Cap in-memory buffering: subtitles are KBs; refuse absurd bodies.
+            if int(content_resp.headers.get("content-length") or 0) > 5 * 1024 * 1024:
+                raise HTTPException(
+                    status_code=502, detail="Subtitle file too large"
+                )
+            content = content_resp.content
+            if len(content) > 5 * 1024 * 1024:
+                raise HTTPException(
+                    status_code=502, detail="Subtitle file too large"
+                )
     except HTTPException:
         raise
     except Exception as exc:
@@ -386,6 +420,12 @@ async def subtitle_content(
     file = result.scalar_one_or_none()
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
+
+    allowed_providers = set(_subliminal_providers())
+    if _os_enabled():
+        allowed_providers.add("opensubtitlescom")
+    if provider not in allowed_providers:
+        raise HTTPException(status_code=400, detail="Unknown subtitle provider")
 
     if provider == "opensubtitlescom":
         if not _os_enabled():

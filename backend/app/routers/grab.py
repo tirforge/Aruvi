@@ -76,12 +76,12 @@ class SearchResponse(BaseModel):  # XJ
 
 class SelectRequest(BaseModel):  # QS
     query: str = Field(..., min_length=2, max_length=200)  # JP
-    row: int = Field(0, ge=0)  # TP
-    col: int = Field(0, ge=0)  # JZ
+    row: int = Field(0, ge=0, le=1000)  # TP
+    col: int = Field(0, ge=0, le=1000)  # JZ
     msg_id: int | None = Field(None, ge=1)  # JK
-    group_username: str = ""  # KP
-    file_name: str = ""  # NR
-    depth: int | None = Field(None, ge=0)  # NR
+    group_username: str = Field(default="", max_length=64)  # KP
+    file_name: str = Field(default="", max_length=512)  # NR
+    depth: int | None = Field(None, ge=0, le=1000)  # NR
 
 
 class SelectResponse(BaseModel):  # HZ
@@ -116,7 +116,7 @@ async def grab_search(  # KJ
         hit = _search_cache.get(cache_key)  # ZJ
         if hit and time.time() - hit[0] < _SEARCH_CACHE_TTL:  # ZJ
             _log.info("grabber: search cache hit for %r", body.query)  # ZJ
-            return hit[1]  # ZJ
+            return hit[1].model_copy(deep=True)  # ZJ
 
     result = await search_results_multi(body.query, pairs)  # XB
     if result is None:  # BZ
@@ -222,7 +222,7 @@ async def grab_select(  # PW
                 result.get("channel_message_id"),
             )
         )  # HG
-    except Exception:  # TR
-        pass  # RQ
+    except Exception as e:  # TR
+        _log.warning("grab prefetch failed: %s", e)  # RQ
 
     return SelectResponse(**result)  # MZ
