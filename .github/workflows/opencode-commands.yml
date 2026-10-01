@@ -54,7 +54,8 @@ jobs:
           PR=${{ github.event.issue.number }}
           HEAD=$(bash .github/scripts/gh-retry.sh pr view "$PR" --json headRefName -q .headRefName)
           RUN=$(bash .github/scripts/gh-retry.sh run list --workflow review-combo.yml --branch "$HEAD" --limit 1 --json databaseId,conclusion,status -q '.[0] | "\(.databaseId) \(.conclusion) \(.status)"')
-          # shellcheck disable=SC2086 — intentional word-split of "id conclusion status" into $1/$2/$3
+          # Intentional word-split of "id conclusion status" into $1/$2/$3.
+          # shellcheck disable=SC2086
           set -- $RUN
           if [ -z "$1" ]; then
             gh pr comment "$PR" --body "⚠️ **/fix**: no review-combo run found for \`$HEAD\` yet — push or wait for the PR event run first." || true
@@ -78,7 +79,8 @@ jobs:
             --json databaseId,conclusion,workflowName \
             -q '[.[] | select(.conclusion=="failure" and .workflowName!="review-combo" and .workflowName!="opencode-commands") | .databaseId] | join(" ")')
           N=0
-          # shellcheck disable=SC2086 — intentional split of space-joined run IDs
+          # Intentional split of space-joined run IDs.
+          # shellcheck disable=SC2086
           for ID in $IDS; do
             [ "$N" -lt 5 ] || break
             gh run rerun --failed "$ID" || true
