@@ -20,7 +20,7 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.21.0",
-    "zustand": "^4.4.0"
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@testing-library/react": "^16.1.0",
