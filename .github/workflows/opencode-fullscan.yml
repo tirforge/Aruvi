@@ -103,11 +103,18 @@ jobs:
             - If a fix PR for this area is already open, add to it instead
               of opening a duplicate.
             - After opening (or adding to) the fix PR, write its full URL
-              into the report as `Fix PR: <url>`. A non-CLEAN report with
-              no open fix PR FAILS the run — a deterministic workflow step
-              verifies this after you finish, so complete the delivery
-              before you stop. Fixes that live only in your workspace are
-              deleted with the runner and count as NOT DELIVERED.
+              into the report as `Fix PR: <url>`. Open it yourself with
+              `gh pr create --base main --head
+              opencode/fullscan-${{ matrix.area }}-${{ github.run_number }}
+              --title "opencode fullscan: ${{ matrix.area }} fixes"
+              --body-file fullscan-${{ matrix.area }}-report.md`
+              (you have full tool permission, no approval prompts — if the
+              command still fails, leave the branch pushed: a workflow step
+              below opens the PR for you). A non-CLEAN report with no open
+              fix PR FAILS the run — a deterministic workflow step verifies
+              this after you finish, so complete the delivery before you
+              stop. Fixes that live only in your workspace are deleted with
+              the runner and count as NOT DELIVERED.
 
       - name: Publish verdict to step summary
         # Same area gate as the scan step: a skipped area must not false-fail
@@ -132,6 +139,39 @@ jobs:
           name: fullscan-${{ matrix.area }}-report-${{ github.run_number }}
           path: fullscan-${{ matrix.area }}-report.md
           if-no-files-found: error
+
+      - name: Open fix PR (workflow-owned delivery backstop)
+        # The agent is asked to open the PR itself, but its `gh` may hang
+        # on sandbox prompts (seen 2026-10-01: 3h50m parked on an
+        # external_directory ask inside `gh pr create`). This deterministic
+        # step opens the PR when the agent didn't — same branch, report as
+        # body — so delivery never depends on the agent's `gh` working.
+        # Runs BEFORE Verify delivery, which then passes on the open PR.
+        if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.area == 'all' || inputs.area == matrix.area) }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          f="fullscan-${{ matrix.area }}-report.md"
+          branch="opencode/fullscan-${{ matrix.area }}-${{ github.run_number }}"
+          [ -f "$f" ] || { echo "no report — leaving delivery to the Verify gate."; exit 0; }
+          if grep -qiE '^[#[:space:]]*CLEAN([ :]|$)' "$f"; then
+            echo "CLEAN verdict — no PR required."
+            exit 0
+          fi
+          if [ "$(bash .github/scripts/gh-retry.sh pr list --head "$branch" --state open --json number --jq 'length')" -ge 1 ]; then
+            echo "agent already opened the PR — nothing to do."
+            exit 0
+          fi
+          if ! git ls-remote --heads origin "$branch" | grep -q "$branch"; then
+            echo "branch $branch never pushed — leaving delivery to the Verify gate."
+            exit 0
+          fi
+          url="$(bash .github/scripts/gh-retry.sh pr create --base main --head "$branch" \
+            --title "opencode fullscan: ${{ matrix.area }} fixes" --body-file "$f")"
+          echo "opened $url"
+          # Same CodeRabbit nudge the agent prompt requires — the backstop
+          # path must trigger the same review layers, not skip them.
+          bash .github/scripts/gh-retry.sh pr comment "$url" --body "@coderabbitai review" || true
 
       - name: Verify delivery (deterministic gate)
         # The agent is trusted to audit, not to self-report delivery. A
