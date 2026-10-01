@@ -815,7 +815,8 @@ def _parse_cast_probe(data: dict) -> dict:
 
 
 def _norm_lang(lang) -> str:
-    return (lang or "").strip().lower().split()[0]
+    parts = (lang or "").strip().lower().split()
+    return parts[0] if parts else ""
 
 
 def _resolve_cast_audio_map(probe, audio: int | None, audio_lang: str | None) -> str:
@@ -835,12 +836,12 @@ def _resolve_cast_audio_map(probe, audio: int | None, audio_lang: str | None) ->
                     return f"0:a:{i}?"
             logger.warning(
                 "cast audio_lang %r not found in %s – falling back to all audio",
-                audio_lang,
+                req,
                 audio_langs,
             )
             return "0:a?"
         logger.warning(
-            "cast audio_lang %r too short – falling back to all audio", audio_lang
+            "cast audio_lang %r too short – falling back to all audio", req
         )
         return "0:a?"
     if audio is not None and 0 <= audio < audio_count:

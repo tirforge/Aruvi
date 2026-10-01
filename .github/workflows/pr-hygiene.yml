@@ -1,0 +1,55 @@
+name: pr-hygiene
+
+# Weekly queue janitor. Nudges any PR idle 7+ days (once — tracked with the
+# `hygiene-nudged` label), and auto-closes BOT PRs idle 30+ days with a note.
+# Human PRs are NEVER auto-closed: the most the bot does is nudge + label.
+# Runs Mondays 6am UTC + on demand.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: pr-hygiene
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Decide nudge vs close
+        id: decide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash .github/scripts/gh-retry.sh pr list --state open --limit 100 \
+            --json number,updatedAt,author,labels > prs.json
+          python3 .github/scripts/pr-hygiene.py prs.json > actions.txt
+          cat actions.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Act (nudge once, close bots only)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          while read -r ACTION PR DAYS; do
+            case "$ACTION" in
+              NUDGE)
+                gh pr comment "$PR" --body "👋 **Hygiene nudge** — this PR has been idle ${DAYS} days. Still wanted? Comment \`bump\` to keep it alive, or close it if superseded." || true
+                gh pr edit "$PR" --add-label "hygiene-nudged" || true
+                ;;
+              CLOSE)
+                gh pr comment "$PR" --body "🧹 **Hygiene close** — bot PR idle ${DAYS} days with no human interest. Re-open if it's still needed." || true
+                gh pr close "$PR" || true
+                ;;
+            esac
+          done < actions.txt

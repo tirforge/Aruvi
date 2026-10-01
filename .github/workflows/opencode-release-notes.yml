@@ -1,0 +1,112 @@
+name: opencode-release-notes
+
+# Auto-generate user-focused release notes on every version tag.
+# Ported from nagyv/gitlab-opencode (MIT): their `.gitlab-ci.yml` release
+# stage runs `opencode run --command write-release-notes <tag>` (locked-down
+# config + glab tools) and feeds the output into the GitLab release.
+# Here: harvest evidence with `gh`, opencode writes release-notes.md,
+# then `gh release create` publishes it. Read-only agent: the workflow
+# (not the LLM) touches the release.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure git identity (tag evidence only)
+        run: |
+          git config user.name "Aruvi bot"
+          git config user.email "aruvi@users.noreply.github.com"
+
+      - name: Harvest release evidence
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p release-evidence
+          TAG="${GITHUB_REF_NAME}"
+          echo "$TAG" > release-evidence/tag.txt
+          # Last release before this tag (empty = first release ever).
+          gh api "repos/${{ github.repository }}/releases?per_page=20" --jq '.[].tag_name' > release-evidence/past-tags.txt || true
+          PREV=$(grep -v -x "$TAG" release-evidence/past-tags.txt | head -1 || true)
+          echo "${PREV:-}" > release-evidence/prev-tag.txt
+          if [ -n "$PREV" ]; then
+            RANGE="$PREV..$TAG"
+          else
+            # First release ever: range from the root commit so notes cover
+            # the whole history instead of a single tag commit.
+            RANGE="$(git rev-list --max-parents=0 "$TAG" | head -1)..$TAG"
+          fi
+          echo "$RANGE" > release-evidence/range.txt
+          git log --format='%h %s (%an)' "$RANGE" > release-evidence/commits.txt || echo "(no commits in range)" > release-evidence/commits.txt
+          git diff --stat "$RANGE" > release-evidence/diffstat.txt || true
+          wc -l release-evidence/*
+
+      - uses: anomalyco/opencode/github@545f51d26cc39a907d2867492d498d9607ea5fa4 # v1.18.32
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          model: opencode/muse-spark-1.3-contributor-free
+          use_github_token: true
+          prompt: |
+            Release-notes pass. Follow .opencode/command/write-release-notes.md
+            for version in release-evidence/tag.txt. Evidence is already
+            harvested in release-evidence/ (prev-tag.txt, commits.txt,
+            diffstat.txt) — read those plus the commit_diff and
+            last_release_and_commit tools under .opencode/tool/ if you need
+            more detail.
+            Read-only: do not edit code, do not commit, do not push, do not
+            open PRs. Your ONLY output is the file `release-notes.md` at repo
+            root in the exact structure the command specifies
+            (## What's New + grouped sections, omit empties, no wrapper text).
+
+      # after_script assertion, gitlab-opencode style: fail loud if the LLM
+      # produced nothing usable instead of publishing an empty release.
+      - name: Assert usable notes
+        run: |
+          [ -f release-notes.md ] || { echo "::error::release-notes.md missing"; exit 1; }
+          LINES=$(wc -l < release-notes.md)
+          [ "$LINES" -ge 5 ] || { echo "::error::release-notes.md too short ($LINES lines)"; exit 1; }
+          grep -q "What's New" release-notes.md || { echo "::error::release-notes.md missing What's New section"; exit 1; }
+          echo "release-notes.md OK ($LINES lines)"
+
+      - name: Publish to step summary
+        if: always()
+        run: |
+          echo "## release notes for ${GITHUB_REF_NAME}" >> "$GITHUB_STEP_SUMMARY"
+          cat release-notes.md 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || echo "(missing)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload notes artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-notes-${{ github.ref_name }}
+          path: |
+            release-notes.md
+            release-evidence/
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} exists — updating notes."
+            gh release edit "${GITHUB_REF_NAME}" --notes-file release-notes.md
+          else
+            gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes-file release-notes.md
+          fi

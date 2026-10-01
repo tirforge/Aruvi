@@ -36,6 +36,10 @@ android/app/build/
 # workspace-only, never PR content
 /findings/
 
+# Coverage reports (regenerated in CI for Sonar/Codecov)
+backend/coverage.xml
+frontend/coverage/
+
 # IDE / OS
 .idea/
 .vscode/

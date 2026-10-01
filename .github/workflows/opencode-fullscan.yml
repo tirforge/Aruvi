@@ -38,7 +38,7 @@ jobs:
       pull-requests: write
       issues: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
@@ -119,8 +119,10 @@ jobs:
 
       - name: Upload verdict artifact
         if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.area == 'all' || inputs.area == matrix.area) }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: fullscan-${{ matrix.area }}-report
+          # gitlab-opencode port: per-run prefix (job_prefix idea) so weekly
+          # backend/frontend/android reports never overwrite each other.
+          name: fullscan-${{ matrix.area }}-report-${{ github.run_number }}
           path: fullscan-${{ matrix.area }}-report.md
-          if-no-files-found: warn
+          if-no-files-found: error

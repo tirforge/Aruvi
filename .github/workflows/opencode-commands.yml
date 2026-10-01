@@ -1,0 +1,111 @@
+name: opencode-commands
+
+# Chat-ops for the pipeline. Comment on a PR (OWNER/MEMBER/COLLABORATOR only):
+#   /fix    — re-run ONLY the failed review-combo jobs for this PR's head
+#             (smart rerun: no duplicate review burn when review already passed)
+#   /retest — re-run failed jobs of every OTHER workflow on this head
+#             (CI, Sonar, CodeQL...). Combo failures use /fix, not this.
+#   /merge  — dispatch merge-agent (green-checks merge, never bypasses protection)
+#   /close  — dispatch merge-agent to close with a reason
+#   /sweep  — dispatch merge-sweep (bot-PR pass)
+# Fork comments are ignored (read-only token can't act). Unknown commands are
+# ignored silently so humans can discuss freely.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: write
+
+jobs:
+  route:
+    if: github.event.issue.pull_request && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Parse command
+        id: cmd
+        env:
+          BODY: ${{ github.event.comment.body }}
+        run: |
+          CMD=$(printf '%s' "$BODY" | head -n 1 | grep -oE '^/(fix|retest|merge|close|sweep)\b' || true)
+          echo "cmd=$CMD" >> "$GITHUB_OUTPUT"
+          [ -n "$CMD" ] || echo "No command on first line — ignoring."
+
+      - name: React (ack)
+        if: steps.cmd.outputs.cmd != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          gh api repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions
+          -f content=rocket || true
+
+      - name: /fix — rerun failed combo jobs for this head
+        if: steps.cmd.outputs.cmd == '/fix'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR=${{ github.event.issue.number }}
+          HEAD=$(bash .github/scripts/gh-retry.sh pr view "$PR" --json headRefName -q .headRefName)
+          RUN=$(bash .github/scripts/gh-retry.sh run list --workflow review-combo.yml --branch "$HEAD" --limit 1 --json databaseId,conclusion,status -q '.[0] | "\(.databaseId) \(.conclusion) \(.status)"')
+          # Intentional word-split of "id conclusion status" into $1/$2/$3.
+          # shellcheck disable=SC2086
+          set -- $RUN
+          if [ -z "$1" ]; then
+            gh pr comment "$PR" --body "⚠️ **/fix**: no review-combo run found for \`$HEAD\` yet — push or wait for the PR event run first." || true
+          elif [ "$2" = "success" ]; then
+            gh pr comment "$PR" --body "✅ **/fix**: latest combo run on \`$HEAD\` is already green — nothing to rerun." || true
+          elif [ "$3" = "in_progress" ] || [ "$3" = "queued" ]; then
+            gh pr comment "$PR" --body "⏳ **/fix**: a combo run on \`$HEAD\` is still in flight — letting it finish." || true
+          else
+            bash .github/scripts/gh-retry.sh run rerun --failed "$1"
+            gh pr comment "$PR" --body "🔁 **/fix**: re-running failed jobs from run \`$1\` on \`$HEAD\`." || true
+          fi
+
+      - name: /retest — rerun failed non-combo runs for this head
+        if: steps.cmd.outputs.cmd == '/retest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR=${{ github.event.issue.number }}
+          HEAD=$(bash .github/scripts/gh-retry.sh pr view "$PR" --json headRefName -q .headRefName)
+          IDS=$(bash .github/scripts/gh-retry.sh run list --branch "$HEAD" --limit 20 \
+            --json databaseId,conclusion,workflowName \
+            -q '[.[] | select(.conclusion=="failure" and .workflowName!="review-combo" and .workflowName!="opencode-commands") | .databaseId] | join(" ")')
+          N=0
+          # Intentional split of space-joined run IDs.
+          # shellcheck disable=SC2086
+          for ID in $IDS; do
+            [ "$N" -lt 5 ] || break
+            gh run rerun --failed "$ID" || true
+            N=$((N + 1))
+          done
+          if [ "$N" = "0" ]; then
+            gh pr comment "$PR" --body "✅ **/retest**: no failed non-combo runs on \`$HEAD\` — nothing to rerun (combo failures use \`/fix\`)." || true
+          else
+            gh pr comment "$PR" --body "🔁 **/retest**: re-ran failed jobs on $N run(s) for \`$HEAD\`." || true
+          fi
+
+      - name: /merge or /close — dispatch merge-agent
+        if: steps.cmd.outputs.cmd == '/merge' || steps.cmd.outputs.cmd == '/close'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR=${{ github.event.issue.number }}
+          ACT=merge; [ "${{ steps.cmd.outputs.cmd }}" = "/close" ] && ACT=close
+          bash .github/scripts/gh-retry.sh workflow run merge-agent.yml -f pr="$PR" -f action="$ACT"
+          gh pr comment "$PR" --body "🤖 **${{ steps.cmd.outputs.cmd }}**: merge-agent dispatched ($ACT #$PR)." || true
+
+      - name: /sweep — dispatch merge-sweep
+        if: steps.cmd.outputs.cmd == '/sweep'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash .github/scripts/gh-retry.sh workflow run merge-sweep.yml
+          gh pr comment "${{ github.event.issue.number }}" --body "🧹 **/sweep**: merge-sweep dispatched." || true

@@ -28,14 +28,14 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "No SONAR_TOKEN secret — skipping SonarCloud scan."
           fi
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: steps.gate.outputs.skip != 'true'
         with:
           fetch-depth: 0
       # Coverage must be generated IN this job: coverage.xml is gitignored,
       # so the scanner would otherwise see 0% on every PR (new_coverage
       # gate can never pass). Mirrors codecov.yml so Sonar gets real numbers.
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         if: steps.gate.outputs.skip != 'true'
         with:
           python-version: "3.11"
@@ -50,7 +50,21 @@ jobs:
         env:
           JWT_SECRET: ci-dummy-secret
           DATABASE_URL: sqlite+aiosqlite:///./ci_test.db
-      - uses: SonarSource/sonarqube-scan-action@v8
+      # Frontend lcov is gitignored too, so generate it here as well —
+      # otherwise every frontend line reads as 0% (killed the gate on PR #58).
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        if: steps.gate.outputs.skip != 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Frontend tests with coverage (for Sonar)
+        if: steps.gate.outputs.skip != 'true'
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run test:coverage
+      - uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8
         if: steps.gate.outputs.skip != 'true'
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

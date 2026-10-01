@@ -1,0 +1,1 @@
+{"issues": [{"severity": "CRITICAL", "component": "tirforge_Aruvi:backend/app/auth.py", "line": 42, "rule": "python:S6437", "message": "Change this hard-coded secret."}, {"severity": "MAJOR", "component": "tirforge_Aruvi:frontend/src/api.ts", "rule": "typescript:S-", "message": "Missing error boundary on fetch."}]}

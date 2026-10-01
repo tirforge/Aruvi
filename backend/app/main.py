@@ -159,38 +159,6 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# CORS middleware - Properly configured for production
-# List allowed origins explicitly instead of using "*"
-allowed_origins = [
-    settings.web_base_url,
-    "https://REDACTED_DOMAIN",
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:5173",
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    # NOTE: Do NOT use allow_origin_regex=".*" together with allow_credentials=True.
-    # That combination lets any origin make credentialed requests (CSRF/credential
-    # theft). Cast receivers fetch media from varied origins, but those requests are
-    # non-credentialed and are already covered by the explicit "Access-Control-Allow-Origin: *"
-    # headers set per-response on the streaming endpoints below. Authenticated web
-    # dashboard traffic stays restricted to `allowed_origins`.
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=[
-        "Authorization",
-        "Content-Type",
-        "Accept",
-        "Range",
-        "Accept-Encoding",
-    ],
-    expose_headers=["Content-Range", "Accept-Ranges", "Content-Length", "Content-Type"],
-)
-
 
 class SecurityHeadersMiddleware:
     """Pure-ASGI middleware that injects security headers.
@@ -228,6 +196,39 @@ class SecurityHeadersMiddleware:
 
 app.add_middleware(CompressibleGZipMiddleware, minimum_size=1024)
 app.add_middleware(SecurityHeadersMiddleware)
+
+# CORS middleware - added LAST so it runs FIRST (outermost) per python:S8414.
+# Preflight/actual CORS handling must precede GZip and SecurityHeaders.
+# List allowed origins explicitly instead of using "*"
+allowed_origins = [
+    settings.web_base_url,
+    "https://REDACTED_DOMAIN",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    # NOTE: Do NOT use allow_origin_regex=".*" together with allow_credentials=True.
+    # That combination lets any origin make credentialed requests (CSRF/credential
+    # theft). Cast receivers fetch media from varied origins, but those requests are
+    # non-credentialed and are already covered by the explicit "Access-Control-Allow-Origin: *"
+    # headers set per-response on the streaming endpoints below. Authenticated web
+    # dashboard traffic stays restricted to `allowed_origins`.
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "Range",
+        "Accept-Encoding",
+    ],
+    expose_headers=["Content-Range", "Accept-Ranges", "Content-Length", "Content-Type"],
+)
 
 
 # Include routers
