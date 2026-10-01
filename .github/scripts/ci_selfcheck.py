@@ -69,10 +69,17 @@ check(len(scan_step) == 1
       and "inputs.area" in str(scan_step[0].get("if", ""))
       and "matrix.area" in str(scan_step[0].get("if", "")),
       "fullscan: step-level area gate")
-check(full.count("always() && (github.event_name") == 3,
-      "fullscan: verdict+artifact+delivery gated with always()")
+check(full.count("always() && (github.event_name") == 4,
+      "fullscan: verdict+artifact+backstop+delivery gated with always()")
 check("Verify delivery" in full and "Fix PR:" in full,
       "fullscan: deterministic delivery gate + PR-URL contract")
+check("Open fix PR (workflow-owned delivery backstop)" in full
+      and "gh pr create --base main" in full,
+      "fullscan: workflow-owned PR backstop (agent gh may hang)")
+import json as _json
+_oc = _json.loads((ROOT / "opencode.json").read_text())
+check(_oc.get("permission", {}).get("*") == "allow",
+      "opencode.json: full permission (no ask-prompts stall agents)")
 
 check("Configure git identity" in combo, "combo: git identity step")
 check("workflows: write" not in combo,
