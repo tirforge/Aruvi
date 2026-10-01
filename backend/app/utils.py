@@ -7,7 +7,7 @@ def bearer_token_matches(auth_header: str, expected: str) -> bool:
     """Constant-time check that a Authorization header equals 'Bearer <expected>'.
     Debug/diag endpoints guard powerful operations, so the comparison must not
     leak timing information about the secret."""
-    if not expected:
+    if not expected or not auth_header:
         return False
     return hmac.compare_digest(auth_header.encode(), f"Bearer {expected}".encode())
 

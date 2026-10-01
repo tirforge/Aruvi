@@ -304,7 +304,10 @@ async def delete_folder(
     )
     f_alias = aliased(Folder)
     subfolders_cte = subfolders_cte.union_all(
-        select(f_alias.id).where(f_alias.parent_id == subfolders_cte.c.id)
+        select(f_alias.id).where(
+            f_alias.parent_id == subfolders_cte.c.id,
+            f_alias.user_id == current_user.id,
+        )
     )
     all_ids_result = await db.execute(select(subfolders_cte.c.id))
     all_folder_ids = list(all_ids_result.scalars().all())
@@ -333,7 +336,10 @@ async def delete_folder(
 
             await db.execute(
                 update(File)
-                .where(File.folder_id.in_(all_folder_ids))
+                .where(
+                    File.folder_id.in_(all_folder_ids),
+                    File.user_id == current_user.id,
+                )
                 .values(folder_id=target_folder_id)
             )
     else:
@@ -352,12 +358,22 @@ async def delete_folder(
             if storage_message_ids:
                 invalidate_message_cache_batch(storage_message_ids)
 
-            await db.execute(delete(File).where(File.folder_id.in_(all_folder_ids)))
+            await db.execute(
+                delete(File).where(
+                    File.folder_id.in_(all_folder_ids),
+                    File.user_id == current_user.id,
+                )
+            )
 
     # Delete all descendant folder rows explicitly — ORM cascade only fires
     # for loaded children, and SQLite FK cascade needs PRAGMA foreign_keys=ON
     if all_folder_ids:
-        await db.execute(delete(Folder).where(Folder.id.in_(all_folder_ids)))
+        await db.execute(
+            delete(Folder).where(
+                Folder.id.in_(all_folder_ids),
+                Folder.user_id == current_user.id,
+            )
+        )
     await db.commit()
 
     # Best-effort cleanup from the Telegram storage channel — run AFTER the
@@ -382,6 +398,8 @@ async def batch_delete_folders(
     current_user: User = Depends(get_current_user),
 ):
     """Delete multiple folders."""
+    if len(folder_ids) > 500:
+        raise HTTPException(status_code=400, detail="Too many folders (max 500)")
     # Fetch all folders
     result = await db.execute(
         select(Folder).where(
@@ -406,7 +424,10 @@ async def batch_delete_folders(
     )
     f_alias = aliased(Folder)
     subfolders_cte = subfolders_cte.union_all(
-        select(f_alias.id).where(f_alias.parent_id == subfolders_cte.c.id)
+        select(f_alias.id).where(
+            f_alias.parent_id == subfolders_cte.c.id,
+            f_alias.user_id == current_user.id,
+        )
     )
     folder_result = await db.execute(select(subfolders_cte.c.id))
     all_affected_folder_ids = folder_result.scalars().all()
@@ -430,13 +451,19 @@ async def batch_delete_folders(
 
         # Delete files from DB
         await db.execute(
-            sqlalchemy_delete(File).where(File.folder_id.in_(all_affected_folder_ids))
+            sqlalchemy_delete(File).where(
+                File.folder_id.in_(all_affected_folder_ids),
+                File.user_id == current_user.id,
+            )
         )
 
     # Delete all affected folder rows explicitly (ORM cascade only fires for loaded children)
     if all_affected_folder_ids:
         await db.execute(
-            sqlalchemy_delete(Folder).where(Folder.id.in_(all_affected_folder_ids))
+            sqlalchemy_delete(Folder).where(
+                Folder.id.in_(all_affected_folder_ids),
+                Folder.user_id == current_user.id,
+            )
         )
 
     await db.commit()
@@ -462,6 +489,8 @@ async def batch_move_folders(
     current_user: User = Depends(get_current_user),
 ):
     """Move multiple folders to another folder."""
+    if len(move_data.ids) > 500:
+        raise HTTPException(status_code=400, detail="Too many folders (max 500)")
     folder_ids = move_data.ids
     target_id = move_data.folder_id
 

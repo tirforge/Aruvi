@@ -154,10 +154,11 @@ class CacheManager:
             self._caches[key] = ChunkCache(max_bytes=self._per_video_max)
         return self._caches[key]
 
-    def remove(self, chat_id: int, message_id: int):
+    def remove(self, chat_id: int, message_id: int) -> int:
         key = (chat_id, message_id)
         if key in self._caches:
-            self._caches.pop(key).clear()
+            return self._caches.pop(key).clear()
+        return 0
 
     def clear_all(self, exclude_keys: set[tuple[int, int]] | None = None) -> int:
         total = 0

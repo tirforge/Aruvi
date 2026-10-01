@@ -12,6 +12,7 @@ Flow:
 """
 
 import asyncio
+import logging
 import os
 import secrets
 import time
@@ -96,7 +97,8 @@ async def setup_send_code(request: Request, body: SendCodeIn):
             await client.disconnect()
         except Exception:
             pass
-        raise HTTPException(400, f"Telegram rejected the request: {e}")
+        logging.getLogger("setup").warning("Telegram send-code failed: %s", e)
+        raise HTTPException(400, "Telegram rejected the request")
 
     _pending[token] = {
         "client": client,
@@ -125,9 +127,11 @@ async def setup_sign_in(request: Request, body: SignInIn):
         try:
             await client.check_password(body.password)
         except Exception as e:
-            raise HTTPException(403, f"Wrong 2FA password: {e}")
+            logging.getLogger("setup").warning("Telegram 2FA check failed: %s", e)
+            raise HTTPException(403, "Wrong 2FA password")
     except Exception as e:
-        raise HTTPException(400, f"Sign-in failed: {e}")
+        logging.getLogger("setup").warning("Telegram sign-in failed: %s", e)
+        raise HTTPException(400, "Sign-in failed")
 
     session_string = await client.export_session_string()
     try:

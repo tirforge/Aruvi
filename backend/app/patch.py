@@ -57,7 +57,7 @@ class PatchedClient(PyroClient):
             msg = await self.get_messages(chat_id=chat_id, message_ids=message_id)
             if msg.empty:  # type: ignore
                 raise ValueError("message id is invalid")
-            if not msg.from_user.is_self:  # type: ignore
+            if not msg.from_user or not msg.from_user.is_self:  # type: ignore
                 raise ValueError("cannot use self message")
             # if not await self.check_cbd(msg.reply_markup):  # type: ignore
             #     raise TypeError("message type invalid [no callback button]")

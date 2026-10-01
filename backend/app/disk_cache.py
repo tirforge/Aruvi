@@ -9,6 +9,7 @@ Policy:  directories expire DISK_CACHE_TTL seconds after the LAST ACTIVITY
          Set DISK_CACHE_ENABLED=0 to disable (all methods become no-ops).
 """
 
+import logging
 import os
 import tempfile
 import threading
@@ -168,8 +169,8 @@ class DiskChunkCache:
                     os.unlink(tmp)
                 except OSError:
                     pass
-        except OSError:
-            pass
+        except OSError as e:
+            logging.getLogger("disk_cache").warning("Disk cache write failed: %s", e)
         self.touch(chat_id, message_id)
 
     def sweep(self) -> int:

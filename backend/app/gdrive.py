@@ -283,7 +283,7 @@ async def upload_streaming(
 
     # ── Phase 1: Download full file to NVMe temp (pipelined byte-accurate) ──
     GDRIVE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = GDRIVE_UPLOAD_DIR / f"{msg.id}_{int(time.time())}.tmp"
+    tmp = GDRIVE_UPLOAD_DIR / f"{msg.id}_{int(time.time())}_{secrets.token_hex(8)}.tmp"
 
     try:
         # Pre-allocate temp file (off the event loop: slow disks stall it)
