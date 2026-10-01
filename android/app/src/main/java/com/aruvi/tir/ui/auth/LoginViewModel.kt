@@ -52,6 +52,11 @@ class LoginViewModel @Inject constructor(
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
 
     private var pollingJob: kotlinx.coroutines.Job? = null
+    // Debounce for the server-URL text field: updateServerUrl() fires on every
+    // keystroke, so without this each keystroke past "http…" launches a
+    // /auth/bot/info request and concurrent responses race (stale bot name can
+    // win). Direct calls (save/load) still use fetchBotInfo() immediately.
+    private var serverUrlInputJob: kotlinx.coroutines.Job? = null
 
     init {
         loadServerUrl()
@@ -74,8 +79,12 @@ class LoginViewModel @Inject constructor(
     fun updateServerUrl(url: String) {
         _uiState.value = _uiState.value.copy(serverUrl = url)
 
+        serverUrlInputJob?.cancel()
         if (url.startsWith("http") && url.length > 10) {
-            fetchBotInfo()
+            serverUrlInputJob = viewModelScope.launch {
+                delay(500)
+                fetchBotInfo()
+            }
         }
     }    fun fetchBotInfo() {
         viewModelScope.launch {
@@ -249,6 +258,8 @@ class LoginViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         stopPolling()
+        serverUrlInputJob?.cancel()
+        serverUrlInputJob = null
     }
 
     private fun generateQrCode(content: String, size: Int): Bitmap {

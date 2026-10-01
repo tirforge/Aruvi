@@ -37,7 +37,10 @@ data class FileItem(
         get() {
             if (fileSize <= 0) return "0 B"
             val units = arrayOf("B", "KB", "MB", "GB", "TB")
-            val digitGroups = (log10(fileSize.toDouble()) / log10(1024.0)).toInt()
+            val rawGroups = (log10(fileSize.toDouble()) / log10(1024.0)).toInt()
+            // Clamp: a corrupt/huge file_size from the server must show TB,
+            // never throw ArrayIndexOutOfBounds and crash the list.
+            val digitGroups = rawGroups.coerceIn(0, units.size - 1)
             return DecimalFormat("#,##0.#").format(
                 fileSize / 1024.0.pow(digitGroups.toDouble())
             ) + " " + units[digitGroups]

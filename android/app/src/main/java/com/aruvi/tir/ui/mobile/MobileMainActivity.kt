@@ -51,7 +51,11 @@ class MobileMainActivity : FragmentActivity() {
 
             // Only request permissions that haven't been granted yet, so we
             // don't re-prompt for things the user already allowed.
-            val pendingPermissions = remember(permissions) {
+            // No remember key: `permissions` is a fresh array every
+            // recomposition (array equality is referential), so keying on it
+            // would recompute each time. The set only depends on the SDK
+            // version, which is static for the process lifetime.
+            val pendingPermissions = remember {
                 permissions.filter { context.checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
                     .toTypedArray()
             }

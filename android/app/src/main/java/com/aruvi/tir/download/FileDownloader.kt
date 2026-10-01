@@ -116,9 +116,12 @@ class FileDownloader(
      * legacy raw file path is used.
      */
     private fun createDestination(fileName: String, mimeType: String?): String {
+        // Never trust the server-provided name as a path: strip directories so a
+        // hostile file_name ("../../evil.apk", "/abs/path") cannot escape Downloads.
+        val safeName = sanitizeFileName(fileName)
         if (Build.VERSION.SDK_INT >= 29) {
             val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                put(MediaStore.Downloads.DISPLAY_NAME, safeName)
                 put(MediaStore.Downloads.MIME_TYPE, mimeType)
                 put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                 put(MediaStore.Downloads.IS_PENDING, 1)
@@ -132,7 +135,18 @@ class FileDownloader(
     }
 
     private fun legacyPath(fileName: String): String =
-        File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), fileName).absolutePath
+        File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), sanitizeFileName(fileName)).absolutePath
+
+    /**
+     * Strip directory components from a server-provided file name so it can
+     * never escape the Downloads collection/dir via "../", "/" or "\".
+     */
+    private fun sanitizeFileName(fileName: String): String {
+        val base = fileName.substringAfterLast('/').substringAfterLast('\\').trim()
+            .replace("..", "_")
+            .takeIf { it.isNotEmpty() } ?: "download"
+        return base.replace('/', '_').replace('\\', '_')
+    }
 
     private fun isContentUri(task: DownloadTask): Boolean =
         task.localPath?.startsWith("content://") == true
@@ -327,6 +341,7 @@ class FileDownloader(
             }
 
             val body = response.body ?: run {
+                response.close()
                 updateTask(task.copy(
                     status = DownloadStatus.FAILED,
                     error = "Empty response body"
@@ -357,10 +372,10 @@ class FileDownloader(
             val output: java.nio.channels.FileChannel = if (contentUri != null) {
                 val pfd = context.contentResolver.openFileDescriptor(
                     Uri.parse(contentUri), if (startOffset > 0) "rw" else "w"
-                ) ?: return false
+                ) ?: run { response.close(); return false }
                 java.io.FileOutputStream(pfd.fileDescriptor).channel
             } else {
-                val file = File(task.localPath ?: return false)
+                val file = File(task.localPath ?: run { response.close(); return false })
                 file.parentFile?.mkdirs()
                 val channel = RandomAccessFile(file, "rw").channel
                 // A full 200 response overwrites from the start - truncate any stale

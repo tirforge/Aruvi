@@ -1354,7 +1354,8 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 // Never swallow cast-load failures silently: a rejected load
                 // leaves the receiver idle ("no media selected") with no clue
                 // why. Surface it in logcat under the cast tag.
-                android.util.Log.w("PlayerViewModel", "castToDevice load failed url=$url", e)
+                // NOTE: never log the URL itself — it carries ?token=<JWT>.
+                android.util.Log.w("PlayerViewModel", "castToDevice load failed (fileId=$currentFileId)", e)
             }
         }
     }
