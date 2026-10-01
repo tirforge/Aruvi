@@ -124,10 +124,23 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
     }
   }, [selectMutation, queryClient, addToast]);
 
+  // Backend stream_url may be relative (/api/...) — a relative URL pasted
+  // from the clipboard or handed to an external app (VLC) is useless, so
+  // absolutize against the current origin first.
+  const toAbsoluteUrl = (url: string) => {
+    if (!url) return url;
+    if (/^https?:\/\//i.test(url)) return url;
+    try {
+      return new URL(url, window.location.origin).href;
+    } catch {
+      return `${window.location.origin}/${url.replace(/^\/+/, '')}`;
+    }
+  };
+
   const handleCopyUrl = useCallback(async () => {
     if (!grabbed) return;
     try {
-      await navigator.clipboard.writeText(grabbed.stream_url);
+      await navigator.clipboard.writeText(toAbsoluteUrl(grabbed.stream_url));
       setCopied(true);
       if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
       copyTimerRef.current = window.setTimeout(() => setCopied(false), 2000);
@@ -163,7 +176,7 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
   }, [grabbed, setPreviewFile]);
 
   const getVlcUrl = (url: string) => {
-    return 'vlc://' + url;
+    return 'vlc://' + toAbsoluteUrl(url);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

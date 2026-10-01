@@ -781,7 +781,8 @@ queryClient.invalidateQueries({ queryKey: ['admin', 'stats'] });
 
 export const formatFileSize = (bytes: number | string): string => {
 const value = typeof bytes === 'string' ? Number(bytes) : bytes;
-if (!Number.isFinite(value)) return '—';
+// Negative sizes come from corrupt metadata — never render "-3.2 GB".
+if (!Number.isFinite(value) || value < 0) return '—';
 const units = ['B', 'KB', 'MB', 'GB', 'TB'];
 let size = value;
 let unitIndex = 0;
@@ -793,7 +794,9 @@ return `${size.toFixed(1)} ${units[unitIndex]}`;
 };
 
 export const formatDuration = (seconds: number | null): string => {
-if (!seconds) return '';
+// Zero/negative durations (unprobed metadata) render as garbage ("-1:59:55")
+// without the <= 0 guard.
+if (!seconds || seconds <= 0) return '';
 if (!Number.isFinite(seconds)) return '—';
 const hours = Math.floor(seconds / 3600);
 const minutes = Math.floor((seconds % 3600) / 60);

@@ -257,10 +257,11 @@ export default function FileBrowser() {
                 }
                 setClipboard(null);
             } else if (clipboard.mode === 'copy') {
-                alert("Copying files is not yet supported. Only Move (Cut) is supported.");
+                addToast('Copying files is not yet supported. Only Move (Cut) is supported.', 'info');
             }
         } catch (error) {
             console.error('Paste failed:', error);
+            addToast('Paste failed — please try again', 'error');
         }
     }, [clipboard, currentFolderId, moveFilesMutation, moveFoldersMutation, setClipboard]);
 
@@ -623,7 +624,10 @@ export default function FileBrowser() {
                         {/* Breadcrumbs */}
                         <nav className="flex items-center gap-0.5 overflow-hidden hidden sm:flex">
                             {breadcrumbs.map((crumb, index) => (
-                                <div key={crumb.id || 'root'} className="flex items-center min-w-0">
+                                // Key by index: revisiting a folder (A→B→A)
+                                // duplicates ids, and duplicate keys corrupt
+                                // React's reconciliation of the trail.
+                                <div key={`${crumb.id ?? 'root'}-${index}`} className="flex items-center min-w-0">
                                     {index > 0 && <ChevronRight className="w-4 h-4 text-dark-600 mx-1 shrink-0" />}
                                     <button 
                                         onClick={() => navigateToBreadcrumb(index)}

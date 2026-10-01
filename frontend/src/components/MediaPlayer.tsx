@@ -55,7 +55,10 @@ function loadMoviPlayer(): Promise<boolean> {
         s.type = 'module';
         s.src = MOVI_PLAYER_URL;
         s.onload = () => resolve(true);
-        s.onerror = () => resolve(false);
+        // Reset the cached promise on failure: without this a transient
+        // network error pins every later open to the cached `false` and the
+        // engine is never re-fetched for the rest of the session.
+        s.onerror = () => { moviLoadPromise = null; resolve(false); };
         document.head.appendChild(s);
     });
     return moviLoadPromise;
@@ -170,10 +173,15 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         // MicroDVD (.sub) is not supported — the SRT→VTT converter would mangle it
         if (file.name.toLowerCase().endsWith('.sub')) return;
         const reader = new FileReader();
+        reader.onerror = () => {
+            addToast('Could not read subtitle file', 'error');
+        };
         reader.onload = () => {
             let text = reader.result as string;
-            // Convert SRT to VTT if needed
-            if (file.name.endsWith('.srt')) {
+            // Convert SRT to VTT if needed (case-insensitive: cameras/editors
+            // often emit .SRT, which the old endsWith('.srt') missed and fed
+            // raw SRT timestamps to the VTT parser).
+            if (file.name.toLowerCase().endsWith('.srt')) {
                 text = srtToVtt(text);
             }
             const blob = new Blob([text], { type: 'text/vtt' });
@@ -186,20 +194,27 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
             setShowSubPicker(false);
         };
         reader.readAsText(file);
-    }, []);
+    }, [addToast]);
 
     // Search the internet (OpenSubtitles + keyless providers) for subtitles
+    // Stale-response guard: searches are sequential per click but the button
+    // stays enabled while one is in flight, so a slow first response must not
+    // overwrite the newer results (same seq pattern as GrabSearch).
+    const internetSearchSeqRef = useRef(0);
     const handleInternetSearch = useCallback(async () => {
         if (internetLoading) return;
+        const seq = ++internetSearchSeqRef.current;
         setInternetLoading(true);
         setInternetError(null);
         try {
             const res = await searchInternetSubtitles(file.id);
+            if (seq !== internetSearchSeqRef.current) return;
             setInternetSubs(res.subtitles);
         } catch (err: any) {
+            if (seq !== internetSearchSeqRef.current) return;
             setInternetError(err?.response?.data?.detail || 'Subtitle search failed');
         } finally {
-            setInternetLoading(false);
+            if (seq === internetSearchSeqRef.current) setInternetLoading(false);
         }
     }, [file.id, internetLoading]);
 
@@ -269,7 +284,14 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
     const getAbsoluteUrl = (url: string) => {
         if (!url) return '';
         if (url.startsWith('http')) return url;
-        return `${window.location.origin}${url}`;
+        // Tolerate backend paths missing the leading slash (naive
+        // concatenation mangles them into https://hostapi/...) — same
+        // approach as AuthImage.
+        try {
+            return new URL(url, window.location.origin).href;
+        } catch {
+            return `${window.location.origin}/${url.replace(/^\/+/, '')}`;
+        }
     };
 
     // Capture the authorized stream URL once per file so a token refresh
@@ -281,7 +303,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         const token = localStorage.getItem('access_token');
         const base = getAbsoluteUrl(file.stream_url || '');
         const sep = base.includes('?') ? '&' : '?';
-        return `${base}${sep}token=${token}`;
+        return `${base}${sep}token=${encodeURIComponent(token ?? '')}`;
     }, [file.id, file.stream_url]);
     // Still images don't risk restarting playback, so use the reactive token:
     // if it rotates mid-viewing, the <img> re-renders with a fresh token instead
@@ -291,7 +313,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         if (!isImage) return authorizedStreamUrl;
         const base = getAbsoluteUrl(file.stream_url || '');
         const sep = base.includes('?') ? '&' : '?';
-        return `${base}${sep}token=${reactiveToken}`;
+        return `${base}${sep}token=${encodeURIComponent(reactiveToken)}`;
     }, [file.stream_url, file.id, isImage, reactiveToken, authorizedStreamUrl]);
     const externalUrl = getAbsoluteUrl((extendedFile || file).public_stream_url || '') || authorizedStreamUrl;
     const vlcUrl = `vlc://${externalUrl}`;
@@ -317,7 +339,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         // would replay the stale token the rotation just invalidated.
         const base = getAbsoluteUrl(file.stream_url || '');
         const sep = base.includes('?') ? '&' : '?';
-        const freshUrl = `${base}${sep}token=${reactiveToken}`;
+        const freshUrl = `${base}${sep}token=${encodeURIComponent(reactiveToken)}`;
         el.source({
             video: { src: freshUrl, type: 'video/mp4' },
         });
@@ -763,7 +785,19 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
                             </a>
                             <div className="flex gap-3">
                                 <Button
-                                    onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(externalUrl).then(() => { addToast('URL copied to clipboard', 'success'); }).catch(() => { addToast('Copy failed (browser blocked clipboard)', 'error'); }); }}
+                                    onClick={(e) => { e.stopPropagation(); void (async () => {
+                                        // `navigator.clipboard` is undefined outside secure
+                                        // contexts (plain-http LAN/TV) — the old
+                                        // `.writeText().then().catch()` chain threw
+                                        // synchronously there instead of rejecting.
+                                        try {
+                                            if (!navigator.clipboard) throw new Error('clipboard unavailable');
+                                            await navigator.clipboard.writeText(externalUrl);
+                                            addToast('URL copied to clipboard', 'success');
+                                        } catch {
+                                            addToast('Copy failed (browser blocked clipboard)', 'error');
+                                        }
+                                    })(); }}
                                     className="flex-1 btn-secondary flex items-center justify-center gap-2"
                                 >
                                     <Copy className="w-4 h-4" />

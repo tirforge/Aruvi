@@ -22,8 +22,16 @@ export default function NewFolderModal({ parentId, onClose }: NewFolderModalProp
     const [name, setName] = useState('');
     const createFolder = useCreateFolder();
     const addToast = useAppStore((s) => s.addToast);
+    const inputRef = useRef<HTMLInputElement>(null);
     // Return focus to the opener (New Folder button) on close.
     useFocusReturn();
+
+    // Focus the input after mount (not via autoFocus: autoFocus moves focus
+    // before useFocusReturn snapshots the opener, so the opener capture
+    // becomes the input itself and closing drops focus to <body>).
+    useEffect(() => {
+        inputRef.current?.focus();
+    }, []);
 
     // Guarded close: creating is fast, but backdrop/Escape/X/Cancel during
     // the POST must not fake a cancel (the create still completes + toasts).
@@ -78,11 +86,11 @@ export default function NewFolderModal({ parentId, onClose }: NewFolderModalProp
 
                 <form onSubmit={handleSubmit}>
                     <input
+                        ref={inputRef}
                         type="text"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
                         placeholder="Folder name"
-                        autoFocus
                         className="w-full px-4 py-3 bg-dark-700 border border-dark-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500/50 mb-4"
                     />
 

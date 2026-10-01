@@ -46,13 +46,18 @@ navigate('/', { replace: true });
                     <div className="mt-4 p-4 bg-dark-800 rounded-lg text-left">
                         <p className="text-dark-400 text-sm mb-2">Token received (click to copy):</p>
                         <button
-                            onClick={() => {
-                                navigator.clipboard.writeText(token).then(() => {
+                            onClick={() => { void (async () => {
+                                // Guarded: `navigator.clipboard` is undefined
+                                // outside secure contexts — the promise chain
+                                // threw synchronously there instead of rejecting.
+                                try {
+                                    if (!navigator.clipboard) throw new Error('clipboard unavailable');
+                                    await navigator.clipboard.writeText(token);
                                     setStatus('Token copied! Open browser DevTools console and run:\nlocalStorage.setItem("access_token", "paste-token-here")');
-                                }).catch(() => {
+                                } catch {
                                     setStatus('Copy failed (browser blocked clipboard). Long-press / Ctrl+C the token above.');
-                                });
-                            }}
+                                }
+                            })(); }}
                             className="text-xs text-primary-400 break-all text-left hover:text-primary-300"
                         >
                             {token.substring(0, 50)}...
