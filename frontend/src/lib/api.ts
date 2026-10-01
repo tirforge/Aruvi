@@ -793,7 +793,7 @@ return `${size.toFixed(1)} ${units[unitIndex]}`;
 };
 
 export const formatDuration = (seconds: number | null): string => {
-if (!seconds) return '';
+if (seconds == null || !(seconds > 0)) return '';
 if (!Number.isFinite(seconds)) return '—';
 const hours = Math.floor(seconds / 3600);
 const minutes = Math.floor((seconds % 3600) / 60);
@@ -802,14 +802,4 @@ if (hours > 0) {
 return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 return `${minutes}:${secs.toString().padStart(2, '0')}`;
-};
-
-export const getFileIcon = (fileType: string): string => {
-switch (fileType) {
-case 'video': return '🎬';
-case 'audio': return '🎵';
-case 'image': return '🖼️';
-case 'document': return '📄';
-default: return '📎';
-}
 };

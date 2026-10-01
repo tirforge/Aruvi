@@ -43,7 +43,6 @@ interface AppState {
 
     moveItems: { files: TelegramFile[], folders: Folder[] } | null;
     setMoveItems: (items: { files: TelegramFile[], folders: Folder[] } | null) => void;
-    setMoveFiles: (files: TelegramFile[]) => void;
 
     showNewFolder: boolean;
     setShowNewFolder: (show: boolean) => void;
@@ -150,11 +149,16 @@ export const useAppStore = create<AppState>((set) => ({
         return { selectedFolderIds: newSet };
     }),
     clearSelection: () => set({ selectedFileIds: new Set(), selectedFolderIds: new Set(), selectedFiles: [] }),
-    selectAll: (fileIds, folderIds = []) => set((state) => ({
-        selectedFileIds: new Set(fileIds),
-        selectedFolderIds: new Set(folderIds),
-        selectedFiles: state.visibleFiles.filter((f) => fileIds.includes(f.id)),
-    })),
+    selectAll: (fileIds, folderIds = []) => set((state) => {
+        // Set lookup: the old `fileIds.includes(f.id)` scan was O(visible ×
+        // selected) on every rubber-band frame that changed the selection.
+        const picked = new Set(fileIds);
+        return {
+            selectedFileIds: new Set(fileIds),
+            selectedFolderIds: new Set(folderIds),
+            selectedFiles: state.visibleFiles.filter((f) => picked.has(f.id)),
+        };
+    }),
 
     // View mode
     viewMode: 'grid',
@@ -172,7 +176,6 @@ export const useAppStore = create<AppState>((set) => ({
 
     moveItems: null,
     setMoveItems: (items) => set({ moveItems: items }),
-    setMoveFiles: (files) => set({ moveItems: { files, folders: [] } }),
     selectedFiles: [],
     setSelectedFiles: (files) => set({ selectedFiles: files }),
 

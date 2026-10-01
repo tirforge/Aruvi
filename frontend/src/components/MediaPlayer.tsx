@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMemo, useRef, useEffect, useCallback } from 'react';
 import { X, Play, Pause, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, Music, Film, ChevronDown, ChevronUp, Subtitles, Search, Loader2 } from 'lucide-react';
-import { TelegramFile, formatDuration, useUpdateProgress, useFile, getFileDownloadToken, useAccessToken, searchInternetSubtitles, fetchSubtitleContent, SubtitleCandidate } from '../lib/api';
+import { TelegramFile, formatDuration, useUpdateProgress, useFile, getFileDownloadToken, useAccessToken, searchInternetSubtitles, fetchSubtitleContent, SubtitleCandidate, API_BASE } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import AuthImage from './AuthImage';
 
@@ -269,7 +269,36 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
     const getAbsoluteUrl = (url: string) => {
         if (!url) return '';
         if (url.startsWith('http')) return url;
-        return `${window.location.origin}${url}`;
+        // Tolerate relative paths missing the leading slash (which naive
+        // origin + path concatenation mangles into https://hostapi/...).
+        // Same approach as AuthImage.
+        try {
+            return new URL(url, window.location.origin).href;
+        } catch {
+            return `${window.location.origin}/${url.replace(/^\/+/, '')}`;
+        }
+    };
+
+    // Bearer-leak guard (mirrors AuthImage): the account JWT in ?token= must
+    // only ever go to our own backend (same origin or __BACKEND_URL__
+    // origin). If stream_url ever resolves elsewhere, play it tokenless
+    // rather than exfiltrating the credential.
+    const isOwnBackendUrl = (href: string) => {
+        try {
+            const ownOrigins = new Set([
+                new URL(API_BASE || window.location.origin, window.location.origin).origin,
+                window.location.origin,
+            ]);
+            return ownOrigins.has(new URL(href, window.location.origin).origin);
+        } catch {
+            return false;
+        }
+    };
+
+    const withToken = (base: string, token: string) => {
+        if (!base || !token || !isOwnBackendUrl(base)) return base;
+        const sep = base.includes('?') ? '&' : '?';
+        return `${base}${sep}token=${token}`;
     };
 
     // Capture the authorized stream URL once per file so a token refresh
@@ -278,10 +307,9 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
     // link already in stream_url, so a second `?` would swallow both tokens
     // into one malformed query value and the stream comes back "not authed".
     const authorizedStreamUrl = useMemo(() => {
-        const token = localStorage.getItem('access_token');
+        const token = localStorage.getItem('access_token') || '';
         const base = getAbsoluteUrl(file.stream_url || '');
-        const sep = base.includes('?') ? '&' : '?';
-        return `${base}${sep}token=${token}`;
+        return withToken(base, token);
     }, [file.id, file.stream_url]);
     // Still images don't risk restarting playback, so use the reactive token:
     // if it rotates mid-viewing, the <img> re-renders with a fresh token instead
@@ -290,8 +318,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
     const imageUrl = useMemo(() => {
         if (!isImage) return authorizedStreamUrl;
         const base = getAbsoluteUrl(file.stream_url || '');
-        const sep = base.includes('?') ? '&' : '?';
-        return `${base}${sep}token=${reactiveToken}`;
+        return withToken(base, reactiveToken);
     }, [file.stream_url, file.id, isImage, reactiveToken, authorizedStreamUrl]);
     const externalUrl = getAbsoluteUrl((extendedFile || file).public_stream_url || '') || authorizedStreamUrl;
     const vlcUrl = `vlc://${externalUrl}`;
@@ -315,9 +342,11 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         // Build the URL from the CURRENT token — authorizedStreamUrl is
         // deliberately frozen at mount (stable src); re-sourcing with it
         // would replay the stale token the rotation just invalidated.
+        // Foreign origins carry no token (see withToken), so there is
+        // nothing to refresh — leave the element alone.
         const base = getAbsoluteUrl(file.stream_url || '');
-        const sep = base.includes('?') ? '&' : '?';
-        const freshUrl = `${base}${sep}token=${reactiveToken}`;
+        if (!isOwnBackendUrl(base)) return;
+        const freshUrl = withToken(base, reactiveToken);
         el.source({
             video: { src: freshUrl, type: 'video/mp4' },
         });

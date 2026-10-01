@@ -26,6 +26,15 @@ export default function GlobalContextMenu() {
     const selectedFolders = folders?.filter(f => selectedFolderIds.has(f.id)) || [];
     const menuRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
+    // Timer for the "✓ Copied!" feedback. A bare setTimeout per copy let a
+    // stale timer wipe a NEWER copy's feedback early (copy A, then copy B
+    // 1.5s later — A's timer fired at 2s and cleared B after 0.5s).
+    const copyTimerRef = useRef<number | null>(null);
+    useEffect(() => {
+        return () => {
+            if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+        };
+    }, []);
     // In-flight guard for the async share/link actions. Without it the menu
     // stays open during the POST and rapid clicks mint duplicate share links
     // (or duplicate revokes). The menu intentionally stays open for the
@@ -101,7 +110,8 @@ export default function GlobalContextMenu() {
         try {
             await navigator.clipboard.writeText(text);
             setCopiedId(id);
-            setTimeout(() => setCopiedId(null), 2000);
+            if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+            copyTimerRef.current = window.setTimeout(() => setCopiedId(null), 2000);
         } catch (err) {
             console.error('Failed to copy:', err);
         }
@@ -223,7 +233,7 @@ export default function GlobalContextMenu() {
                                                     const url = f.public_stream_url
                                                         ? `${baseUrl}${f.public_stream_url}`
                                                         : `${baseUrl}${f.stream_url}?token=${await getFileDownloadToken(f.id)}`;
-                                                    window.open(`vlc://${url}`, '_blank');
+                                                    window.open(`vlc://${url}`, '_blank', 'noopener,noreferrer');
                                                 } catch (err) {
                                                     console.error('Failed to mint stream token:', err);
                                                 }
