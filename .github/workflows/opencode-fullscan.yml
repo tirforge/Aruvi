@@ -85,6 +85,11 @@ jobs:
               commit (identity is pre-configured above), push, and open
               a PR titled `opencode fullscan: ${{ matrix.area }} fixes`
               listing every bug found + fixed (file:line for each).
+            - Commit + push the fix branch BEFORE final verification: a
+              provider outage after the push still delivers (the workflow
+              backstop below opens the PR for you). Uncommitted fixes die
+              with the runner — seen 2026-10-01 run #3 (provider 503 after
+              the report was written, branch never pushed, everything lost).
             - Right after opening the PR, comment `@coderabbitai review`
               on it. This repo is under 10 stars so CodeRabbit only
               reviews on manual trigger — without this comment the
@@ -161,6 +166,21 @@ jobs:
           if [ "$(bash .github/scripts/gh-retry.sh pr list --head "$branch" --state open --json number --jq 'length')" -ge 1 ]; then
             echo "agent already opened the PR — nothing to do."
             exit 0
+          fi
+          # Same-runner rescue: the agent may have committed the fix branch
+          # locally but died (e.g. provider 503) before pushing — seen
+          # 2026-10-01 run #3. Push its local commits (never invent our own:
+          # uncommitted changes stay uncommitted for the Verify gate to
+          # fail on). Push needs no git identity; failures stay non-fatal
+          # so the ls-remote check below still routes to Verify.
+          if git show-ref --verify --quiet "refs/heads/$branch"; then
+            if git ls-remote --heads origin "$branch" | grep -q "$branch"; then
+              if [ "$(git rev-list --count "origin/$branch..$branch")" -gt 0 ]; then
+                git push origin "$branch" && echo "pushed agent's unpushed commits." || echo "::warning::push of unpushed commits failed."
+              fi
+            else
+              git push -u origin "$branch" && echo "pushed agent's local branch." || echo "::warning::push of local branch failed."
+            fi
           fi
           if ! git ls-remote --heads origin "$branch" | grep -q "$branch"; then
             echo "branch $branch never pushed — leaving delivery to the Verify gate."

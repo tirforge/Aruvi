@@ -76,6 +76,10 @@ check("Verify delivery" in full and "Fix PR:" in full,
 check("Open fix PR (workflow-owned delivery backstop)" in full
       and "gh pr create --base main" in full,
       "fullscan: workflow-owned PR backstop (agent gh may hang)")
+check("show-ref --verify" in full and "pushed agent's local branch" in full,
+      "fullscan: backstop pushes agent's unpushed local branch (503 rescue)")
+check("BEFORE final verification" in full,
+      "fullscan: prompt orders commit+push before verification")
 import json as _json
 _oc = _json.loads((ROOT / "opencode.json").read_text())
 check(_oc.get("permission", {}).get("*") == "allow",
