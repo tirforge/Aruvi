@@ -346,7 +346,7 @@ fun MobilePlayerScreen(
                                  val verticalDelta = -accumulatedDragY
                                  // Full height = 1.0 change
                                  val changePercent = verticalDelta / height
-                                 val newBrightness = (startBrightness + changePercent).coerceIn(0f, 1f)
+                                  val newBrightness = (startBrightness + changePercent).coerceIn(0.05f, 1f)
 
                                  activity?.window?.attributes?.let { attributes ->
                                      attributes.screenBrightness = newBrightness

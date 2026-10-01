@@ -136,7 +136,19 @@ fun clearGrabResult() { _state.value = _state.value.copy(grabResult = null) }
 fun clearError() { _state.value = _state.value.copy(error = null) }
 
 fun download(result: GrabSelectResponse) {
-downloader.enqueue(result.id ?: 0, result.name, result.streamUrl, "video/*")
+    val id = result.id ?: run {
+        _state.value = _state.value.copy(error = "Download unavailable: missing file id")
+        return
+    }
+    if (result.streamUrl.isBlank()) {
+        _state.value = _state.value.copy(error = "Download unavailable: missing stream URL")
+        return
+    }
+    try {
+        downloader.enqueue(id, result.name, result.streamUrl, "video/*")
+    } catch (e: Exception) {
+        _state.value = _state.value.copy(error = e.message ?: "Download failed")
+    }
 }
 
 }

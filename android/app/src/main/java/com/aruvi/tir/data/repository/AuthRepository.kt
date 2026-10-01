@@ -120,8 +120,12 @@ class AuthRepository @Inject constructor(
                         null
                     }
                 } else {
-                    // Refresh rejected (invalid/expired session) - clear auth
-                    clearAuth()
+                    // Refresh rejected with an auth error (invalid/expired session)
+                    // - clear auth. Transient failures (429/5xx) keep tokens so a
+                    // later refresh can retry instead of logging the user out.
+                    if (response.code() in listOf(400, 401, 403, 404, 410, 422)) {
+                        clearAuth()
+                    }
                     null
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -192,6 +196,8 @@ class AuthRepository @Inject constructor(
     suspend fun logout() {
         try {
             api.logout()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             // Ignore logout API errors
         }

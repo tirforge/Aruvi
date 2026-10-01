@@ -1486,7 +1486,10 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
     }
 
     fun jumpToTimestamp(hours: Int, minutes: Int, seconds: Int) {
-        val posMs = ((hours * 3600L) + (minutes * 60L) + seconds) * 1000L
+        val h = hours.coerceIn(0, 99)
+        val m = minutes.coerceIn(0, 59)
+        val s = seconds.coerceIn(0, 59)
+        val posMs = ((h * 3600L) + (m * 60L) + s) * 1000L
         seekTo(posMs)
         _uiState.value = _uiState.value.copy(showJumpDialog = false)
         if (_uiState.value.isPlaying) scheduleControlsHide()
@@ -1504,8 +1507,9 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
     }
 
     fun setPlaybackSpeed(speed: Float) {
-        activePlayer().setPlaybackSpeed(speed)
-        _uiState.value = _uiState.value.copy(playbackSpeed = speed)
+        val clamped = speed.coerceIn(0.25f, 3f)
+        activePlayer().setPlaybackSpeed(clamped)
+        _uiState.value = _uiState.value.copy(playbackSpeed = clamped)
     }
 
     @OptIn(UnstableApi::class)

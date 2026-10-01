@@ -266,6 +266,10 @@ class MobileHomeViewModel @Inject constructor(
     }
 
     fun moveFolder(folder: Folder, targetFolderId: Int?) {
+        if (targetFolderId != null && targetFolderId == folder.id) {
+            _uiState.value = _uiState.value.copy(error = "Cannot move a folder into itself")
+            return
+        }
         viewModelScope.launch {
             foldersRepository.updateFolder(folder.id, parentId = targetFolderId)
             refresh()
@@ -274,7 +278,8 @@ class MobileHomeViewModel @Inject constructor(
 
     fun downloadFile(file: FileItem) {
         viewModelScope.launch {
-            val serverUrl = settingsRepository.getServerUrl()
+            val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
+            if (serverUrl.isBlank()) return@launch
             val url = "$serverUrl/api/stream/${file.id}"
             fileDownloader.enqueue(file.id, file.fileName, url, file.mimeType)
         }
@@ -288,7 +293,8 @@ class MobileHomeViewModel @Inject constructor(
 
     fun openInExternalPlayer(file: FileItem) {
         viewModelScope.launch {
-            val serverUrl = settingsRepository.getServerUrl()
+            val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
+            if (serverUrl.isBlank()) return@launch
             val publicLinkResult = filesRepository.getPublicLink(file.id, serverUrl)
             val streamUrl = publicLinkResult.getOrElse {
                 val token = authRepository.getAccessToken()
@@ -302,9 +308,9 @@ class MobileHomeViewModel @Inject constructor(
             try {
                 val intent = Intent(Intent.ACTION_VIEW).apply {
                     setDataAndType(Uri.parse(streamUrl), "video/*")
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
-                context.startActivity(intent)
+                context.startActivity(Intent.createChooser(intent, "Open with"))
             } catch (e: Exception) {
                 Toast.makeText(context, "No external player found", Toast.LENGTH_SHORT).show()
             }
@@ -313,7 +319,7 @@ class MobileHomeViewModel @Inject constructor(
 
     fun copyPublicLink(file: FileItem) {
         viewModelScope.launch {
-            val serverUrl = settingsRepository.getServerUrl()
+            val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
             val publicLinkResult = filesRepository.getPublicLink(file.id, serverUrl)
             
             publicLinkResult.onSuccess { url ->
@@ -338,7 +344,7 @@ class MobileHomeViewModel @Inject constructor(
 
     fun copyDownloadLink(file: FileItem) {
         viewModelScope.launch {
-            val serverUrl = settingsRepository.getServerUrl()
+            val serverUrl = settingsRepository.getServerUrl().trimEnd('/')
             val token = authRepository.getAccessToken()
             val downloadUrl = if (token != null) {
                 "$serverUrl/api/stream/${file.id}?token=$token"

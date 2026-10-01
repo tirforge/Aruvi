@@ -11,12 +11,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.*
@@ -169,7 +167,8 @@ restoreState = true
                                 popUpTo(tabNavController.graph.findStartDestination().id) {
                                     saveState = true
                                 }
-                                launchSingleTop = true
+                                // Distinct folder destinations must not be deduped.
+                                launchSingleTop = false
                                 restoreState = true
                             }
                         }
@@ -206,7 +205,7 @@ BottomNavItem.Downloads
 )
 
 items.forEach { item ->
-val isSelected = currentRoute?.startsWith(item.route) == true
+val isSelected = currentRoute?.substringBefore("?") == item.route
 NavigationBarItem(
 selected = isSelected,
 onClick = {

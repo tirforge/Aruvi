@@ -53,6 +53,10 @@ class FolderViewModel @Inject constructor(
      */
     fun loadFolder() {
         viewModelScope.launch {
+            if (folderId <= 0) {
+                _uiState.value = _uiState.value.copy(isLoading = false, error = "Invalid folder id")
+                return@launch
+            }
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
 
             val serverUrl = settingsRepository.getServerUrl()

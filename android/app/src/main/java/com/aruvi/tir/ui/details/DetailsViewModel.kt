@@ -63,6 +63,11 @@ class DetailsViewModel @Inject constructor(
 
     private var downloadJob: Job? = null
 
+    override fun onCleared() {
+        downloadJob?.cancel()
+        super.onCleared()
+    }
+
     init {
         loadFileDetails()
     }
@@ -72,6 +77,10 @@ class DetailsViewModel @Inject constructor(
      */
     fun loadFileDetails() {
         viewModelScope.launch {
+            if (fileId <= 0) {
+                _uiState.value = _uiState.value.copy(isLoading = false, error = "Invalid file id")
+                return@launch
+            }
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
 
             val serverUrl = settingsRepository.getServerUrl()
@@ -120,12 +129,13 @@ class DetailsViewModel @Inject constructor(
      * Disk access — dispatched to IO (caller runs on Main).
      */
     private fun checkLocalFile(fileName: String) {
+        val safeName = sanitizeFileName(fileName)
         viewModelScope.launch {
             val localFile = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 val downloadsDir = Environment.getExternalStoragePublicDirectory(
                     Environment.DIRECTORY_DOWNLOADS
                 )
-                File(downloadsDir, fileName).takeIf { it.exists() && it.length() > 0 }
+                File(downloadsDir, safeName).takeIf { it.exists() && it.length() > 0 }
             }
             if (localFile != null) {
                 _uiState.value = _uiState.value.copy(
@@ -148,14 +158,18 @@ class DetailsViewModel @Inject constructor(
      * Get thumbnail URL.
      */
     fun getThumbnailUrl(): String {
-        return "${_uiState.value.serverUrl}/api/stream/$fileId/thumbnail"
+        val base = _uiState.value.serverUrl.trimEnd('/')
+        if (base.isBlank()) return ""
+        return "$base/api/stream/$fileId/thumbnail"
     }
 
     /**
      * Get stream URL.
      */
     fun getStreamUrl(): String {
-        return "${_uiState.value.serverUrl}/api/stream/$fileId"
+        val base = _uiState.value.serverUrl.trimEnd('/')
+        if (base.isBlank()) return ""
+        return "$base/api/stream/$fileId"
     }
 
     /**
@@ -173,7 +187,6 @@ class DetailsViewModel @Inject constructor(
      */
     fun deleteLocalFile(context: Context) {
         val path = _uiState.value.localFilePath ?: return
-        val file = File(path)
 
         viewModelScope.launch {
             try {
@@ -181,6 +194,16 @@ class DetailsViewModel @Inject constructor(
                     if (path.startsWith("content://")) {
                         context.contentResolver.delete(Uri.parse(path), null, null) > 0
                     } else {
+                        val file = File(path)
+                        val downloadsDir = Environment.getExternalStoragePublicDirectory(
+                            Environment.DIRECTORY_DOWNLOADS
+                        )
+                        // Containment check: never delete outside Downloads.
+                        val canonical = file.canonicalPath
+                        val base = downloadsDir.canonicalPath
+                        if (!canonical.startsWith(base + File.separator) && canonical != base) {
+                            throw SecurityException("Refusing to delete file outside Downloads")
+                        }
                         file.exists() && file.delete()
                     }
                 }
@@ -222,7 +245,7 @@ class DetailsViewModel @Inject constructor(
      */
     fun startDownload(context: Context) {
         val file = _uiState.value.file ?: return
-        val serverUrl = _uiState.value.serverUrl
+        val serverUrl = _uiState.value.serverUrl.trimEnd('/')
         if (serverUrl.isBlank()) return
 
         // Prevent multiple downloads
@@ -230,8 +253,9 @@ class DetailsViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
+                val safeName = sanitizeFileName(file.fileName)
                 val url = "$serverUrl/api/stream/$fileId"
-                val taskId = fileDownloader.enqueue(fileId, file.fileName, url, file.mimeType)
+                val taskId = fileDownloader.enqueue(fileId, safeName, url, file.mimeType)
 
                 _uiState.value = _uiState.value.copy(
                     downloadStarted = true,
@@ -270,7 +294,7 @@ class DetailsViewModel @Inject constructor(
 
                 Toast.makeText(
                     context,
-                    "⬇ Downloading: ${file.fileName}",
+                    "⬇ Downloading: ${sanitizeFileName(file.fileName)}",
                     Toast.LENGTH_SHORT
                 ).show()
 
@@ -285,6 +309,16 @@ class DetailsViewModel @Inject constructor(
                     error = e.message
                 )
             }
+        }
+    }
+
+    companion object {
+        fun sanitizeFileName(raw: String): String {
+            val base = File(raw).name
+                .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+                .trim()
+                .take(180)
+            return base.ifBlank { "file" }
         }
     }
 }

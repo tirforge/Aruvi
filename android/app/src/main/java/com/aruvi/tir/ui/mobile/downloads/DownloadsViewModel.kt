@@ -1,11 +1,9 @@
 package com.aruvi.tir.ui.mobile.downloads
 
-import android.os.Environment
 import androidx.lifecycle.ViewModel
 import com.aruvi.tir.download.DownloadStatus
 import com.aruvi.tir.download.DownloadTask
 import com.aruvi.tir.download.FileDownloader
-import com.aruvi.tir.data.repository.AuthRepository
 import com.aruvi.tir.data.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -16,10 +14,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import android.content.Context
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.combine
-import java.io.File
 
 /**
  * Unified download item for the UI layer.
@@ -46,8 +41,7 @@ data class DownloadsUiState(
 class DownloadsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val fileDownloader: FileDownloader,
-    private val settingsRepository: SettingsRepository,
-    private val authRepository: AuthRepository
+    private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
     val uiState: StateFlow<DownloadsUiState> = fileDownloader.tasks.map { tasksMap ->

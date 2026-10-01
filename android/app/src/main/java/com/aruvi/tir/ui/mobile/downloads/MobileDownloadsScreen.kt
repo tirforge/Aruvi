@@ -19,7 +19,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -161,7 +160,7 @@ fun DownloadItemCard(
                 
                 // Progress & Speed for running downloads
                 if (item.status == DownloadStatus.RUNNING) {
-                     val progress = if (item.totalSize > 0) item.downloadedSize.toFloat() / item.totalSize else 0f
+                     val progress = if (item.totalSize > 0) (item.downloadedSize.toDouble() / item.totalSize).toFloat().coerceIn(0f, 1f) else 0f
                      LinearProgressIndicator(
                          progress = { progress },
                          modifier = Modifier.fillMaxWidth().height(4.dp),
@@ -179,15 +178,15 @@ fun DownloadItemCard(
                              style = MaterialTheme.typography.labelSmall,
                              color = MobilePrimary
                          )
-                         Text(
-                             text = "${Formatter.formatFileSize(context, item.downloadedSize)} / ${Formatter.formatFileSize(context, item.totalSize)}",
-                             style = MaterialTheme.typography.labelSmall,
-                             color = Color.White.copy(alpha = 0.5f)
-                         )
+                          Text(
+                              text = "${Formatter.formatFileSize(context, item.downloadedSize)} / ${Formatter.formatFileSize(context, item.totalSize)}",
+                              style = MaterialTheme.typography.labelSmall,
+                              color = MaterialTheme.colorScheme.onSurfaceVariant
+                          )
                      }
                 } else if (item.status == DownloadStatus.PAUSED && item.totalSize > 0) {
                     // Show progress bar for paused items
-                    val progress = item.downloadedSize.toFloat() / item.totalSize
+                    val progress = (item.downloadedSize.toDouble() / item.totalSize).toFloat().coerceIn(0f, 1f)
                     LinearProgressIndicator(
                         progress = { progress },
                         modifier = Modifier.fillMaxWidth().height(4.dp),

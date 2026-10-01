@@ -18,11 +18,12 @@ class AuthInterceptor @Inject constructor(
     override fun intercept(chain: Interceptor.Chain): Response {
         val originalRequest = chain.request()
 
-        // Skip auth for login endpoints
+        // Skip auth for login endpoints (anchored suffix match to avoid
+        // over-matching unrelated paths that merely contain the substring).
         val path = originalRequest.url.encodedPath
-        if (path.contains("/auth/generate-code") ||
-            path.contains("/auth/verify-code") ||
-            path.contains("/auth/refresh")) {
+        if (path.endsWith("/auth/generate-code") ||
+            path.endsWith("/auth/verify-code") ||
+            path.endsWith("/auth/refresh")) {
             return chain.proceed(originalRequest)
         }
 
@@ -42,21 +43,20 @@ class AuthInterceptor @Inject constructor(
 
         // If 401, try to refresh token
         if (response.code == 401) {
-            val failedResponse = response
             val newToken = runBlocking { authRepository.get().refreshAccessToken() }
-            failedResponse.close()
 
             if (newToken != null) {
+                // Retry with new token (close the failed response first).
+                response.close()
                 // Retry with new token
                 val retryRequest = originalRequest.newBuilder()
                     .header("Authorization", "Bearer $newToken")
                     .build()
                 response = chain.proceed(retryRequest)
             } else {
-                // Refresh failed — return a FRESH unauthenticated response.
-                // Returning the closed one would make Retrofit throw
-                // "IllegalStateException: closed" instead of a clean 401.
-                response = chain.proceed(originalRequest)
+                // Refresh failed — return the original 401 as-is instead of
+                // firing a second unauthenticated request that will 401 again.
+                return response
             }
         }
 

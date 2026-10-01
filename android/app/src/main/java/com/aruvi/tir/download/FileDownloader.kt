@@ -11,6 +11,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
@@ -84,6 +85,7 @@ class FileDownloader(
      */
     fun enqueue(fileId: Int, fileName: String, url: String, mimeType: String? = null): Long {
         val id = nextId.getAndIncrement()
+        val safeName = sanitizeFileName(fileName)
 
         // Register the task immediately so the UI sees it; the MediaStore
         // insert (a provider round-trip) happens off the caller thread —
@@ -91,7 +93,7 @@ class FileDownloader(
         val task = DownloadTask(
             id = id,
             fileId = fileId,
-            fileName = fileName,
+            fileName = safeName,
             url = url,
             mimeType = mimeType,
             status = DownloadStatus.PENDING,
@@ -100,7 +102,7 @@ class FileDownloader(
         updateTask(task)
 
         scope.launch(Dispatchers.IO) {
-            val ready = task.copy(localPath = createDestination(fileName, mimeType))
+            val ready = task.copy(localPath = createDestination(safeName, mimeType))
             updateTask(ready)
             // Start foreground service to keep downloads alive in background
             try { DownloadService.start(context) } catch (_: Exception) {}
@@ -111,14 +113,27 @@ class FileDownloader(
     }
 
     /**
+     * Strip path separators / traversal sequences from server-provided names so
+     * "a/b.mp4" or "../evil.mp4" cannot escape the Downloads directory.
+     */
+    private fun sanitizeFileName(raw: String): String {
+        val base = File(raw).name
+            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            .trim()
+            .take(180)
+        return base.ifBlank { "download" }
+    }
+
+    /**
      * Reserve a destination for the download. On API 29+ a MediaStore.Downloads row is
      * created (scoped storage forbids raw writes to public Downloads); below that the
      * legacy raw file path is used.
      */
     private fun createDestination(fileName: String, mimeType: String?): String {
+        val safeName = sanitizeFileName(fileName)
         if (Build.VERSION.SDK_INT >= 29) {
             val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                put(MediaStore.Downloads.DISPLAY_NAME, safeName)
                 put(MediaStore.Downloads.MIME_TYPE, mimeType)
                 put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                 put(MediaStore.Downloads.IS_PENDING, 1)
@@ -128,11 +143,11 @@ class FileDownloader(
             )
             if (uri != null) return uri.toString()
         }
-        return legacyPath(fileName)
+        return legacyPath(safeName)
     }
 
     private fun legacyPath(fileName: String): String =
-        File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), fileName).absolutePath
+        File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), sanitizeFileName(fileName)).absolutePath
 
     private fun isContentUri(task: DownloadTask): Boolean =
         task.localPath?.startsWith("content://") == true
@@ -222,9 +237,7 @@ class FileDownloader(
         lastTimeMap.remove(id)
 
         val task = _tasks.value[id]
-        val currentTasks = _tasks.value.toMutableMap()
-        currentTasks.remove(id)
-        _tasks.value = currentTasks
+        _tasks.update { it - id }
 
         // Delete the (possibly partial) file off the main thread
         if (task != null && task.status != DownloadStatus.COMPLETED) {
@@ -237,9 +250,7 @@ class FileDownloader(
      */
     fun deleteFile(id: Long) {
         val task = _tasks.value[id] ?: return
-        val currentTasks = _tasks.value.toMutableMap()
-        currentTasks.remove(id)
-        _tasks.value = currentTasks
+        _tasks.update { it - id }
         scope.launch(Dispatchers.IO) { deleteDestination(task) }
     }
 
@@ -314,7 +325,7 @@ class FileDownloader(
             val response = okHttpClient.newCall(requestBuilder.build()).execute()
 
             if (!response.isSuccessful && response.code != 206) {
-                val retryable = response.code == 429 || response.code >= 500
+                val retryable = response.code == 408 || response.code == 429 || response.code >= 500
                 response.close()
                 if (retryable) {
                     throw DownloadRetryableException("HTTP ${response.code}: ${response.message}")
@@ -327,6 +338,7 @@ class FileDownloader(
             }
 
             val body = response.body ?: run {
+                response.close()
                 updateTask(task.copy(
                     status = DownloadStatus.FAILED,
                     error = "Empty response body"
@@ -357,10 +369,10 @@ class FileDownloader(
             val output: java.nio.channels.FileChannel = if (contentUri != null) {
                 val pfd = context.contentResolver.openFileDescriptor(
                     Uri.parse(contentUri), if (startOffset > 0) "rw" else "w"
-                ) ?: return false
+                ) ?: run { response.close(); return false }
                 java.io.FileOutputStream(pfd.fileDescriptor).channel
             } else {
-                val file = File(task.localPath ?: return false)
+                val file = File(task.localPath ?: run { response.close(); return false })
                 file.parentFile?.mkdirs()
                 val channel = RandomAccessFile(file, "rw").channel
                 // A full 200 response overwrites from the start - truncate any stale
@@ -442,6 +454,6 @@ class FileDownloader(
     }
 
     private fun updateTask(task: DownloadTask) {
-        _tasks.value = _tasks.value + (task.id to task)
+        _tasks.update { it + (task.id to task) }
     }
 }

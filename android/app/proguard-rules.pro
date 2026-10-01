@@ -27,8 +27,8 @@
 -keep class com.google.android.gms.cast.framework.** { *; }
 -keep class androidx.mediarouter.app.MediaRouteActionProvider { *; }
 
-# FFmpeg extension
--keep class com.github.ArmynC.** { *; }
+# FFmpeg extension (nextlib-media3ext)
+-keep class io.github.anilbeesetti.nextlib.** { *; }
 
 # ZXing QR Code
 -keep class com.google.zxing.** { *; }

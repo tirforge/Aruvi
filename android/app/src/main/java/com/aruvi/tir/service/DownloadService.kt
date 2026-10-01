@@ -3,14 +3,12 @@ package com.aruvi.tir.service
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
-import com.aruvi.tir.R
 import com.aruvi.tir.download.DownloadStatus
 import com.aruvi.tir.download.DownloadTask
 import com.aruvi.tir.download.FileDownloader
@@ -38,6 +36,7 @@ class DownloadService : Service() {
         private const val CHANNEL_ID = "download_channel"
         private const val SUMMARY_NOTIFICATION_ID = 2000
         private const val NOTIFICATION_ID_BASE = 2001
+        private const val COMPLETION_NOTIFICATION_ID = 3000
 
         fun start(context: Context) {
             val intent = Intent(context, DownloadService::class.java)
@@ -108,7 +107,7 @@ override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
                     .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                     .setAutoCancel(true)
                     .build()
-                notificationManager.notify(SUMMARY_NOTIFICATION_ID + 999, notification)
+                notificationManager.notify(COMPLETION_NOTIFICATION_ID, notification)
             }
 
             stopForeground(STOP_FOREGROUND_REMOVE)

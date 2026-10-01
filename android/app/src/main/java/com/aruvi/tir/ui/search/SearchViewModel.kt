@@ -119,10 +119,13 @@ class SearchViewModel @Inject constructor(
      * Clear search.
      */
     fun clearSearch() {
+        searchJob?.cancel()
         _uiState.value = _uiState.value.copy(
             query = "",
             results = emptyList(),
-            hasSearched = false
+            hasSearched = false,
+            isSearching = false,
+            error = null
         )
     }
 
@@ -160,7 +163,7 @@ class SearchViewModel @Inject constructor(
 
     fun downloadFile(file: FileItem) {
         viewModelScope.launch {
-            val serverUrl = _uiState.value.serverUrl
+            val serverUrl = _uiState.value.serverUrl.trimEnd('/')
             if (serverUrl.isEmpty()) return@launch
             val url = "$serverUrl/api/stream/${file.id}"
             fileDownloader.enqueue(file.id, file.fileName, url, file.mimeType)
@@ -169,7 +172,7 @@ class SearchViewModel @Inject constructor(
 
     fun openInExternalPlayer(file: FileItem) {
         viewModelScope.launch {
-            val serverUrl = _uiState.value.serverUrl
+            val serverUrl = _uiState.value.serverUrl.trimEnd('/')
             if (serverUrl.isEmpty()) return@launch
             val publicLinkResult = filesRepository.getPublicLink(file.id, serverUrl)
             val streamUrl = publicLinkResult.getOrElse {
@@ -184,9 +187,9 @@ class SearchViewModel @Inject constructor(
             try {
                 val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
                     setDataAndType(android.net.Uri.parse(streamUrl), "video/*")
-                    flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
-                context.startActivity(intent)
+                context.startActivity(android.content.Intent.createChooser(intent, "Open with"))
             } catch (e: Exception) {
                 android.widget.Toast.makeText(context, "No external player found", android.widget.Toast.LENGTH_SHORT).show()
             }
@@ -195,7 +198,7 @@ class SearchViewModel @Inject constructor(
 
     fun copyPublicLink(file: FileItem) {
         viewModelScope.launch {
-            val serverUrl = _uiState.value.serverUrl
+            val serverUrl = _uiState.value.serverUrl.trimEnd('/')
             if (serverUrl.isEmpty()) return@launch
             val publicLinkResult = filesRepository.getPublicLink(file.id, serverUrl)
             
@@ -229,7 +232,7 @@ class SearchViewModel @Inject constructor(
 
     fun copyDownloadLink(file: FileItem) {
         viewModelScope.launch {
-            val serverUrl = _uiState.value.serverUrl
+            val serverUrl = _uiState.value.serverUrl.trimEnd('/')
             if (serverUrl.isEmpty()) return@launch
             val token = authRepository.getAccessToken()
             val downloadUrl = if (token != null) {

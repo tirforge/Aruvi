@@ -96,8 +96,13 @@ class SettingsViewModel @Inject constructor(
      */
     fun logout(onComplete: () -> Unit) {
         viewModelScope.launch {
-            authRepository.logout()
-            onComplete()
+            try {
+                authRepository.logout()
+            } catch (e: Exception) {
+                // Logout still proceeds locally; surface nothing to avoid stuck dialog.
+            } finally {
+                onComplete()
+            }
         }
     }
 }

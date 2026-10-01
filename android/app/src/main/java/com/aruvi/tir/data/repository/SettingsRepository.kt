@@ -77,7 +77,7 @@ class SettingsRepository @Inject constructor(
     fun normalizeServerUrl(input: String): String {
         val trimmed = input.trim().trimEnd('/')
         if (trimmed.isEmpty()) return trimmed
-        return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+        return if (trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true)) {
             trimmed
         } else {
             "http://$trimmed"
