@@ -8,16 +8,31 @@ import { tool } from "@opencode-ai/plugin"
 
 export default tool({
   description: "Gets the last GitHub release tag and its associated commit SHA",
-  args: {},
-  async execute() {
+  args: {
+    target_tag: tool.schema
+      .string()
+      .optional()
+      .describe(
+        "Target release tag to exclude from the baseline lookup (the release being documented)"
+      ),
+  },
+  async execute(args) {
+    const targetTag = (args.target_tag ?? "").trim()
     const slug =
       (process.env.GITHUB_REPOSITORY ?? "").trim() ||
       (await Bun.$`gh repo view --json nameWithOwner --jq .nameWithOwner`.text()).trim()
 
     const result =
-      await Bun.$`gh api ${`repos/${slug}/releases?per_page=1`}`.json()
+      await Bun.$`gh api ${`repos/${slug}/releases?per_page=100`}`.json()
 
-    if (!result || result.length === 0) {
+    const releases = Array.isArray(result) ? result : []
+    // Exclude the target release itself so a first/only release does not
+    // become its own baseline (which would yield an empty commit_diff).
+    const candidates = targetTag
+      ? releases.filter((r) => r?.tag_name !== targetTag)
+      : releases
+
+    if (candidates.length === 0) {
       return JSON.stringify({
         error: "No releases found",
         tag: null,
@@ -25,7 +40,7 @@ export default tool({
       })
     }
 
-    const lastRelease = result[0]
+    const lastRelease = candidates[0]
     const tag = lastRelease.tag_name
 
     // NOTE: GitHub's target_commitish is a branch name (e.g. "main"), NOT a

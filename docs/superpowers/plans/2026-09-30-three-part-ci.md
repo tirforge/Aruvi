@@ -500,6 +500,10 @@ jobs:
     steps:
       - name: Aggregate area results
         run: |
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "changes result: ${{ needs.changes.result }}"
+            exit 1
+          fi
           for r in "${{ needs.backend.result }}" "${{ needs.frontend.result }}" "${{ needs.build.result }}"; do
             case "$r" in success|skipped) ;; *) echo "area result: $r"; exit 1;; esac
           done

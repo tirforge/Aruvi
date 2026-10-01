@@ -15,6 +15,13 @@ on:
 jobs:
   combo:
     uses: tirforge/Aruvi/.github/workflows/review-combo.yml@v1
+    # Reusable workflows cannot elevate the caller token: declare the scopes
+    # the combo needs (review comments + fix-and-push loop) here.
+    permissions:
+      id-token: write
+      contents: write
+      pull-requests: write
+      issues: write
     with:
       # Any language works: tell the fixer how YOUR repo verifies.
       verify_commands: "npm run lint; npm test; npm run build"
