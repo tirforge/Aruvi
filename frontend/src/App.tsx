@@ -12,6 +12,7 @@ function AuthCallback() {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
     const token = searchParams.get('token');
+    const refreshToken = searchParams.get('refresh_token');
 const [status, setStatus] = useState('Processing...');
 const [saved, setSaved] = useState(false);
 
@@ -19,6 +20,12 @@ const [saved, setSaved] = useState(false);
         if (token) {
             try {
                 localStorage.setItem('access_token', token);
+                // The callback may carry a refresh token alongside the access
+                // token — persist it too, otherwise the session cannot refresh
+                // and dies at the first 401.
+                if (refreshToken) {
+                    localStorage.setItem('refresh_token', refreshToken);
+                }
                 const check = localStorage.getItem('access_token');
                 if (check === token) {
 setSaved(true);
@@ -34,7 +41,7 @@ navigate('/', { replace: true });
         } else {
             setStatus('No token in URL');
         }
-    }, [token, navigate]);
+    }, [token, refreshToken, navigate]);
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-dark-950 p-4">
@@ -44,24 +51,20 @@ navigate('/', { replace: true });
 
                 {token && !saved && (
                     <div className="mt-4 p-4 bg-dark-800 rounded-lg text-left">
-                        <p className="text-dark-400 text-sm mb-2">Token received (click to copy):</p>
-                        <button
-                            onClick={() => {
-                                navigator.clipboard.writeText(token).then(() => {
-                                    setStatus('Token copied! Open browser DevTools console and run:\nlocalStorage.setItem("access_token", "paste-token-here")');
-                                }).catch(() => {
-                                    setStatus('Copy failed (browser blocked clipboard). Long-press / Ctrl+C the token above.');
-                                });
-                            }}
-                            className="text-xs text-primary-400 break-all text-left hover:text-primary-300"
-                        >
-                            {token.substring(0, 50)}...
-                        </button>
+                        {/* Never render the token itself here: it lands in the DOM
+                            (and any retyped copy in clipboard/history) for no
+                            benefit — the save already failed or is pending. */}
+                        <p className="text-dark-400 text-sm mb-2">Sign-in did not complete automatically.</p>
                         <div className="mt-4">
                             <a
                                 href="/"
                                 className="inline-block px-4 py-2 bg-primary-600 hover:bg-primary-700 rounded text-white text-sm"
-                                onClick={() => localStorage.setItem('access_token', token)}
+                                onClick={() => {
+                                    localStorage.setItem('access_token', token);
+                                    if (refreshToken) {
+                                        localStorage.setItem('refresh_token', refreshToken);
+                                    }
+                                }}
                             >
                                 Try Manual Login →
                             </a>
@@ -361,11 +364,13 @@ function BotLink({ code }: { code?: string }) {
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-    const { isLoading, error, refetch } = useCurrentUser();
     // Reactive token: re-renders when another tab rotates/clears it. A bare
     // localStorage.getItem() here never re-rendered, so a logged-out tab kept
     // showing the app on a dead token until hard reload.
     const token = useAccessToken();
+    // Don't burn an unauthenticated /auth/me (and its refresh attempt) when
+    // there is no token to send — it can only 401.
+    const { isLoading, error, refetch } = useCurrentUser(!!token);
 
     if (!token) {
         return <Navigate to="/login" replace />;

@@ -1,7 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../lib/store';
-import { TelegramFile, Folder, api, useFolders, getFileDownloadToken, useAccessToken } from '../lib/api';
+import { TelegramFile, Folder, api, useFolders, getFileDownloadToken, useAccessToken, API_BASE } from '../lib/api';
 import { Play, Download, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, ExternalLink } from 'lucide-react';
+
+// Backend-aware origin for share/stream URLs: split frontend/backend deploys
+// serve /api and public links from __BACKEND_URL__, not from the SPA origin.
+// Falls back to the SPA origin for same-origin prod and dev proxy setups.
+const backendBaseUrl = () => {
+    if (/^https?:\/\//i.test(API_BASE)) {
+        try {
+            return new URL(API_BASE).origin;
+        } catch {
+            // fall through to the SPA origin below
+        }
+    }
+    return `${window.location.protocol}//${window.location.host}`;
+};
 
 export default function GlobalContextMenu() {
     // Narrow selectors: this component mounts permanently at the app root —
@@ -70,7 +84,9 @@ export default function GlobalContextMenu() {
     if (!activeContextMenu) return null;
 
     const { x, y } = activeContextMenu;
-    const isMultiSelect = selectedFileIds.size > 1 && activeContextMenu.type === 'file' && selectedFileIds.has(activeContextMenu.item.id);
+    // Multi-select covers files AND folders: the old `selectedFileIds.size > 1`
+    // check dropped into the single-file menu for 1 file + N folders.
+    const isMultiSelect = (selectedFileIds.size + selectedFolderIds.size) > 1 && activeContextMenu.type === 'file' && selectedFileIds.has(activeContextMenu.item.id);
 
     // Adjust position to keep within viewport
     const getMenuPosition = () => {
@@ -126,7 +142,7 @@ export default function GlobalContextMenu() {
 
     const ensurePublicLink = async (file: TelegramFile): Promise<string | null> => {
         if (file.public_stream_url) {
-            return `${window.location.protocol}//${window.location.host}${file.public_stream_url}`;
+            return `${backendBaseUrl()}${file.public_stream_url}`;
         }
         try {
             const { data } = await api.post(`/files/${file.id}/share`);
@@ -134,7 +150,7 @@ export default function GlobalContextMenu() {
                 if (activeContextMenu && activeContextMenu.type === 'file') {
                     setActiveContextMenu({ ...activeContextMenu, item: data });
                 }
-                return `${window.location.protocol}//${window.location.host}${data.public_stream_url}`;
+                return `${backendBaseUrl()}${data.public_stream_url}`;
             }
         } catch (err) {
             console.error('Failed to create public link:', err);
@@ -219,7 +235,7 @@ export default function GlobalContextMenu() {
                                             // external app — never embed the account-wide JWT.
                                             void (async () => {
                                                 try {
-                                                    const baseUrl = `${window.location.protocol}//${window.location.host}`;
+                                                    const baseUrl = backendBaseUrl();
                                                     const url = f.public_stream_url
                                                         ? `${baseUrl}${f.public_stream_url}`
                                                         : `${baseUrl}${f.stream_url}?token=${await getFileDownloadToken(f.id)}`;
@@ -238,7 +254,7 @@ export default function GlobalContextMenu() {
                                             // short-lived file-bound token, not the account JWT.
                                             void (async () => {
                                                 try {
-                                                    const baseUrl = `${window.location.protocol}//${window.location.host}`;
+                                                    const baseUrl = backendBaseUrl();
                                                     const url = f.public_stream_url
                                                         ? `${baseUrl}${f.public_stream_url}`
                                                         : `${baseUrl}${f.stream_url}?token=${await getFileDownloadToken(f.id)}`;

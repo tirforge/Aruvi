@@ -180,12 +180,15 @@ function FolderTreeItem({ folder, selectedId, onSelect, depth }: {
                 style={{ paddingLeft: `${16 + depth * 16}px` }}
             >
                 {hasChildren && (
-                    <div
+                    <span
+                        role="button"
+                        tabIndex={-1}
                         onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setExpanded(!expanded); } }}
                         className="p-0.5"
                     >
                         <ChevronRight className={`w-3 h-3 transition-transform ${expanded ? 'rotate-90' : ''}`} />
-                    </div>
+                    </span>
                 )}
                 {!hasChildren && <div className="w-4" />}
                 <FolderIcon className="w-4 h-4 text-primary-400" />

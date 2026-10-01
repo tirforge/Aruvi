@@ -257,12 +257,12 @@ export default function FileBrowser() {
                 }
                 setClipboard(null);
             } else if (clipboard.mode === 'copy') {
-                alert("Copying files is not yet supported. Only Move (Cut) is supported.");
+                addToast('Copying files is not yet supported. Only Move (Cut) is supported.', 'info');
             }
         } catch (error) {
             console.error('Paste failed:', error);
         }
-    }, [clipboard, currentFolderId, moveFilesMutation, moveFoldersMutation, setClipboard]);
+    }, [clipboard, currentFolderId, moveFilesMutation, moveFoldersMutation, setClipboard, addToast]);
 
 
     // Selection Box Logic
@@ -427,6 +427,11 @@ export default function FileBrowser() {
         const handleKeyDown = (e: KeyboardEvent) => {
             // Ignore if input/textarea is focused or player is open
             if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || previewFile) return;
+            // Modals own their keys (each has a guarded Escape handler that
+            // stops propagation): firing grid shortcuts behind them would act
+            // on invisible state — e.g. Delete confirming a second delete, or
+            // F2 swapping the rename target mid-edit.
+            if (showNewFolder || moveItems || deleteConfirm || renameFile || renameFolder) return;
 
             // Ctrl+Shift+N - New Folder
             if (e.ctrlKey && e.shiftKey && (e.key === 'N' || e.key === 'n')) {
@@ -508,7 +513,7 @@ export default function FileBrowser() {
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [
-        previewFile, showNewFolder, moveItems, deleteConfirm, 
+        previewFile, showNewFolder, moveItems, deleteConfirm, renameFile, renameFolder,
         selectedFileIds, selectedFolderIds, displayFiles, breadcrumbs, clipboard, 
         currentFolderId, handlePaste, handleRefresh,
         setPreviewFile, setShowNewFolder, setMoveItems, setDeleteConfirm, 

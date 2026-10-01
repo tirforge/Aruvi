@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMemo, useRef, useEffect, useCallback } from 'react';
 import { X, Play, Pause, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, Music, Film, ChevronDown, ChevronUp, Subtitles, Search, Loader2 } from 'lucide-react';
-import { TelegramFile, formatDuration, useUpdateProgress, useFile, getFileDownloadToken, useAccessToken, searchInternetSubtitles, fetchSubtitleContent, SubtitleCandidate } from '../lib/api';
+import { TelegramFile, formatDuration, useUpdateProgress, useFile, getFileDownloadToken, useAccessToken, searchInternetSubtitles, fetchSubtitleContent, SubtitleCandidate, API_BASE } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import AuthImage from './AuthImage';
 
@@ -55,7 +55,10 @@ function loadMoviPlayer(): Promise<boolean> {
         s.type = 'module';
         s.src = MOVI_PLAYER_URL;
         s.onload = () => resolve(true);
-        s.onerror = () => resolve(false);
+        // Don't cache the failure: a transient network blip would otherwise
+        // poison every later open until full page reload. Reset so the next
+        // file re-attempts the download.
+        s.onerror = () => { moviLoadPromise = null; resolve(false); };
         document.head.appendChild(s);
     });
     return moviLoadPromise;
@@ -268,8 +271,16 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
 
     const getAbsoluteUrl = (url: string) => {
         if (!url) return '';
-        if (url.startsWith('http')) return url;
-        return `${window.location.origin}${url}`;
+        if (/^https?:\/\//i.test(url)) return url;
+        // Respect split frontend/backend deploys (__BACKEND_URL__): stream and
+        // image URLs must point at the backend origin, not the SPA origin.
+        // Tolerate relative paths missing the leading slash as well.
+        const base = API_BASE || window.location.origin;
+        try {
+            return new URL(url, base).href;
+        } catch {
+            return `${base.replace(/\/+$/, '')}/${url.replace(/^\/+/, '')}`;
+        }
     };
 
     // Capture the authorized stream URL once per file so a token refresh
@@ -341,7 +352,10 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         const win = window.open('', '_blank');
         try {
             const token = await getFileDownloadToken(file.id);
-            const dlUrl = `${window.location.protocol}//${window.location.host}/api/stream/dl?id=${file.id}&token=${encodeURIComponent(token)}`;
+            // Backend-aware origin: split deploys serve /api from __BACKEND_URL__,
+            // not from the SPA origin.
+            const backendBase = (API_BASE || window.location.origin).replace(/\/+$/, '');
+            const dlUrl = `${backendBase}/api/stream/dl?id=${file.id}&token=${encodeURIComponent(token)}`;
             if (win) win.location.href = dlUrl;
             else window.location.href = dlUrl;
         } catch (err) {
@@ -763,7 +777,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
                             </a>
                             <div className="flex gap-3">
                                 <Button
-                                    onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(externalUrl).then(() => { addToast('URL copied to clipboard', 'success'); }).catch(() => { addToast('Copy failed (browser blocked clipboard)', 'error'); }); }}
+                                    onClick={(e) => { e.stopPropagation(); const write = navigator.clipboard?.writeText?.bind(navigator.clipboard); if (!write) { addToast('Copy failed (browser blocked clipboard)', 'error'); return; } write(externalUrl).then(() => { addToast('URL copied to clipboard', 'success'); }).catch(() => { addToast('Copy failed (browser blocked clipboard)', 'error'); }); }}
                                     className="flex-1 btn-secondary flex items-center justify-center gap-2"
                                 >
                                     <Copy className="w-4 h-4" />

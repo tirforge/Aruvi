@@ -296,9 +296,10 @@ return Promise.reject(error);
 
 // ============== Auth Hooks ==============
 
-export const useCurrentUser = () => {
+export const useCurrentUser = (enabled = true) => {
 return useQuery({
 queryKey: ['currentUser'],
+enabled,
 queryFn: async () => {
 const { data } = await api.get<User>('/auth/me');
 return data;

@@ -7,7 +7,7 @@ export default function Toasts() {
     const removeToast = useAppStore((s) => s.removeToast);
 
     return (
-        <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
+        <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none" aria-live="polite" aria-atomic="false">
             {toasts.map((toast) => (
                 <ToastItem key={toast.id} toast={toast} onDismiss={() => removeToast(toast.id)} />
             ))}
@@ -42,7 +42,7 @@ function ToastItem({ toast, onDismiss }: { toast: { id: string; message: string;
     };
 
     return (
-        <div className={`pointer-events-auto flex items-center gap-3 pl-4 pr-3 py-3 rounded-xl border shadow-xl backdrop-blur-md animate-slide-up sm:min-w-[300px] max-w-md ${getBgColor()}`}>
+        <div role="status" className={`pointer-events-auto flex items-center gap-3 pl-4 pr-3 py-3 rounded-xl border shadow-xl backdrop-blur-md animate-slide-up sm:min-w-[300px] max-w-md ${getBgColor()}`}>
             {getIcon()}
             <p className="flex-1 text-sm font-medium text-white">{toast.message}</p>
             <button 

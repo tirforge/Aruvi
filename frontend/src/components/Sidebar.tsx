@@ -2,6 +2,7 @@ import { Files, Clock, PlayCircle, LogOut, HardDrive, X, Users, Zap, Shield, Sea
 import logo from '../assets/logo.png';
 import { useAppStore } from '../lib/store';
 import { useStorageStats, formatFileSize, useLogoutAll, useCurrentUser } from '../lib/api';
+import { clearStoredLoginCode } from '../lib/loginCode';
 import { memo, useCallback, useState, type ComponentType } from 'react';
 
 interface SidebarProps {
@@ -25,6 +26,9 @@ function Sidebar({ isOpen, onClose }: SidebarProps) {
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
         localStorage.removeItem('user');
+        // A saved login code belongs to this session — without clearing, the
+        // next visit to /login resurrects a stale code instead of minting one.
+        clearStoredLoginCode();
         window.location.href = '/login';
     };
 
@@ -109,9 +113,16 @@ function Sidebar({ isOpen, onClose }: SidebarProps) {
                         <>
                             <div className="text-xl font-bold text-white mb-1">
                                 {formatFileSize(storage.total_size)}
+                                {Number.isFinite(storage.limit) && storage.limit > 0 && (
+                                    <span className="text-sm font-medium text-dark-400"> of {formatFileSize(storage.limit)}</span>
+                                )}
                             </div>
                             <div className="text-xs text-primary-400">
-                                Unlimited Storage <Zap className="w-3 h-3 inline-block text-primary-400" />
+                                {Number.isFinite(storage.limit) && storage.limit > 0 ? (
+                                    <>Storage Used <Zap className="w-3 h-3 inline-block text-primary-400" /></>
+                                ) : (
+                                    <>Unlimited Storage <Zap className="w-3 h-3 inline-block text-primary-400" /></>
+                                )}
                             </div>
                         </>
                     ) : (

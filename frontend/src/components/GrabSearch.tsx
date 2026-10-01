@@ -3,7 +3,7 @@
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Search, Film, Download, ExternalLink, Copy, Check, Loader2, X, Zap, Play } from 'lucide-react';
-import { useGrabSearch, useGrabSelect, formatFileSize, GrabSearchResult, GrabSelectResponse } from '../lib/api';
+import { useGrabSearch, useGrabSelect, formatFileSize, GrabSearchResult, GrabSelectResponse, API_BASE } from '../lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useAppStore } from '../lib/store';
@@ -14,6 +14,20 @@ const MIME_BY_EXT: Record<string, string> = {
   mov: 'video/quicktime',
   webm: 'video/webm',
   mp4: 'video/mp4',
+};
+
+// Resolve a backend stream path to an absolute URL (see backendBaseUrl in
+// GlobalContextMenu): relative grabs must gain a host before being handed to
+// VLC or the clipboard, and split deploys must use the backend origin.
+const toAbsoluteStreamUrl = (url: string): string => {
+  if (!url) return url;
+  if (/^https?:\/\//i.test(url)) return url;
+  const base = API_BASE || window.location.origin;
+  try {
+    return new URL(url, base).href;
+  } catch {
+    return `${base.replace(/\/+$/, '')}/${url.replace(/^\/+/, '')}`;
+  }
 };
 
 export default function GrabSearch() {
@@ -127,7 +141,7 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
   const handleCopyUrl = useCallback(async () => {
     if (!grabbed) return;
     try {
-      await navigator.clipboard.writeText(grabbed.stream_url);
+      await navigator.clipboard.writeText(toAbsoluteStreamUrl(grabbed.stream_url));
       setCopied(true);
       if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
       copyTimerRef.current = window.setTimeout(() => setCopied(false), 2000);
@@ -163,7 +177,10 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
   }, [grabbed, setPreviewFile]);
 
   const getVlcUrl = (url: string) => {
-    return 'vlc://' + url;
+    // Grabbed stream URLs may be relative (/api/...) — an external player
+    // needs an absolute URL, resolved against the backend origin so split
+    // frontend/backend deploys keep working.
+    return 'vlc://' + toAbsoluteStreamUrl(url);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
