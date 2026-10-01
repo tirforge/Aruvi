@@ -78,4 +78,4 @@ Every item below was verified in current source before fixing
 - `python3 -m compileall -q backend/app backend/tests` — must pass (see PR checks)
 - Existing pytest suite + CI (CodeQL, opencode-review, Sonar) run on the PR
 
-Fix PR: <pending — filled in after `gh pr create`>
+Fix PR: https://github.com/tirforge/Aruvi/pull/69
