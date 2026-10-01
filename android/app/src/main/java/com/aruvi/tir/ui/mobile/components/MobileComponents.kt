@@ -2,6 +2,8 @@ package com.aruvi.tir.ui.mobile.components
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
@@ -171,8 +173,8 @@ fun MovePickerDialog(
                         Text(error!!, color = MaterialTheme.colorScheme.error)
                     }
                 } else {
-                    androidx.compose.foundation.layout.Column(
-                        modifier = Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())
+                    Column(
+                        modifier = Modifier.verticalScroll(rememberScrollState())
                     ) {
                         if (navStack.isNotEmpty()) {
                             MoveDestinationItem(
