@@ -128,13 +128,16 @@ export type CodeVerificationResponse = AuthResponse | PendingCodeResponse;
 
 // API client — use runtime config (set by index.html) or fallback to /api.
 // Exported so thumbnail/image URL builders share the same origin logic.
-export const API_BASE = (window as any).__BACKEND_URL__ || '';
+// Trailing slashes are stripped so a deploy-injected '__BACKEND_URL__' with a
+// trailing slash can't produce '//api/...' double-slash URLs.
+export const API_BASE = ((window as any).__BACKEND_URL__ || '').replace(/\/+$/, '');
 export const api = axios.create({
 baseURL: API_BASE + '/api',
 });
 
 // Add auth token to requests
 api.interceptors.request.use((config) => {
+config.headers = config.headers ?? {};
 const token = localStorage.getItem('access_token');
 if (token) {
 config.headers.Authorization = `Bearer ${token}`;
@@ -781,7 +784,7 @@ queryClient.invalidateQueries({ queryKey: ['admin', 'stats'] });
 
 export const formatFileSize = (bytes: number | string): string => {
 const value = typeof bytes === 'string' ? Number(bytes) : bytes;
-if (!Number.isFinite(value)) return '—';
+if (!Number.isFinite(value) || value < 0) return '—';
 const units = ['B', 'KB', 'MB', 'GB', 'TB'];
 let size = value;
 let unitIndex = 0;
@@ -793,7 +796,7 @@ return `${size.toFixed(1)} ${units[unitIndex]}`;
 };
 
 export const formatDuration = (seconds: number | null): string => {
-if (!seconds) return '';
+if (!seconds || seconds < 0) return '';
 if (!Number.isFinite(seconds)) return '—';
 const hours = Math.floor(seconds / 3600);
 const minutes = Math.floor((seconds % 3600) / 60);

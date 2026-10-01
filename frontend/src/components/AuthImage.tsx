@@ -9,7 +9,10 @@ interface AuthImageProps {
 
 const getAbsoluteUrl = (url: string) => {
     if (!url) return '';
-    if (url.startsWith('http')) return url;
+    // Absolute-URL check must include the scheme separator: a bare
+    // startsWith('http') also matched relative strings like 'httpfoo',
+    // which then skipped the origin join below and fetched a wrong path.
+    if (/^https?:\/\//i.test(url)) return url;
     // Respect split frontend/backend deploys (__BACKEND_URL__) and tolerate
     // relative paths missing the leading slash (which naive concatenation
     // mangles into https://hostapi/...). Falls back to origin-joined.

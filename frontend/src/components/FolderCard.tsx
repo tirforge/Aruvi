@@ -20,6 +20,7 @@ function FolderCardImpl({ folder, viewMode, selected, onSelect, onOpen, onFileDr
     const [isDragOver, setIsDragOver] = useState(false);
     const activeContextMenu = useAppStore((s) => s.activeContextMenu);
     const setActiveContextMenu = useAppStore((s) => s.setActiveContextMenu);
+    const addToast = useAppStore((s) => s.addToast);
 
     // Check if this folder's context menu is active
     const showMenu = activeContextMenu?.type === 'folder' && activeContextMenu?.item.id === folder.id;
@@ -84,7 +85,10 @@ function FolderCardImpl({ folder, viewMode, selected, onSelect, onOpen, onFileDr
             if (/^\d+$/.test(plain)) {
                 onFileDrop(Number(plain), folder.id);
             } else {
+                // OS file drags and text selections carry no move payload —
+                // say so instead of failing silently (console-only before).
                 console.error('Invalid drop data');
+                addToast('Drop files or folders from your library here', 'info');
             }
         }
     };

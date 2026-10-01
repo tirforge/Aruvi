@@ -1,5 +1,4 @@
-import { useState } from 'react';
-import { useMemo, useRef, useEffect, useCallback } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { X, Play, Pause, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, Music, Film, ChevronDown, ChevronUp, Subtitles, Search, Loader2 } from 'lucide-react';
 import { TelegramFile, formatDuration, useUpdateProgress, useFile, getFileDownloadToken, useAccessToken, searchInternetSubtitles, fetchSubtitleContent, SubtitleCandidate } from '../lib/api';
 import { useAppStore } from '../lib/store';
@@ -169,11 +168,19 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         if (!file) return;
         // MicroDVD (.sub) is not supported — the SRT→VTT converter would mangle it
         if (file.name.toLowerCase().endsWith('.sub')) return;
+        // Bound the FileReader blob: a "subtitle" can be any user-picked file,
+        // and reading a multi-GB pick into memory would freeze the tab.
+        const MAX_SUBTITLE_BYTES = 5 * 1024 * 1024;
+        if (file.size > MAX_SUBTITLE_BYTES) {
+            addToast('Subtitle file is too large (max 5 MB)', 'error');
+            return;
+        }
         const reader = new FileReader();
         reader.onload = () => {
             let text = reader.result as string;
-            // Convert SRT to VTT if needed
-            if (file.name.endsWith('.srt')) {
+            // Convert SRT to VTT if needed (case-insensitive: FILE.SRT from
+            // Windows/TV file pickers otherwise slipped through as raw SRT)
+            if (file.name.toLowerCase().endsWith('.srt')) {
                 text = srtToVtt(text);
             }
             const blob = new Blob([text], { type: 'text/vtt' });
@@ -268,8 +275,15 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
 
     const getAbsoluteUrl = (url: string) => {
         if (!url) return '';
-        if (url.startsWith('http')) return url;
-        return `${window.location.origin}${url}`;
+        // Same rule as AuthImage: require the scheme separator so relative
+        // strings starting with 'http' still get origin-joined, and tolerate
+        // paths missing the leading slash.
+        if (/^https?:\/\//i.test(url)) return url;
+        try {
+            return new URL(url, window.location.origin).href;
+        } catch {
+            return `${window.location.origin}/${url.replace(/^\/+/, '')}`;
+        }
     };
 
     // Capture the authorized stream URL once per file so a token refresh
@@ -663,8 +677,14 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         if (!el || subtitleTracks.length === 0) return;
         const prevTime = el.currentTime || 0;
         const activeIdxRef = activeSubKeyRef.current === null ? -1 : subtitleTracks.findIndex((t) => t.key === activeSubKeyRef.current);
+        // authorizedStreamUrl is frozen at mount (stable src) and may carry a
+        // rotated-out token — mint the source URL from the CURRENT token so
+        // attaching subtitles after a refresh doesn't re-source into a 401.
+        const freshToken = localStorage.getItem('access_token') || '';
+        const freshBase = getAbsoluteUrl(file.stream_url || '');
+        const freshSep = freshBase.includes('?') ? '&' : '?';
         el.source({
-            video: { src: authorizedStreamUrl, type: 'video/mp4' },
+            video: { src: `${freshBase}${freshSep}token=${freshToken}`, type: 'video/mp4' },
             subtitles: subtitleTracks.map((t, i) => ({
                 src: t.url,
                 lang: `s${i}`,
@@ -1035,7 +1055,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
 // Helper button component for cleaner code
 function Button({ onClick, className, children }: { onClick?: (e: any) => void, className?: string, children: React.ReactNode }) {
     return (
-        <button onClick={onClick} className={className}>
+        <button type="button" onClick={onClick} className={className}>
             {children}
         </button>
     );

@@ -96,7 +96,10 @@ export const useAppStore = create<AppState>((set) => ({
 
     // Navigation Section
     activeSection: 'files',
-    setActiveSection: (section) => set({ activeSection: section, showAdminPanel: false, currentFolderId: null, breadcrumbs: [{ id: null, name: section === 'files' ? 'My Files' : section === 'recent' ? 'Recently Added' : section === 'grab' ? 'Search Movies' : 'Continue Watching' }] }),
+    // Switching sections resets navigation AND clears the selection: the file
+    // grid unmounts, but selectedFileIds survived — so keyboard Delete/Ctrl+A
+    // in the grab section could act on invisible files from another section.
+    setActiveSection: (section) => set({ activeSection: section, showAdminPanel: false, currentFolderId: null, selectedFileIds: new Set(), selectedFolderIds: new Set(), selectedFiles: [], breadcrumbs: [{ id: null, name: section === 'files' ? 'My Files' : section === 'recent' ? 'Recently Added' : section === 'grab' ? 'Search Movies' : 'Continue Watching' }] }),
 
     // Admin Panel
     showAdminPanel: false,
@@ -205,7 +208,11 @@ export const useAppStore = create<AppState>((set) => ({
     // Toast Notifications
     toasts: [],
     addToast: (message, type = 'success') => set((state) => {
-        const id = Math.random().toString(36).substring(2, 9);
+        // crypto.randomUUID avoids the (tiny but real) Math.random collision
+        // window that could merge two toasts under one React key.
+        const id = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+            ? crypto.randomUUID()
+            : Math.random().toString(36).substring(2, 9);
         const last = state.toasts[state.toasts.length - 1];
         // Drop consecutive duplicates (error storms from failing beats would
         // flood the stack) and cap at 5 — expiry relies on each item's timer.

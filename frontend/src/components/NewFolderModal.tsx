@@ -83,6 +83,7 @@ export default function NewFolderModal({ parentId, onClose }: NewFolderModalProp
                         onChange={(e) => setName(e.target.value)}
                         placeholder="Folder name"
                         autoFocus
+                        maxLength={255}
                         className="w-full px-4 py-3 bg-dark-700 border border-dark-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500/50 mb-4"
                     />
 
