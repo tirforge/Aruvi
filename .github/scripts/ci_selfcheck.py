@@ -125,6 +125,21 @@ r = subprocess.run([sys.executable, "-m", "py_compile",
                     str(_scripts / "redact-secrets.py")],
                    capture_output=True, text=True)
 check(r.returncode == 0, "redact-secrets.py: py_compile OK")
+
+# Gitleaks toml must EXTEND the default ruleset, not replace it: a config
+# without [extend] loads zero rules and every scan passes vacuously.
+_toml = (ROOT / ".gitleaks.toml").read_text()
+check("useDefault = true" in _toml, "gitleaks: extend/useDefault present")
+# The allowlist regex must still match the live curl line in
+# harvest-findings.sh — semantic check, not string presence, so the two
+# can't drift apart (the stale `$SONAR_TOKEN:` shape once did).
+import re as _re
+_harvest = (ROOT / ".github" / "scripts" / "harvest-findings.sh").read_text()
+_curl_lines = [ln for ln in _harvest.splitlines() if "curl " in ln and "SONAR_TOKEN" in ln]
+_allow = _re.findall(r"'''(.+?)'''", _toml.split("[allowlist]", 1)[1])
+check(bool(_curl_lines) and any(
+    _re.search(rx, ln) for rx in _allow for ln in _curl_lines),
+    "gitleaks: allowlist regex matches live SONAR_TOKEN curl line")
 _gitleaks = (ROOT / ".gitleaks.toml").read_text()
 check("SONAR_TOKEN" in _gitleaks and "curl -sf -u" in _gitleaks,
       "gitleaks: allowlist covers SONAR_TOKEN env-reference line shape")
