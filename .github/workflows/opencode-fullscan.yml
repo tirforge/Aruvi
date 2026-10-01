@@ -102,6 +102,12 @@ jobs:
               step summary + artifacts by the workflow below).
             - If a fix PR for this area is already open, add to it instead
               of opening a duplicate.
+            - After opening (or adding to) the fix PR, write its full URL
+              into the report as `Fix PR: <url>`. A non-CLEAN report with
+              no open fix PR FAILS the run — a deterministic workflow step
+              verifies this after you finish, so complete the delivery
+              before you stop. Fixes that live only in your workspace are
+              deleted with the runner and count as NOT DELIVERED.
 
       - name: Publish verdict to step summary
         # Same area gate as the scan step: a skipped area must not false-fail
@@ -126,3 +132,31 @@ jobs:
           name: fullscan-${{ matrix.area }}-report-${{ github.run_number }}
           path: fullscan-${{ matrix.area }}-report.md
           if-no-files-found: error
+
+      - name: Verify delivery (deterministic gate)
+        # The agent is trusted to audit, not to self-report delivery. A
+        # non-CLEAN report with no open fix PR means the fixes died with
+        # the runner workspace (seen 2026-10-01 frontend: 15 findings
+        # fixed + verified, zero PRs). Fail loud so it gets re-run.
+        if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.area == 'all' || inputs.area == matrix.area) }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          f="fullscan-${{ matrix.area }}-report.md"
+          [ -f "$f" ] || { echo "::error::no verdict file"; exit 1; }
+          branch="opencode/fullscan-${{ matrix.area }}-${{ github.run_number }}"
+          if [ "$(bash .github/scripts/gh-retry.sh pr list --head "$branch" --state open --json number --jq 'length')" -ge 1 ]; then
+            echo "DELIVERED: open fix PR on $branch."
+            exit 0
+          fi
+          url="$(grep -oiE 'https://github\.com/[^[:space:]]+/pull/[0-9]+' "$f" | head -1)"
+          if [ -n "$url" ] && [ "$(bash .github/scripts/gh-retry.sh pr view "$url" --json state --jq .state)" = "OPEN" ]; then
+            echo "DELIVERED: report names open $url."
+            exit 0
+          fi
+          if grep -qiE '^CLEAN([ :]|$)' "$f"; then
+            echo "CLEAN verdict — no PR required."
+            exit 0
+          fi
+          echo "::error::non-CLEAN report but no open fix PR (expected head $branch or an open PR URL in the report). Re-run the scan."
+          exit 1
