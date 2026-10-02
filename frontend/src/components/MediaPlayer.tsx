@@ -272,7 +272,14 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         if (url.startsWith('http')) return url;
         try {
             const backendBase = new URL(API_BASE || window.location.origin, window.location.origin);
-            const prefix = API_BASE ? backendBase.pathname.replace(/\/+$/, '') : '';
+            let prefix = '';
+            if (API_BASE) {
+                let rawPath = backendBase.pathname;
+                while (rawPath.length > 1 && rawPath.endsWith('/')) {
+                    rawPath = rawPath.slice(0, -1);
+                }
+                prefix = rawPath === '/' ? '' : rawPath;
+            }
             const path = url.startsWith('/') ? url : `/${url}`;
             return new URL(`${prefix}${path}`, backendBase.origin).href;
         } catch {

@@ -57,4 +57,22 @@ describe('withToken', () => {
         expect(withToken('https://evil.example/x.mp4', null))
             .toBe('https://evil.example/x.mp4');
     });
+
+    it('places the token query before any fragment so it is actually sent', () => {
+        expect(withToken('http://backend.test:8000/stream/1#ch2', 'tok'))
+            .toBe('http://backend.test:8000/stream/1?token=tok#ch2');
+        expect(withToken('http://backend.test:8000/stream/1?dl=1#ch2', 'tok'))
+            .toBe('http://backend.test:8000/stream/1?dl=1&token=tok#ch2');
+    });
+
+    it('encodes reserved characters in the token (round-trips server-side)', () => {
+        const url = withToken('http://backend.test:8000/stream/1#ch2', 'a b&c');
+        expect(new URL(url).searchParams.get('token')).toBe('a b&c');
+        expect(url.indexOf('#ch2')).toBeGreaterThan(url.indexOf('token='));
+    });
+
+    it('replaces an existing token param instead of duplicating it', () => {
+        expect(withToken('http://backend.test:8000/stream/1?token=dl123', 'jwt123'))
+            .toBe('http://backend.test:8000/stream/1?token=jwt123');
+    });
 });

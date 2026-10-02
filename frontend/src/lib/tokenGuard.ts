@@ -10,7 +10,7 @@ import { API_BASE } from './api';
 export function isOwnBackendUrl(absoluteUrl: string): boolean {
     try {
         const urlOrigin = new URL(absoluteUrl).origin;
-        const backendOrigin = new URL(API_BASE || window.location.origin).origin;
+        const backendOrigin = new URL(API_BASE || window.location.origin, window.location.origin).origin;
         return urlOrigin === backendOrigin;
     } catch {
         return false;
@@ -20,6 +20,11 @@ export function isOwnBackendUrl(absoluteUrl: string): boolean {
 /** Append the access token only for own-backend URLs; otherwise unchanged. */
 export function withToken(base: string, token: string | null): string {
     if (!token || !isOwnBackendUrl(base)) return base;
-    const sep = base.includes('?') ? '&' : '?';
-    return `${base}${sep}token=${token}`;
+    try {
+        const url = new URL(base);
+        url.searchParams.set('token', token);
+        return url.toString();
+    } catch {
+        return base;
+    }
 }
