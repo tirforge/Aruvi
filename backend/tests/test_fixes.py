@@ -100,6 +100,24 @@ def _make_mock_request(token: str):
     return MockRequest(token)
 
 
+def _make_rate_limit_request():
+    """Real Starlette request for slowapi-decorated endpoints."""
+    from starlette.requests import Request
+
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/auth/refresh",
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 80),
+            "scheme": "http",
+        }
+    )
+
+
 class TestAuthRotation:
     """Test refresh token rotation and replay protection."""
 
@@ -139,7 +157,9 @@ class TestAuthRotation:
 
         # First refresh: should succeed and rotate
         req = RefreshTokenRequest(refresh_token=refresh_token_str)
-        result = await refresh_token(req, db=temp_db)
+        result = await refresh_token(
+            _make_rate_limit_request(), body=req, db=temp_db
+        )
 
         assert result.access_token is not None
         assert result.refresh_token is not None
@@ -150,13 +170,17 @@ class TestAuthRotation:
         from fastapi import HTTPException
 
         with pytest.raises(HTTPException) as exc_info:
-            await refresh_token(req2, db=temp_db)
+            await refresh_token(
+                _make_rate_limit_request(), body=req2, db=temp_db
+            )
         assert exc_info.value.status_code == 401
         assert "invalidated" in str(exc_info.value.detail).lower()
 
         # New token should work
         req3 = RefreshTokenRequest(refresh_token=result.refresh_token)
-        result2 = await refresh_token(req3, db=temp_db)
+        result2 = await refresh_token(
+            _make_rate_limit_request(), body=req3, db=temp_db
+        )
         assert result2.access_token is not None
 
         # Exactly one session row exists

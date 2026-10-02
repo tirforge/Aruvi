@@ -346,7 +346,10 @@ async def delete_folder(
         if all_folder_ids:
             file_query = (
                 select(File)
-                .where(File.folder_id.in_(all_folder_ids))
+                .where(
+                    File.folder_id.in_(all_folder_ids),
+                    File.user_id == current_user.id,
+                )
                 .options(defer(File.thumbnail_data))
             )
             file_result = await db.execute(file_query)
@@ -436,7 +439,10 @@ async def batch_delete_folders(
         # Get files to delete from Telegram
         file_query = (
             select(File)
-            .where(File.folder_id.in_(all_affected_folder_ids))
+            .where(
+                File.folder_id.in_(all_affected_folder_ids),
+                File.user_id == current_user.id,
+            )
             .options(defer(File.thumbnail_data))
         )
         file_result = await db.execute(file_query)
