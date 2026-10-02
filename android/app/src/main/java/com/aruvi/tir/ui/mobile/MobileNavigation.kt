@@ -168,8 +168,9 @@ restoreState = true
                                     saveState = true
                                 }
                                 // Distinct folder destinations must not be deduped.
+                                // No restoreState here so the requested folderId/folderName
+                                // applies instead of restoring a saved Home folder.
                                 launchSingleTop = false
-                                restoreState = true
                             }
                         }
                     )

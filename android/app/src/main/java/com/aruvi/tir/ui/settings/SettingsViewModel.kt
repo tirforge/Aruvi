@@ -98,11 +98,12 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 authRepository.logout()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 // Logout still proceeds locally; surface nothing to avoid stuck dialog.
-            } finally {
-                onComplete()
             }
+            onComplete()
         }
     }
 }

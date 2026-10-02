@@ -60,7 +60,7 @@ class SearchViewModel @Inject constructor(
     }
 
     suspend fun loadFolderTree(): List<FolderWithChildren> =
-        foldersRepository.getFolderTree().getOrNull() ?: emptyList()
+        foldersRepository.getFolderTree().getOrThrow()
 
     private fun loadServerUrl() {
         viewModelScope.launch {
@@ -84,7 +84,9 @@ class SearchViewModel @Inject constructor(
             } else {
                 _uiState.value = _uiState.value.copy(
                     results = emptyList(),
-                    hasSearched = false
+                    hasSearched = false,
+                    isSearching = false,
+                    error = null
                 )
             }
         }

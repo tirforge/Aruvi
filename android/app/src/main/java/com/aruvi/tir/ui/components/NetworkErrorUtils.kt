@@ -36,17 +36,7 @@ fun Throwable.toUserFriendlyMessage(): String {
             }
         }
         else -> {
-            sanitizeErrorMessage(this.message) ?: "An unexpected error occurred. Please try again."
+            "An unexpected error occurred. Please try again."
         }
     }
-}
-
-private fun sanitizeErrorMessage(raw: String?): String? {
-    if (raw.isNullOrBlank()) return null
-    // Strip token/secrets and host details that must never reach the UI or screenshots.
-    var msg = raw.replace(Regex("(?i)(token=)[^&\\s]*"), "$1***")
-    msg = msg.replace(Regex("(?i)(bearer\\s+)[A-Za-z0-9._\\-]+"), "$1***")
-    // Avoid leaking full URLs/IPs; keep it short for display.
-    if (msg.length > 200) msg = msg.take(200) + "…"
-    return msg.ifBlank { null }
 }

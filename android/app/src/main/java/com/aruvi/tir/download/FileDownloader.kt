@@ -324,6 +324,34 @@ class FileDownloader(
         try {
             val response = okHttpClient.newCall(requestBuilder.build()).execute()
 
+            if (response.code == 416 && existing > 0) {
+                response.close()
+                if (contentUri != null) {
+                    val descriptor = context.contentResolver.openFileDescriptor(
+                        Uri.parse(contentUri), "w"
+                    )
+                    if (descriptor == null) {
+                        updateTask(task.copy(
+                            status = DownloadStatus.FAILED,
+                            error = "Could not reset download destination"
+                        ))
+                        return false
+                    }
+                    descriptor.use {}
+                } else {
+                    val path = task.localPath
+                    if (path == null) {
+                        updateTask(task.copy(
+                            status = DownloadStatus.FAILED,
+                            error = "Missing download destination"
+                        ))
+                        return false
+                    }
+                    RandomAccessFile(path, "rw").use { it.setLength(0L) }
+                }
+                return downloadAttempt(task)
+            }
+
             if (!response.isSuccessful && response.code != 206) {
                 val retryable = response.code == 408 || response.code == 429 || response.code >= 500
                 response.close()

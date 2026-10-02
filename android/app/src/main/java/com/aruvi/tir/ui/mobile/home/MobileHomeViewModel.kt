@@ -168,7 +168,7 @@ class MobileHomeViewModel @Inject constructor(
     }
 
     suspend fun loadFolderTree(): List<FolderWithChildren> =
-        foldersRepository.getFolderTree().getOrNull() ?: emptyList()
+        foldersRepository.getFolderTree().getOrThrow()
 
     // Selection management
     fun toggleSelection(id: Int, isFolder: Boolean) {
@@ -271,8 +271,14 @@ class MobileHomeViewModel @Inject constructor(
             return
         }
         viewModelScope.launch {
-            foldersRepository.updateFolder(folder.id, parentId = targetFolderId)
-            refresh()
+            val result = foldersRepository.updateFolder(folder.id, parentId = targetFolderId)
+            if (result.isSuccess) {
+                refresh()
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    error = result.exceptionOrNull()?.message ?: "Failed to move folder"
+                )
+            }
         }
     }
 
