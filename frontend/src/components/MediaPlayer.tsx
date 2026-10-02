@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useMemo, useRef, useEffect, useCallback } from 'react';
 import { X, Play, Pause, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, Music, Film, ChevronDown, ChevronUp, Subtitles, Search, Loader2 } from 'lucide-react';
-import { TelegramFile, formatDuration, useUpdateProgress, useFile, getFileDownloadToken, useAccessToken, searchInternetSubtitles, fetchSubtitleContent, SubtitleCandidate, API_BASE } from '../lib/api';
+import { TelegramFile, formatDuration, useUpdateProgress, useFile, getFileDownloadToken, useAccessToken, searchInternetSubtitles, fetchSubtitleContent, SubtitleCandidate } from '../lib/api';
 import { withToken } from '../lib/tokenGuard';
+import { getAbsoluteUrl } from '../lib/resolveUrl';
 import { useAppStore } from '../lib/store';
 import AuthImage from './AuthImage';
 
@@ -267,26 +268,6 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         });
     }, [file.id, isImage]);
 
-    const getAbsoluteUrl = (url: string) => {
-        if (!url) return '';
-        if (url.startsWith('http')) return url;
-        try {
-            const backendBase = new URL(API_BASE || window.location.origin, window.location.origin);
-            let prefix = '';
-            if (API_BASE) {
-                let rawPath = backendBase.pathname;
-                while (rawPath.length > 1 && rawPath.endsWith('/')) {
-                    rawPath = rawPath.slice(0, -1);
-                }
-                prefix = rawPath === '/' ? '' : rawPath;
-            }
-            const path = url.startsWith('/') ? url : `/${url}`;
-            return new URL(`${prefix}${path}`, backendBase.origin).href;
-        } catch {
-            const path = url.startsWith('/') ? url : `/${url}`;
-            return `${window.location.origin}${path}`;
-        }
-    };
 
     // Security: the account JWT must ONLY go to our own backend origin.
     // Appending it to a foreign stream URL would exfiltrate the token to a
