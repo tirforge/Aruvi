@@ -269,7 +269,15 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
     const getAbsoluteUrl = (url: string) => {
         if (!url) return '';
         if (url.startsWith('http')) return url;
-        return `${window.location.origin}${url}`;
+        try {
+            const backendBase = new URL(API_BASE || window.location.origin, window.location.origin);
+            const prefix = API_BASE ? backendBase.pathname.replace(/\/+$/, '') : '';
+            const path = url.startsWith('/') ? url : `/${url}`;
+            return new URL(`${prefix}${path}`, backendBase.origin).href;
+        } catch {
+            const path = url.startsWith('/') ? url : `/${url}`;
+            return `${window.location.origin}${path}`;
+        }
     };
 
     // Security: the account JWT must ONLY go to our own backend origin.
