@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMemo, useRef, useEffect, useCallback } from 'react';
 import { X, Play, Pause, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, Music, Film, ChevronDown, ChevronUp, Subtitles, Search, Loader2 } from 'lucide-react';
 import { TelegramFile, formatDuration, useUpdateProgress, useFile, getFileDownloadToken, useAccessToken, searchInternetSubtitles, fetchSubtitleContent, SubtitleCandidate, API_BASE } from '../lib/api';
+import { withToken } from '../lib/tokenGuard';
 import { useAppStore } from '../lib/store';
 import AuthImage from './AuthImage';
 
@@ -284,20 +285,8 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
     // Appending it to a foreign stream URL would exfiltrate the token to a
     // third party (their server logs / Referer). Same-origin backend URLs
     // keep working exactly as before.
-    const isOwnBackendUrl = (absoluteUrl: string) => {
-        try {
-            const urlOrigin = new URL(absoluteUrl).origin;
-            const backendOrigin = new URL(API_BASE || window.location.origin).origin;
-            return urlOrigin === backendOrigin;
-        } catch {
-            return false;
-        }
-    };
-    const withToken = (base: string, token: string | null) => {
-        if (!token || !isOwnBackendUrl(base)) return base;
-        const sep = base.includes('?') ? '&' : '?';
-        return `${base}${sep}token=${token}`;
-    };
+    // Helpers live in ../lib/tokenGuard so unit tests can cover them
+    // (Sonar requires >=80% coverage on new code).
 
     // Capture the authorized stream URL once per file so a token refresh
     // doesn't change the src and restart playback. Appends the access token
