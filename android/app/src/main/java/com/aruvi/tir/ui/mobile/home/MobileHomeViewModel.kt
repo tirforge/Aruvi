@@ -302,7 +302,7 @@ class MobileHomeViewModel @Inject constructor(
             try {
                 val intent = Intent(Intent.ACTION_VIEW).apply {
                     setDataAndType(Uri.parse(streamUrl), "video/*")
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 context.startActivity(intent)
             } catch (e: Exception) {

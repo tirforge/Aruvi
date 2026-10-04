@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aruvi.tir.data.model.FileItem
 import com.aruvi.tir.data.model.FolderWithChildren
+import com.aruvi.tir.ui.components.toUserFriendlyMessage
 import com.aruvi.tir.data.repository.FilesRepository
 import com.aruvi.tir.data.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -74,13 +75,14 @@ class SearchViewModel @Inject constructor(
      */
     fun onQueryChange(query: String) {
         _uiState.value = _uiState.value.copy(query = query)
-        
+
         // Debounce search
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
             delay(300)
-            if (query.length >= 2) {
-                search(query)
+            val trimmed = query.trim()
+            if (trimmed.length >= 2) {
+                search(trimmed.take(100))
             } else {
                 _uiState.value = _uiState.value.copy(
                     results = emptyList(),
@@ -108,7 +110,7 @@ class SearchViewModel @Inject constructor(
             onFailure = { e ->
                 _uiState.value = _uiState.value.copy(
                     isSearching = false,
-                    error = e.message ?: "Search failed",
+                    error = e.toUserFriendlyMessage(),
                     hasSearched = true
                 )
             }
@@ -184,7 +186,7 @@ class SearchViewModel @Inject constructor(
             try {
                 val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
                     setDataAndType(android.net.Uri.parse(streamUrl), "video/*")
-                    flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 context.startActivity(intent)
             } catch (e: Exception) {

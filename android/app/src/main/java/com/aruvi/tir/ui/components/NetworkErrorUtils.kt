@@ -21,7 +21,12 @@ fun Throwable.toUserFriendlyMessage(): String {
             "Connection timed out. The server might be busy or slow to respond."
         }
         else -> {
-            this.message ?: "An unexpected error occurred. Please try again."
+            val raw = this.message ?: return "An unexpected error occurred. Please try again."
+            // Never surface tokens / auth material that may hide in messages.
+            var safe = raw.replace(Regex("(?i)bearer\\s+[A-Za-z0-9._~-]+"), "Bearer <redacted>")
+            safe = safe.replace(Regex("[?&]token=[^&\\s]+"), "")
+            if (safe.length > 200) safe = safe.take(200) + "…"
+            if (safe.isBlank()) "An unexpected error occurred. Please try again." else safe
         }
     }
 }

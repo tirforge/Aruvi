@@ -52,7 +52,15 @@ class AudioPlaybackService : MediaSessionService() {
         // Must call startForeground() within 5 seconds of startForegroundService()
         ensureNotificationChannel()
         val notification = buildNotification()
-        startForeground(NOTIFICATION_ID, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
 
         return super.onStartCommand(intent, flags, startId)
     }

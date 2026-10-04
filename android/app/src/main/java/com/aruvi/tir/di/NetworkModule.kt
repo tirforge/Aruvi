@@ -13,7 +13,6 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
-import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -79,9 +78,10 @@ object NetworkModule {
     ): OkHttpClient {
         val loggingInterceptor = HttpLoggingInterceptor().apply {
             // BODY logging writes every JWT, login code and response body to
-            // logcat — release builds must stay silent.
+            // logcat (and buffers full bodies/images into memory — OOM via
+            // the shared Coil client). HEADERS is the loudest safe level.
             level = if (BuildConfig.DEBUG) {
-                HttpLoggingInterceptor.Level.BODY
+                HttpLoggingInterceptor.Level.HEADERS
             } else {
                 HttpLoggingInterceptor.Level.NONE
             }
@@ -107,17 +107,19 @@ object NetworkModule {
         gson: Gson,
         settingsRepository: SettingsRepository
     ): Retrofit {
-        // One startup read to seed the in-memory cache the interceptor uses;
-        // the base URL below is only a valid-URL placeholder — every request
+        // The base URL below is only a valid-URL placeholder — every request
         // is rewritten to the CURRENT saved server by DynamicBaseUrlInterceptor,
-        // so changing servers applies without an app restart.
-        val serverUrl = try {
-            runBlocking { settingsRepository.getServerUrl() }
-        } catch (e: Exception) {
-            BuildConfig.DEFAULT_SERVER_URL.ifBlank { "http://localhost:7680" }
+        // so changing servers applies without an app restart. Never block
+        // startup on a DataStore read here (ANR); the interceptor's
+        // in-memory cache is seeded on first SettingsRepository read.
+        val configured = BuildConfig.DEFAULT_SERVER_URL.ifBlank { "http://localhost:7680" }
+        val parsed = try {
+            okhttp3.HttpUrl.Companion.toHttpUrlOrNull(configured.trim())
+        } catch (_: Exception) {
+            null
         }
-        val baseUrl = if (serverUrl.startsWith("http://") || serverUrl.startsWith("https://")) {
-            if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/"
+        val baseUrl = if (parsed != null && parsed.host.isNotBlank()) {
+            parsed.newBuilder().encodedPath("/").query(null).fragment(null).build().toString()
         } else {
             "http://localhost:7680/"
         }
