@@ -173,25 +173,37 @@ function FolderTreeItem({ folder, selectedId, onSelect, depth }: {
 
     return (
         <div>
-            <button
-                onClick={() => onSelect(folder.id)}
+            {/* Row is a plain div with two sibling buttons: an interactive
+                toggle nested inside the select <button> is invalid HTML and
+                unreachable by keyboard, so expand and select are peers. */}
+            <div
                 className={`w-full flex items-center gap-2 px-4 py-2 hover:bg-dark-700 transition-colors ${selectedId === folder.id ? 'bg-primary-600/20 text-primary-400' : ''
                     }`}
                 style={{ paddingLeft: `${16 + depth * 16}px` }}
             >
-                {hasChildren && (
-                    <div
-                        onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
-                        className="p-0.5"
+                {hasChildren ? (
+                    <button
+                        type="button"
+                        onClick={() => setExpanded(!expanded)}
+                        aria-expanded={expanded}
+                        aria-label={expanded ? `Collapse ${folder.name}` : `Expand ${folder.name}`}
+                        className="p-0.5 rounded hover:bg-white/10 transition-colors shrink-0"
                     >
                         <ChevronRight className={`w-3 h-3 transition-transform ${expanded ? 'rotate-90' : ''}`} />
-                    </div>
+                    </button>
+                ) : (
+                    <div className="w-4 shrink-0" aria-hidden="true" />
                 )}
-                {!hasChildren && <div className="w-4" />}
-                <FolderIcon className="w-4 h-4 text-primary-400" />
-                <span className="truncate">{folder.name}</span>
-                <span className="text-xs text-dark-500 ml-auto">{folder.file_count}</span>
-            </button>
+                <button
+                    type="button"
+                    onClick={() => onSelect(folder.id)}
+                    className="flex items-center gap-2 flex-1 min-w-0 text-left"
+                >
+                    <FolderIcon className="w-4 h-4 text-primary-400 shrink-0" />
+                    <span className="truncate">{folder.name}</span>
+                    <span className="text-xs text-dark-500 ml-auto shrink-0">{folder.file_count}</span>
+                </button>
+            </div>
 
             {expanded && hasChildren && folder.children?.map((child) => (
                 <FolderTreeItem
