@@ -1,5 +1,7 @@
 # Fullscan: android — report (2026-10-04)
 
+Fix PR: https://github.com/tirforge/Aruvi/pull/74
+
 Branch: `opencode/fullscan-android-22`
 Scope (strict): only `android/` — no other top-level dirs, `.github/`, or vendored/build output touched.
 
