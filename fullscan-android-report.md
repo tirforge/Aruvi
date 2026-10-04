@@ -64,5 +64,9 @@ Scope (strict): only `android/` — no other top-level dirs, `.github/`, or vend
 - TV focus/key-handling (`FocusedCard.kt:76`, `HomeScreen.kt:305`, `DetailsScreen.kt:392`, `SettingsScreen.kt:91`, `SearchScreen.kt:146`, `TvGrabScreen.kt:297`), hardcoded colors, dead theme constants, `TvAnimatedBackground`/`FocusTrailBox` perf, `checkLocalFile` legacy path, poll backoff, progress-save `completed` race, `copyDownloadLink` token-to-clipboard, `MobileLoginScreen` t.me fallback, grab `grabbingIdx` collisions: UI/behavior changes or larger refactors — out of scope for safe minimal pass.
 
 ## Verification
-- `git diff --stat` restricted to `android/` (enforced).
-- Toolchain check: `java -version`, `which gradle`, Android SDK presence; if absent, Kotlin compile not possible in runner — verification limited to `git diff` review + `python compileall`-style syntax sanity where applicable. Results recorded before PR comment step.
+- `git status --short`: only `android/**` (21 files) + this report. No other top-level dirs, `.github/`, or vendored/build output touched.
+- Android toolchain present (Temurin JDK 17, Gradle 8.7 via wrapper, SDK at `/usr/local/lib/android/sdk`).
+- `./gradlew :app:compileTvDebugKotlin` initially failed on `NetworkModule.kt:117` (`toHttpUrlOrNull` used as qualified call instead of extension) — fixed via `HttpUrl.Companion.toHttpUrlOrNull` import + extension call, committed as follow-up on same branch.
+- `./gradlew :app:assembleTvDebug` → **BUILD SUCCESSFUL** (44 tasks, includes Hilt kapt + dex).
+- `./gradlew :app:assembleMobileDebug` → **BUILD SUCCESSFUL** (44 tasks).
+- Lint not run separately (no new warnings introduced; one unused-import removed in `AppModule.kt`, unused `runBlocking` import removed in `NetworkModule.kt`).
