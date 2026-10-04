@@ -107,7 +107,7 @@ def get_cpu() -> float:
                 du = usage - pu
                 _prev_cpu = (usage, now)
                 if dt > 0:
-                    return round(du / 1_000_000 / dt * 100 / cores, 1)
+                    return max(0.0, round(du / 1_000_000 / dt * 100 / cores, 1))
                 return 0.0
             _prev_cpu = (usage, now)
             return 0.0
@@ -116,13 +116,21 @@ def get_cpu() -> float:
 
 
 def _parse_mem_env(val: str) -> int:
-    val = val.strip().upper()
-    for suffix in ["GIB", "GI", "GB", "G", "MIB", "MI", "MB", "M"]:
-        if val.endswith(suffix):
-            return int(
-                float(val[: -len(suffix)]) * (1024**3 if suffix[0] == "G" else 1024**2)
-            )
-    return int(val)
+    try:
+        val = val.strip().upper()
+    except (AttributeError, ValueError):
+        return 16 * 1024**3
+    if not val:
+        return 16 * 1024**3
+    try:
+        for suffix in ["GIB", "GI", "GB", "G", "MIB", "MI", "MB", "M"]:
+            if val.endswith(suffix):
+                return int(
+                    float(val[: -len(suffix)]) * (1024**3 if suffix[0] == "G" else 1024**2)
+                )
+        return int(val)
+    except ValueError:
+        return 16 * 1024**3
 
 
 def _cgroup_memory_max() -> int | None:

@@ -559,6 +559,10 @@ async def get_thumbnail(
                 )
         else:  # YH
             thumb_bytes = await _download_thumb(message, thumbnail)  # KJ
+            if thumb_bytes is None:
+                raise HTTPException(
+                    status_code=404, detail="Thumbnail not found in message"
+                )
             data = (
                 thumb_bytes.getvalue()
                 if hasattr(thumb_bytes, "getvalue")
@@ -580,10 +584,14 @@ async def get_thumbnail(
 
 def _detect_image_mime(data: bytes) -> str:
     """Detect image MIME type from magic bytes."""
+    if not data:
+        return "image/jpeg"
     if data[:4] == b"\x89PNG":
         return "image/png"
     if data[:2] == b"\xff\xd8":
         return "image/jpeg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
     if data[:2] == b"BM":
         return "image/bmp"
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
