@@ -13,6 +13,7 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -114,7 +115,7 @@ object NetworkModule {
         // in-memory cache is seeded on first SettingsRepository read.
         val configured = BuildConfig.DEFAULT_SERVER_URL.ifBlank { "http://localhost:7680" }
         val parsed = try {
-            okhttp3.HttpUrl.Companion.toHttpUrlOrNull(configured.trim())
+            configured.trim().toHttpUrlOrNull()
         } catch (_: Exception) {
             null
         }
