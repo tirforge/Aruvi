@@ -7,6 +7,7 @@ import { useGrabSearch, useGrabSelect, formatFileSize, GrabSearchResult, GrabSel
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useAppStore } from '../lib/store';
+import { useFocusReturn } from '../lib/useFocusReturn';
 
 const MIME_BY_EXT: Record<string, string> = {
   mkv: 'video/x-matroska',
@@ -14,6 +15,11 @@ const MIME_BY_EXT: Record<string, string> = {
   mov: 'video/quicktime',
   webm: 'video/webm',
   mp4: 'video/mp4',
+};
+
+// Module scope: needed by both GrabSearch and the GrabbedModal child.
+const getVlcUrl = (url: string) => {
+  return 'vlc://' + url;
 };
 
 export default function GrabSearch() {
@@ -40,15 +46,10 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
   const searchMutation = useGrabSearch();
   const selectMutation = useGrabSelect();
 
-  // Close modal on Escape; reset copied state on open/close.
+  // Reset copied state whenever the modal opens/closes (Escape close lives
+  // in GrabbedModal, which also returns focus to the opener on unmount).
   useEffect(() => {
     setCopied(false);
-    if (!grabbed) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setGrabbed(null);
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
   }, [grabbed]);
 
   // Clear the copy-check timer on unmount.
@@ -161,10 +162,6 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
     });
     setGrabbed(null);
   }, [grabbed, setPreviewFile]);
-
-  const getVlcUrl = (url: string) => {
-    return 'vlc://' + url;
-  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !searchMutation.isPending) handleSearch();
@@ -341,11 +338,47 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
         </div>
       )}
 
-      {/* Watch Now Modal */}
+      {/* Watch Now Modal (own component so useFocusReturn restores focus to
+          the Grab button on close — like every other modal in the app) */}
       {grabbed && (
+        <GrabbedModal
+          result={grabbed}
+          copied={copied}
+          onClose={() => setGrabbed(null)}
+          onCopyUrl={handleCopyUrl}
+          onWatchNow={handleWatchNow}
+        />
+      )}
+    </div>
+  );
+}
+
+function GrabbedModal({ result: grabbed, copied, onClose, onCopyUrl, onWatchNow }: {
+  result: GrabSelectResponse;
+  copied: boolean;
+  onClose: () => void;
+  onCopyUrl: () => void;
+  onWatchNow: () => void;
+}) {
+  // Return focus to the opener (Grab button) on close. Safe when the result
+  // list re-rendered underneath — focus() on a detached node just no-ops.
+  useFocusReturn();
+  // Close on Escape; the effect owns the listener so FileBrowser's global
+  // handler can't double-close (same pattern as the other modals).
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+  return (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"
-          onClick={() => setGrabbed(null)}
+          onClick={onClose}
         >
           <div
             className="glass-panel w-full max-w-lg overflow-hidden animate-scale-in"
@@ -358,7 +391,7 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
                   Ready to Watch
                 </h3>
                 <button
-                  onClick={() => setGrabbed(null)}
+                  onClick={onClose}
                   className="p-1 text-dark-500 hover:text-white transition-colors"
                 >
                   <X className="w-5 h-5" />
@@ -376,7 +409,7 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
                     {grabbed.stream_url}
                   </code>
                   <button
-                    onClick={handleCopyUrl}
+                    onClick={onCopyUrl}
                     className="btn-icon"
                     title="Copy URL"
                   >
@@ -387,7 +420,7 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
 
               <div className="flex gap-3">
                 <button
-                  onClick={handleWatchNow}
+                  onClick={onWatchNow}
                   className="btn-primary flex-1 flex items-center justify-center gap-2 py-3"
                 >
                   <Play className="w-4 h-4" />
@@ -406,7 +439,5 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
             </div>
           </div>
         </div>
-      )}
-    </div>
   );
 }

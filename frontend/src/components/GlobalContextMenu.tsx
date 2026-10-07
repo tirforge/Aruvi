@@ -13,6 +13,7 @@ export default function GlobalContextMenu() {
     const setDeleteConfirm = useAppStore((s) => s.setDeleteConfirm);
     const setRenameFile = useAppStore((s) => s.setRenameFile);
     const setRenameFolder = useAppStore((s) => s.setRenameFolder);
+    const addToast = useAppStore((s) => s.addToast);
     const selectedFileIds = useAppStore((s) => s.selectedFileIds);
     const selectedFolderIds = useAppStore((s) => s.selectedFolderIds);
     const selectedFiles = useAppStore((s) => s.selectedFiles);
@@ -26,6 +27,15 @@ export default function GlobalContextMenu() {
     const selectedFolders = folders?.filter(f => selectedFolderIds.has(f.id)) || [];
     const menuRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
+    // One timer drives the "✓ Copied!" reset: without the ref, rapid copies
+    // stacked timers and an early one cleared a newer confirmation; without
+    // the unmount cleanup the timer could setState on an unmounted menu.
+    const copyTimerRef = useRef<number | null>(null);
+    useEffect(() => {
+        return () => {
+            if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+        };
+    }, []);
     // In-flight guard for the async share/link actions. Without it the menu
     // stays open during the POST and rapid clicks mint duplicate share links
     // (or duplicate revokes). The menu intentionally stays open for the
@@ -101,9 +111,14 @@ export default function GlobalContextMenu() {
         try {
             await navigator.clipboard.writeText(text);
             setCopiedId(id);
-            setTimeout(() => setCopiedId(null), 2000);
+            if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+            copyTimerRef.current = window.setTimeout(() => {
+                setCopiedId(null);
+                copyTimerRef.current = null;
+            }, 2000);
         } catch (err) {
             console.error('Failed to copy:', err);
+            addToast('Copy failed (browser blocked clipboard)', 'error');
         }
     };
 
@@ -220,12 +235,14 @@ export default function GlobalContextMenu() {
                                             void (async () => {
                                                 try {
                                                     const baseUrl = `${window.location.protocol}//${window.location.host}`;
+                                                    const sep = f.stream_url.includes('?') ? '&' : '?';
                                                     const url = f.public_stream_url
                                                         ? `${baseUrl}${f.public_stream_url}`
-                                                        : `${baseUrl}${f.stream_url}?token=${await getFileDownloadToken(f.id)}`;
-                                                    window.open(`vlc://${url}`, '_blank');
+                                                        : `${baseUrl}${f.stream_url}${sep}token=${await getFileDownloadToken(f.id)}`;
+                                                    window.open(`vlc://${url}`, '_blank', 'noopener,noreferrer');
                                                 } catch (err) {
                                                     console.error('Failed to mint stream token:', err);
+                                                    addToast('Could not open in VLC', 'error');
                                                 }
                                             })();
                                         }}>
@@ -239,12 +256,15 @@ export default function GlobalContextMenu() {
                                             void (async () => {
                                                 try {
                                                     const baseUrl = `${window.location.protocol}//${window.location.host}`;
+                                                    const sep = f.stream_url.includes('?') ? '&' : '?';
                                                     const url = f.public_stream_url
                                                         ? `${baseUrl}${f.public_stream_url}`
-                                                        : `${baseUrl}${f.stream_url}?token=${await getFileDownloadToken(f.id)}`;
+                                                        : `${baseUrl}${f.stream_url}${sep}token=${await getFileDownloadToken(f.id)}`;
                                                     await navigator.clipboard.writeText(url);
+                                                    addToast('Stream URL copied', 'success');
                                                 } catch (err) {
                                                     console.error('Failed to mint stream token:', err);
+                                                    addToast('Could not copy stream URL', 'error');
                                                 }
                                             })();
                                         }}>

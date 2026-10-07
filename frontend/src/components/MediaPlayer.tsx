@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMemo, useRef, useEffect, useCallback } from 'react';
 import { X, Play, Pause, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, Music, Film, ChevronDown, ChevronUp, Subtitles, Search, Loader2 } from 'lucide-react';
-import { TelegramFile, formatDuration, useUpdateProgress, useFile, getFileDownloadToken, useAccessToken, searchInternetSubtitles, fetchSubtitleContent, SubtitleCandidate } from '../lib/api';
+import { TelegramFile, formatDuration, useUpdateProgress, useFile, getFileDownloadToken, useAccessToken, searchInternetSubtitles, fetchSubtitleContent, SubtitleCandidate, API_BASE, api } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import AuthImage from './AuthImage';
 
@@ -162,6 +162,9 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         return vtt;
     };
 
+    // Local subtitle files are read fully into memory + kept as blob URLs —
+    // cap the size so a stray multi-MB pick can't balloon the tab's memory.
+    const MAX_SUBTITLE_BYTES = 5 * 1024 * 1024; // 5MB limit
     const handleSubtitleFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         // Reset so picking the SAME file again still fires a change event
@@ -169,11 +172,16 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         if (!file) return;
         // MicroDVD (.sub) is not supported — the SRT→VTT converter would mangle it
         if (file.name.toLowerCase().endsWith('.sub')) return;
+        if (file.size > MAX_SUBTITLE_BYTES) {
+            addToast('Subtitle file is too large (max 5 MB)', 'error');
+            return;
+        }
         const reader = new FileReader();
         reader.onload = () => {
             let text = reader.result as string;
-            // Convert SRT to VTT if needed
-            if (file.name.endsWith('.srt')) {
+            // Convert SRT to VTT if needed (case-insensitive: FILE.SRT skipped
+            // conversion before and reached the engine as mislabeled VTT)
+            if (file.name.toLowerCase().endsWith('.srt')) {
                 text = srtToVtt(text);
             }
             const blob = new Blob([text], { type: 'text/vtt' });
@@ -266,10 +274,18 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         });
     }, [file.id, isImage]);
 
+    // Resolve backend paths against API_BASE (split frontend/backend deploys
+    // via __BACKEND_URL__) and tolerate relative paths missing the leading
+    // slash — the same shape as AuthImage's resolver. Resolving against the
+    // frontend origin instead 404s every stream/image/VLC URL on split deploys.
     const getAbsoluteUrl = (url: string) => {
         if (!url) return '';
-        if (url.startsWith('http')) return url;
-        return `${window.location.origin}${url}`;
+        if (/^https?:\/\//i.test(url)) return url;
+        try {
+            return new URL(url, API_BASE || window.location.origin).href;
+        } catch {
+            return `${window.location.origin}/${url.replace(/^\/+/, '')}`;
+        }
     };
 
     // Capture the authorized stream URL once per file so a token refresh
@@ -281,7 +297,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         const token = localStorage.getItem('access_token');
         const base = getAbsoluteUrl(file.stream_url || '');
         const sep = base.includes('?') ? '&' : '?';
-        return `${base}${sep}token=${token}`;
+        return `${base}${sep}token=${encodeURIComponent(token || '')}`;
     }, [file.id, file.stream_url]);
     // Still images don't risk restarting playback, so use the reactive token:
     // if it rotates mid-viewing, the <img> re-renders with a fresh token instead
@@ -291,7 +307,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         if (!isImage) return authorizedStreamUrl;
         const base = getAbsoluteUrl(file.stream_url || '');
         const sep = base.includes('?') ? '&' : '?';
-        return `${base}${sep}token=${reactiveToken}`;
+        return `${base}${sep}token=${encodeURIComponent(reactiveToken)}`;
     }, [file.stream_url, file.id, isImage, reactiveToken, authorizedStreamUrl]);
     const externalUrl = getAbsoluteUrl((extendedFile || file).public_stream_url || '') || authorizedStreamUrl;
     const vlcUrl = `vlc://${externalUrl}`;
@@ -317,7 +333,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         // would replay the stale token the rotation just invalidated.
         const base = getAbsoluteUrl(file.stream_url || '');
         const sep = base.includes('?') ? '&' : '?';
-        const freshUrl = `${base}${sep}token=${reactiveToken}`;
+        const freshUrl = `${base}${sep}token=${encodeURIComponent(reactiveToken)}`;
         el.source({
             video: { src: freshUrl, type: 'video/mp4' },
         });
@@ -341,7 +357,13 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         const win = window.open('', '_blank');
         try {
             const token = await getFileDownloadToken(file.id);
-            const dlUrl = `${window.location.protocol}//${window.location.host}/api/stream/dl?id=${file.id}&token=${encodeURIComponent(token)}`;
+            // Respect split frontend/backend deploys: the /api prefix lives on
+            // the backend origin (API_BASE), not necessarily the frontend one.
+            // Same construction as GlobalContextMenu's download handler.
+            const dlPath = `${api.defaults.baseURL}/stream/dl?id=${file.id}&token=${encodeURIComponent(token)}`;
+            const dlUrl = dlPath.startsWith('http')
+                ? dlPath
+                : `${window.location.protocol}//${window.location.host}${dlPath}`;
             if (win) win.location.href = dlUrl;
             else window.location.href = dlUrl;
         } catch (err) {
