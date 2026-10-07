@@ -26,13 +26,15 @@ fun ContentRow(
     useLargeCards: Boolean = false
 ) {
     Column(modifier = modifier) {
-        // Row title
-        Text(
-            text = title,
-            style = MaterialTheme.typography.headlineSmall,
-            color = TVTextPrimary,
-            modifier = Modifier.padding(start = 48.dp, bottom = 16.dp)
-        )
+        // Row title (skip empty titles so no blank/announced gap is laid out)
+        if (title.isNotEmpty()) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineSmall,
+                color = TVTextPrimary,
+                modifier = Modifier.padding(start = 48.dp, bottom = 16.dp)
+            )
+        }
 
         // Horizontal scrollable items
         LazyRow(

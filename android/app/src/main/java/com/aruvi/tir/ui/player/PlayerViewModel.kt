@@ -352,7 +352,6 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
     // must be removable or each playback session leaks one listener (and the
     // ViewModel it captures) into the shared player forever.
     private var exoPlayerListener: Player.Listener? = null
-    private var castExecutor: java.util.concurrent.ExecutorService? = null
 
     private val castPlayerListener = object : Player.Listener {
         override fun onDeviceInfoChanged(deviceInfo: DeviceInfo) {
@@ -685,7 +684,13 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
 
     @OptIn(UnstableApi::class)
     private fun getTrackName(format: Format, index: Int, type: String): String {
-        val lang = format.language?.let { java.util.Locale(it).displayLanguage.takeIf { b -> b.isNotBlank() } }
+        val lang = format.language?.let { tag ->
+            try {
+                java.util.Locale.forLanguageTag(tag).displayLanguage.takeIf { it.isNotBlank() }
+            } catch (_: Exception) {
+                null
+            }
+        }
         val rawLabel = format.label?.trim()?.takeIf { it.isNotBlank() }
         // Rips often abuse label for site/encoder: filter website/rip junk, keep useful codec tags
         val label = rawLabel?.takeIf {
@@ -1110,7 +1115,7 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
 
             val intent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(Uri.parse(streamUrl), "video/*")
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
 
             if (context.packageManager.resolveActivity(intent, 0) == null) {
@@ -1354,7 +1359,8 @@ val streamUrl = "$serverUrl/api/stream/$currentFileId"
                 // Never swallow cast-load failures silently: a rejected load
                 // leaves the receiver idle ("no media selected") with no clue
                 // why. Surface it in logcat under the cast tag.
-                android.util.Log.w("PlayerViewModel", "castToDevice load failed url=$url", e)
+                // Never log the URL: it may carry a ?token= JWT for the receiver.
+                android.util.Log.w("PlayerViewModel", "castToDevice load failed fileId=$currentFileId", e)
             }
         }
     }
@@ -1653,10 +1659,6 @@ while (isActive) {
             try { exoPlayer.removeListener(it) } catch (_: Throwable) {}
         }
         exoPlayerListener = null
-        castExecutor?.let {
-            try { it.shutdown() } catch (_: Throwable) {}
-        }
-        castExecutor = null
         castPlayer?.let {
             try { it.removeListener(castPlayerListener) } catch (_: Throwable) {}
             try { it.release() } catch (_: Throwable) {}

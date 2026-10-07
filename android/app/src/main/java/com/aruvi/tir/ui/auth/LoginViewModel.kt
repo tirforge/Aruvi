@@ -52,6 +52,8 @@ class LoginViewModel @Inject constructor(
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
 
     private var pollingJob: kotlinx.coroutines.Job? = null
+    private var fetchJob: kotlinx.coroutines.Job? = null
+    private var genJob: kotlinx.coroutines.Job? = null
 
     init {
         loadServerUrl()
@@ -78,7 +80,10 @@ class LoginViewModel @Inject constructor(
             fetchBotInfo()
         }
     }    fun fetchBotInfo() {
-        viewModelScope.launch {
+        // Cancel-first: updateServerUrl fires per keystroke, so overlapping
+        // fetches would race the bot fields. No timing change.
+        fetchJob?.cancel()
+        fetchJob = viewModelScope.launch {
             authRepository.getBotInfo().onSuccess { botInfo ->
                 val username = botInfo.username.takeIf { it.isNotBlank() }
                     ?: _uiState.value.botUsername
@@ -129,8 +134,9 @@ class LoginViewModel @Inject constructor(
 
     fun generateLoginCode() {
         stopPolling()
-
-        viewModelScope.launch {
+        // Guard rapid taps: concurrent generators would race startPolling.
+        if (genJob?.isActive == true) return
+        genJob = viewModelScope.launch {
             settingsRepository.setServerUrl(_uiState.value.serverUrl)
 
             _uiState.value = _uiState.value.copy(
@@ -249,6 +255,8 @@ class LoginViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         stopPolling()
+        fetchJob?.cancel()
+        genJob?.cancel()
     }
 
     private fun generateQrCode(content: String, size: Int): Bitmap {

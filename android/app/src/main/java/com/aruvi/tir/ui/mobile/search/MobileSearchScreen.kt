@@ -28,7 +28,6 @@ import com.aruvi.tir.ui.search.SearchViewModel
 import com.aruvi.tir.ui.theme.*
 import com.aruvi.tir.ui.mobile.components.*
 import com.aruvi.tir.data.model.FileItem
-import android.util.Log
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
@@ -83,7 +82,6 @@ fun MobileSearchScreen(
                 TextField(
             value = uiState.query,
             onValueChange = {
-                if (com.aruvi.tir.BuildConfig.DEBUG) Log.d("MobileSearchScreen", "Query changed: $it")
                 viewModel.onQueryChange(it)
             },
             placeholder = { Text("Search files...", color = MobileTextSecondary) },
@@ -127,7 +125,6 @@ fun MobileSearchScreen(
                 }
             }
         } else {
-            if (com.aruvi.tir.BuildConfig.DEBUG) Log.d("MobileSearchScreen", "Showing ${uiState.results.size} results")
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 150.dp),
                 contentPadding = PaddingValues(16.dp),
