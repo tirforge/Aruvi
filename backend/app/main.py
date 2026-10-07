@@ -10,7 +10,10 @@ import mimetypes
 import os
 from contextlib import asynccontextmanager
 
-_libc = ctypes.CDLL("libc.so.6")
+try:
+    _libc = ctypes.CDLL("libc.so.6")
+except OSError:
+    _libc = None
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -118,7 +121,11 @@ async def _oom_guard_loop():
 
     def _gc_and_trim():
         gc.collect()
-        _libc.malloc_trim(0)
+        if _libc is not None:
+            try:
+                _libc.malloc_trim(0)
+            except Exception:
+                pass
 
     while True:
         try:
@@ -378,7 +385,9 @@ async def api_clear_logs(request: Request):
 
 @app.get("/status", include_in_schema=False)
 async def status_page():
-    return FileResponse("app/static/status.html")
+    if os.path.exists("app/static/status.html"):
+        return FileResponse("app/static/status.html")
+    return JSONResponse(status_code=404, content={"detail": "Not found"})
 
 
 if os.path.exists("app/static/assets"):
@@ -396,7 +405,9 @@ async def index():
 
 @app.get("/download", include_in_schema=False)
 async def download_page():
-    return FileResponse("app/static/download.html", headers=NO_CACHE_HEADERS)
+    if os.path.exists("app/static/download.html"):
+        return FileResponse("app/static/download.html", headers=NO_CACHE_HEADERS)
+    return JSONResponse(status_code=404, content={"detail": "Not found"})
 
 
 # Servable static files, walked once at startup: {url path: abs file path}.

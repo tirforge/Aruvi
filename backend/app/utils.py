@@ -1,6 +1,9 @@
 import asyncio
 import hmac
+import logging
 import re
+
+_log = logging.getLogger(__name__)
 
 
 def bearer_token_matches(auth_header: str, expected: str) -> bool:
@@ -17,10 +20,19 @@ def bearer_token_matches(auth_header: str, expected: str) -> bool:
 _background_tasks: set[asyncio.Task] = set()
 
 
+def _log_background_result(task: asyncio.Task) -> None:
+    _background_tasks.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        _log.error("Background task failed: %r", exc)
+
+
 def spawn_background(coro) -> asyncio.Task:
     task = asyncio.create_task(coro)
     _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    task.add_done_callback(_log_background_result)
     return task
 
 

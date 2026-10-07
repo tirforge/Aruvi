@@ -47,7 +47,7 @@ class AdminStats(BaseModel):
 
 
 class FolderBase(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=255)
     parent_id: Optional[int] = None
 
 
@@ -56,7 +56,7 @@ class FolderCreate(FolderBase):
 
 
 class FolderUpdate(BaseModel):
-    name: Optional[str] = None
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     parent_id: Optional[int] = None
 
 
@@ -78,25 +78,25 @@ class FolderWithChildren(FolderResponse):
 
 
 class FileBase(BaseModel):
-    file_name: str
-    file_size: int
-    mime_type: Optional[str] = None
-    file_type: str  # video, audio, document, image
-    duration: Optional[int] = None
-    width: Optional[int] = None
-    height: Optional[int] = None
+    file_name: str = Field(min_length=1, max_length=500)
+    file_size: int = Field(ge=0)
+    mime_type: Optional[str] = Field(default=None, max_length=100)
+    file_type: str = Field(max_length=50)  # video, audio, document, image
+    duration: Optional[int] = Field(default=None, ge=0)
+    width: Optional[int] = Field(default=None, ge=0)
+    height: Optional[int] = Field(default=None, ge=0)
 
 
 class FileCreate(FileBase):
-    file_id: str
-    file_unique_id: str
+    file_id: str = Field(max_length=500)
+    file_unique_id: str = Field(max_length=255)
     channel_message_id: int
-    thumbnail_file_id: Optional[str] = None
+    thumbnail_file_id: Optional[str] = Field(default=None, max_length=500)
     folder_id: Optional[int] = None
 
 
 class FileUpdate(BaseModel):
-    file_name: Optional[str] = None
+    file_name: Optional[str] = Field(default=None, min_length=1, max_length=500)
     folder_id: Optional[int] = None
 
 
@@ -129,14 +129,14 @@ class FileListResponse(BaseModel):
 
 
 class WatchProgressBase(BaseModel):
-    position: int
-    duration: Optional[int] = None
+    position: int = Field(ge=0)
+    duration: Optional[int] = Field(default=None, ge=0)
     completed: bool = False
 
 
 class WatchProgressUpdate(BaseModel):  # QB
-    position: int  # PT
-    duration: Optional[int] = None  # XB
+    position: int = Field(ge=0)  # PT
+    duration: Optional[int] = Field(default=None, ge=0)  # XB
     completed: Optional[bool] = None  # QZ
 
     model_config = ConfigDict(extra="ignore")  # Android client sends extra fields
@@ -144,7 +144,13 @@ class WatchProgressUpdate(BaseModel):  # QB
     @field_validator("position", "duration", mode="before")
     @classmethod
     def _int_from_float(cls, v):
-        return int(v) if isinstance(v, float) else v
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, float):
+            if v != v or v in (float("inf"), float("-inf")):
+                raise ValueError("must be a finite number")
+            return int(v)
+        return v
 
 
 class WatchProgressResponse(WatchProgressBase):
@@ -209,7 +215,7 @@ class BotInfoResponse(BaseModel):
 
 
 class BatchMoveRequest(BaseModel):
-    ids: list[int]
+    ids: list[int] = Field(max_length=500)
     folder_id: Optional[int] = None
 
 
