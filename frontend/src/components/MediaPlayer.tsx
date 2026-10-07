@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useMemo, useRef, useEffect, useCallback } from 'react';
 import { X, Play, Pause, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, Music, Film, ChevronDown, ChevronUp, Subtitles, Search, Loader2 } from 'lucide-react';
 import { TelegramFile, formatDuration, useUpdateProgress, useFile, getFileDownloadToken, useAccessToken, searchInternetSubtitles, fetchSubtitleContent, SubtitleCandidate } from '../lib/api';
+import { withToken } from '../lib/tokenGuard';
+import { getAbsoluteUrl } from '../lib/resolveUrl';
 import { useAppStore } from '../lib/store';
 import AuthImage from './AuthImage';
 
@@ -266,11 +268,13 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         });
     }, [file.id, isImage]);
 
-    const getAbsoluteUrl = (url: string) => {
-        if (!url) return '';
-        if (url.startsWith('http')) return url;
-        return `${window.location.origin}${url}`;
-    };
+
+    // Security: the account JWT must ONLY go to our own backend origin.
+    // Appending it to a foreign stream URL would exfiltrate the token to a
+    // third party (their server logs / Referer). Same-origin backend URLs
+    // keep working exactly as before.
+    // Helpers live in ../lib/tokenGuard so unit tests can cover them
+    // (Sonar requires >=80% coverage on new code).
 
     // Capture the authorized stream URL once per file so a token refresh
     // doesn't change the src and restart playback. Appends the access token
@@ -280,8 +284,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
     const authorizedStreamUrl = useMemo(() => {
         const token = localStorage.getItem('access_token');
         const base = getAbsoluteUrl(file.stream_url || '');
-        const sep = base.includes('?') ? '&' : '?';
-        return `${base}${sep}token=${token}`;
+        return withToken(base, token);
     }, [file.id, file.stream_url]);
     // Still images don't risk restarting playback, so use the reactive token:
     // if it rotates mid-viewing, the <img> re-renders with a fresh token instead
@@ -290,8 +293,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
     const imageUrl = useMemo(() => {
         if (!isImage) return authorizedStreamUrl;
         const base = getAbsoluteUrl(file.stream_url || '');
-        const sep = base.includes('?') ? '&' : '?';
-        return `${base}${sep}token=${reactiveToken}`;
+        return withToken(base, reactiveToken);
     }, [file.stream_url, file.id, isImage, reactiveToken, authorizedStreamUrl]);
     const externalUrl = getAbsoluteUrl((extendedFile || file).public_stream_url || '') || authorizedStreamUrl;
     const vlcUrl = `vlc://${externalUrl}`;
@@ -316,8 +318,7 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         // deliberately frozen at mount (stable src); re-sourcing with it
         // would replay the stale token the rotation just invalidated.
         const base = getAbsoluteUrl(file.stream_url || '');
-        const sep = base.includes('?') ? '&' : '?';
-        const freshUrl = `${base}${sep}token=${reactiveToken}`;
+        const freshUrl = withToken(base, reactiveToken);
         el.source({
             video: { src: freshUrl, type: 'video/mp4' },
         });
