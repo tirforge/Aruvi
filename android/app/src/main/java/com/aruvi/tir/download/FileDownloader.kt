@@ -100,11 +100,27 @@ class FileDownloader(
         updateTask(task)
 
         scope.launch(Dispatchers.IO) {
-            val ready = task.copy(localPath = createDestination(fileName, mimeType))
-            updateTask(ready)
-            // Start foreground service to keep downloads alive in background
-            try { DownloadService.start(context) } catch (_: Exception) {}
-            startDownload(ready)
+            try {
+                val ready = task.copy(localPath = createDestination(fileName, mimeType))
+                // Abort if the user paused/cancelled during destination setup.
+                val live = _tasks.value[id]
+                if (live == null || live.status == DownloadStatus.PAUSED ||
+                    live.status == DownloadStatus.CANCELLED) {
+                    return@launch
+                }
+                updateTask(ready)
+                // Start foreground service to keep downloads alive in background
+                try { DownloadService.start(context) } catch (_: Exception) {}
+                startDownload(ready)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                updateTask(task.copy(
+                    status = DownloadStatus.FAILED,
+                    error = e.message ?: "Download failed",
+                    speed = 0L
+                ))
+            }
         }
 
         return id
@@ -115,10 +131,22 @@ class FileDownloader(
      * created (scoped storage forbids raw writes to public Downloads); below that the
      * legacy raw file path is used.
      */
+    /**
+     * Strip path separators / traversal from server-provided names so a
+     * malicious `file_name` (`../`, absolute paths) cannot escape Downloads.
+     */
+    private fun sanitizeFileName(raw: String, fallback: String = "download"): String {
+        var name = File(raw).name.trim().replace("/", "_").replace("\\", "_")
+        while (name.contains("..")) name = name.replace("..", "_")
+        if (name.isBlank()) name = fallback
+        return name.take(180)
+    }
+
     private fun createDestination(fileName: String, mimeType: String?): String {
+        val safeName = sanitizeFileName(fileName)
         if (Build.VERSION.SDK_INT >= 29) {
             val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                put(MediaStore.Downloads.DISPLAY_NAME, safeName)
                 put(MediaStore.Downloads.MIME_TYPE, mimeType)
                 put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                 put(MediaStore.Downloads.IS_PENDING, 1)
@@ -128,11 +156,11 @@ class FileDownloader(
             )
             if (uri != null) return uri.toString()
         }
-        return legacyPath(fileName)
+        return legacyPath(safeName)
     }
 
     private fun legacyPath(fileName: String): String =
-        File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), fileName).absolutePath
+        File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), sanitizeFileName(fileName)).absolutePath
 
     private fun isContentUri(task: DownloadTask): Boolean =
         task.localPath?.startsWith("content://") == true
@@ -310,23 +338,30 @@ class FileDownloader(
             requestBuilder.addHeader("Range", "bytes=$existing-")
         }
 
+        // Hoisted so the catch blocks below can release them even when the
+        // failure happens mid-copy (they are assigned inside the try).
+        var pfd: android.os.ParcelFileDescriptor? = null
+        var raf: RandomAccessFile? = null
         try {
             val response = okHttpClient.newCall(requestBuilder.build()).execute()
 
             if (!response.isSuccessful && response.code != 206) {
                 val retryable = response.code == 429 || response.code >= 500
+                val code = response.code
+                val message = response.message
                 response.close()
                 if (retryable) {
-                    throw DownloadRetryableException("HTTP ${response.code}: ${response.message}")
+                    throw DownloadRetryableException("HTTP $code: $message")
                 }
                 updateTask(task.copy(
                     status = DownloadStatus.FAILED,
-                    error = "HTTP ${response.code}: ${response.message}"
+                    error = "HTTP $code: $message"
                 ))
                 return false
             }
 
             val body = response.body ?: run {
+                response.close()
                 updateTask(task.copy(
                     status = DownloadStatus.FAILED,
                     error = "Empty response body"
@@ -352,21 +387,40 @@ class FileDownloader(
                 totalBytes = totalBytes
             ))
 
-            // Open d/ Open destination: MediaStore row via content resolver (API 29+),
-            // otherwise the raw file. RandomAccessFile supports both paths.
-            val output: java.nio.channels.FileChannel = if (contentUri != null) {
-                val pfd = context.contentResolver.openFileDescriptor(
-                    Uri.parse(contentUri), if (startOffset > 0) "rw" else "w"
-                ) ?: return false
-                java.io.FileOutputStream(pfd.fileDescriptor).channel
-            } else {
-                val file = File(task.localPath ?: return false)
-                file.parentFile?.mkdirs()
-                val channel = RandomAccessFile(file, "rw").channel
-                // A full 200 response overwrites from the start - truncate any stale
-                // trailing bytes left from a larger partial file.
-                if (startOffset == 0L) channel.truncate(0)
-                channel
+            // Open destination: MediaStore row via content resolver (API 29+),
+            // otherwise the raw file.
+            val localPath = task.localPath ?: run {
+                response.close()
+                return false
+            }
+            pfd = null
+            raf = null
+            val output: java.nio.channels.FileChannel = try {
+                if (contentUri != null) {
+                    val descriptor = context.contentResolver.openFileDescriptor(
+                        Uri.parse(contentUri), if (startOffset > 0) "rw" else "w"
+                    ) ?: run {
+                        response.close()
+                        return false
+                    }
+                    pfd = descriptor
+                    java.io.FileOutputStream(descriptor.fileDescriptor).channel
+                } else {
+                    val file = File(localPath)
+                    file.parentFile?.mkdirs()
+                    val randomAccess = RandomAccessFile(file, "rw")
+                    raf = randomAccess
+                    val channel = randomAccess.channel
+                    // A full 200 response overwrites from the start - truncate any stale
+                    // trailing bytes left from a larger partial file.
+                    if (startOffset == 0L) channel.truncate(0)
+                    channel
+                }
+            } catch (e: Exception) {
+                try { pfd?.close() } catch (_: Exception) {}
+                try { raf?.close() } catch (_: Exception) {}
+                response.close()
+                throw e
             }
 
             // Write using RandomAccessFile for seek support
@@ -401,16 +455,31 @@ class FileDownloader(
                             lastTimeMap[task.id] = now
                             lastUpdateTime = now
 
-                            updateTask(_tasks.value[task.id]?.copy(
-                                status = DownloadStatus.RUNNING,
-                                downloadedBytes = bytesWritten,
-                                totalBytes = totalBytes,
-                                speed = speed
-                            ) ?: return false)
+                            // Don't resurrect a concurrently paused task with a stale RUNNING copy.
+                            val live = _tasks.value[task.id]
+                            if (live?.status == DownloadStatus.RUNNING) {
+                                updateTask(live.copy(
+                                    downloadedBytes = bytesWritten,
+                                    totalBytes = totalBytes,
+                                    speed = speed
+                                ))
+                            } else if (live == null) {
+                                try { response.close() } catch (_: Exception) {}
+                                try { pfd?.close() } catch (_: Exception) {}
+                                try { raf?.close() } catch (_: Exception) {}
+                                return false
+                            }
                         }
                     }
+                    // Drop any stale trailing bytes if the server shrank the
+                    // file since the partial download (resume case).
+                    try { channel.truncate(bytesWritten) } catch (_: Exception) {}
                 }
             }
+            try { pfd?.close() } catch (_: Exception) {}
+            try { raf?.close() } catch (_: Exception) {}
+            pfd = null
+            raf = null
 
             response.close()
 
@@ -433,10 +502,24 @@ class FileDownloader(
             ) ?: return false)
             return true
         } catch (e: CancellationException) {
+            try { pfd?.close() } catch (_: Exception) {}
+            try { raf?.close() } catch (_: Exception) {}
             throw e
         } catch (e: IOException) {
             // Transport errors (socket reset, timeout, DNS) - the partial file stays
             // on disk so the next attempt resumes with a Range header.
+            // Disk-full (ENOSPC) is permanent — fail fast instead of 10 retries.
+            try { pfd?.close() } catch (_: Exception) {}
+            try { raf?.close() } catch (_: Exception) {}
+            if (e.message?.contains("ENOSPC", ignoreCase = true) == true ||
+                e.message?.contains("no space", ignoreCase = true) == true) {
+                updateTask(_tasks.value[task.id]?.copy(
+                    status = DownloadStatus.FAILED,
+                    error = "Storage full",
+                    speed = 0L
+                ) ?: return false)
+                return false
+            }
             throw DownloadRetryableException(e.message ?: "Network error")
         }
     }
