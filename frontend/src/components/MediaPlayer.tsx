@@ -170,13 +170,23 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         // Reset so picking the SAME file again still fires a change event
         e.target.value = '';
         if (!file) return;
-        // MicroDVD (.sub) is not supported — the SRT→VTT converter would mangle it
-        if (file.name.toLowerCase().endsWith('.sub')) return;
+        // MicroDVD (.sub) is not supported — the SRT→VTT converter would mangle
+        // it. Toast instead of silently ignoring the pick (the picker just
+        // sat there with no feedback before).
+        if (file.name.toLowerCase().endsWith('.sub')) {
+            addToast('MicroDVD (.sub) subtitles are not supported — use .srt or .vtt', 'error');
+            return;
+        }
         if (file.size > MAX_SUBTITLE_BYTES) {
             addToast('Subtitle file is too large (max 5 MB)', 'error');
             return;
         }
         const reader = new FileReader();
+        // A failed read (unreadable file, I/O error) otherwise leaves the
+        // picker open with zero feedback — same silent dead-end as above.
+        reader.onerror = () => {
+            addToast('Could not read that subtitle file', 'error');
+        };
         reader.onload = () => {
             let text = reader.result as string;
             // Convert SRT to VTT if needed (case-insensitive: FILE.SRT skipped
@@ -309,8 +319,9 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         const sep = base.includes('?') ? '&' : '?';
         return `${base}${sep}token=${encodeURIComponent(reactiveToken)}`;
     }, [file.stream_url, file.id, isImage, reactiveToken, authorizedStreamUrl]);
-    const externalUrl = getAbsoluteUrl((extendedFile || file).public_stream_url || '') || authorizedStreamUrl;
-    const vlcUrl = `vlc://${externalUrl}`;
+    // Resolved on demand by the handoff actions below (mintExternalUrl):
+    // keeping a JWT-bearing URL in a render-scope const meant any consumer
+    // (VLC link, copy button) could leak the account token outward.
 
     // If the access token rotates mid-playback (refresh interceptor), the
     // frozen authorizedStreamUrl would 401 on the next request with no way to
@@ -367,10 +378,60 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
             if (win) win.location.href = dlUrl;
             else window.location.href = dlUrl;
         } catch (err) {
-            console.warn('Failed to get download token, falling back to stream URL:', err);
-            if (win) win.location.href = externalUrl;
-            else window.location.href = externalUrl;
+            // No JWT fallback: navigating to the account-token stream URL would
+            // leak it into browser history. A public link needs no token, so it
+            // still downloads when the token mint fails; otherwise close the
+            // blank tab opened above (don't leave it lingering) and toast.
+            console.warn('Failed to get download token:', err);
+            const pub = getAbsoluteUrl((extendedFile || file).public_stream_url || '');
+            if (pub) {
+                if (win) win.location.href = pub;
+                else window.location.href = pub;
+            } else {
+                if (win) win.close();
+                addToast('Download failed — please try again', 'error');
+            }
         }
+    };
+
+    // Share-safe external URL for handoff actions (VLC, copy): prefer the
+    // token-free public link, otherwise mint a short-lived file-bound download
+    // token. Never hand out the account-wide JWT backing authorizedStreamUrl —
+    // clipboard contents and vlc:// launches end up in chat history, logs and
+    // external apps (same rule as GlobalContextMenu's VLC/copy handlers).
+    const mintExternalUrl = async (): Promise<string | null> => {
+        const pub = getAbsoluteUrl((extendedFile || file).public_stream_url || '');
+        if (pub) return pub;
+        try {
+            const token = await getFileDownloadToken(file.id);
+            const base = getAbsoluteUrl(file.stream_url || '');
+            const sep = base.includes('?') ? '&' : '?';
+            return `${base}${sep}token=${encodeURIComponent(token)}`;
+        } catch (err) {
+            console.warn('Failed to mint stream token:', err);
+            return null;
+        }
+    };
+
+    const handleOpenVlc = () => {
+        void (async () => {
+            const url = await mintExternalUrl();
+            if (!url) { addToast('Could not open in VLC', 'error'); return; }
+            window.open(`vlc://${url}`, '_blank', 'noopener,noreferrer');
+        })();
+    };
+
+    const handleCopyExternalUrl = () => {
+        void (async () => {
+            const url = await mintExternalUrl();
+            if (!url) { addToast('Could not copy stream URL', 'error'); return; }
+            try {
+                await navigator.clipboard.writeText(url);
+                addToast('URL copied to clipboard', 'success');
+            } catch {
+                addToast('Copy failed (browser blocked clipboard)', 'error');
+            }
+        })();
     };
 
     const resumeStart = Math.floor(extendedFile?.last_pos ?? 0);
@@ -776,16 +837,16 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
                         <p className="text-dark-300 mb-6">{error}</p>
 
                         <div className="flex flex-col gap-3">
-                            <a
-                                href={vlcUrl}
+                            <button
+                                onClick={(e) => { e.stopPropagation(); handleOpenVlc(); }}
                                 className="btn-primary flex items-center justify-center gap-2"
                             >
                                 <ExternalLink className="w-4 h-4" />
                                 Open in VLC
-                            </a>
+                            </button>
                             <div className="flex gap-3">
                                 <Button
-                                    onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(externalUrl).then(() => { addToast('URL copied to clipboard', 'success'); }).catch(() => { addToast('Copy failed (browser blocked clipboard)', 'error'); }); }}
+                                    onClick={(e) => { e.stopPropagation(); handleCopyExternalUrl(); }}
                                     className="flex-1 btn-secondary flex items-center justify-center gap-2"
                                 >
                                     <Copy className="w-4 h-4" />

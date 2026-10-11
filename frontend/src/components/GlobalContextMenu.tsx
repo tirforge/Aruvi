@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../lib/store';
-import { TelegramFile, Folder, api, useFolders, getFileDownloadToken, useAccessToken } from '../lib/api';
+import { TelegramFile, Folder, api, useFolders, getFileDownloadToken, useAccessToken, backendUrl } from '../lib/api';
 import { Play, Download, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, ExternalLink } from 'lucide-react';
 
 export default function GlobalContextMenu() {
@@ -140,8 +140,10 @@ export default function GlobalContextMenu() {
     };
 
     const ensurePublicLink = async (file: TelegramFile): Promise<string | null> => {
+        // backendUrl resolves against API_BASE: the frontend origin is wrong
+        // on split deploys, and public_stream_url is a backend-relative path.
         if (file.public_stream_url) {
-            return `${window.location.protocol}//${window.location.host}${file.public_stream_url}`;
+            return backendUrl(file.public_stream_url);
         }
         try {
             const { data } = await api.post(`/files/${file.id}/share`);
@@ -149,7 +151,7 @@ export default function GlobalContextMenu() {
                 if (activeContextMenu && activeContextMenu.type === 'file') {
                     setActiveContextMenu({ ...activeContextMenu, item: data });
                 }
-                return `${window.location.protocol}//${window.location.host}${data.public_stream_url}`;
+                return backendUrl(data.public_stream_url);
             }
         } catch (err) {
             console.error('Failed to create public link:', err);
@@ -234,11 +236,13 @@ export default function GlobalContextMenu() {
                                             // external app — never embed the account-wide JWT.
                                             void (async () => {
                                                 try {
-                                                    const baseUrl = `${window.location.protocol}//${window.location.host}`;
+                                                    // backendUrl (API_BASE-aware): the frontend origin is
+                                                    // wrong on split deploys, and prepending any origin
+                                                    // to an absolute stream_url corrupts it.
                                                     const sep = f.stream_url.includes('?') ? '&' : '?';
                                                     const url = f.public_stream_url
-                                                        ? `${baseUrl}${f.public_stream_url}`
-                                                        : `${baseUrl}${f.stream_url}${sep}token=${await getFileDownloadToken(f.id)}`;
+                                                        ? backendUrl(f.public_stream_url)
+                                                        : `${backendUrl(f.stream_url)}${sep}token=${await getFileDownloadToken(f.id)}`;
                                                     window.open(`vlc://${url}`, '_blank', 'noopener,noreferrer');
                                                 } catch (err) {
                                                     console.error('Failed to mint stream token:', err);
@@ -255,11 +259,11 @@ export default function GlobalContextMenu() {
                                             // short-lived file-bound token, not the account JWT.
                                             void (async () => {
                                                 try {
-                                                    const baseUrl = `${window.location.protocol}//${window.location.host}`;
+                                                    // backendUrl (API_BASE-aware) — see Play in VLC above.
                                                     const sep = f.stream_url.includes('?') ? '&' : '?';
                                                     const url = f.public_stream_url
-                                                        ? `${baseUrl}${f.public_stream_url}`
-                                                        : `${baseUrl}${f.stream_url}${sep}token=${await getFileDownloadToken(f.id)}`;
+                                                        ? backendUrl(f.public_stream_url)
+                                                        : `${backendUrl(f.stream_url)}${sep}token=${await getFileDownloadToken(f.id)}`;
                                                     await navigator.clipboard.writeText(url);
                                                     addToast('Stream URL copied', 'success');
                                                 } catch (err) {

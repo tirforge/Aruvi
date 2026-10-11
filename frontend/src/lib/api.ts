@@ -133,6 +133,21 @@ export const api = axios.create({
 baseURL: API_BASE + '/api',
 });
 
+// Resolve a backend path or URL against the backend origin (API_BASE), so
+// split frontend/backend deploys build working URLs instead of 404ing on the
+// frontend origin. Absolute URLs pass through untouched (concatenating an
+// origin onto them would corrupt them into `https://fehttps://be/...`).
+export const backendUrl = (url: string): string => {
+if (!url) return '';
+if (/^https?:\/\//i.test(url)) return url;
+try {
+return new URL(url, API_BASE || window.location.origin).href;
+} catch {
+const base = (API_BASE || window.location.origin).replace(/\/+$/, '');
+return `${base}/${url.replace(/^\/+/, '')}`;
+}
+};
+
 // Add auth token to requests
 api.interceptors.request.use((config) => {
 const token = localStorage.getItem('access_token');

@@ -257,13 +257,15 @@ export default function FileBrowser() {
                 }
                 setClipboard(null);
             } else if (clipboard.mode === 'copy') {
-                alert("Copying files is not yet supported. Only Move (Cut) is supported.");
+                // Blocking alert() freezes the tab and traps focus — the app
+                // surfaces every other notice via toasts, so do that here too.
+                addToast('Copying files is not supported — use Cut to move instead', 'info');
             }
         } catch (error) {
             console.error('Paste failed:', error);
             addToast('Failed to move items', 'error');
         }
-    }, [clipboard, currentFolderId, moveFilesMutation, moveFoldersMutation, setClipboard]);
+    }, [clipboard, currentFolderId, moveFilesMutation, moveFoldersMutation, setClipboard, addToast]);
 
 
     // Selection Box Logic
