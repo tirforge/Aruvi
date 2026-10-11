@@ -56,11 +56,16 @@
    modals had no Escape-to-close (every other modal in the app has one); added
    a document-level Escape handler, guarded while logout-all is in flight.
 
-## Verification
+## Verification (2026-10-11, on the fix branch)
 
-- `npx tsc --noEmit`, `npx eslint . --max-warnings 0`, `npx vite build`,
-  `npm test` (vitest) — results recorded in the PR.
+- `npx tsc --noEmit` — exit 0
+- `npx eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0` — exit 0
+- `npm test` (vitest) — 8/8 passed (`modalsEscape.test.tsx`)
+- `npx vite build --outDir /tmp/… --emptyOutDir` — success (1540 modules;
+  outDir overridden to /tmp so the backend `app/static` tree is untouched)
 
 ## Delivery
 
-- Fix PR: (to be filled after push)
+- Fix PR: https://github.com/tirforge/Aruvi/pull/72 (existing open frontend-fix
+  PR for this area — new commits added to its branch
+  `opencode/fullscan-frontend-22` instead of opening a duplicate)
