@@ -88,6 +88,8 @@ Scope (strict): only `android/` — no other top-level dirs, `.github/`, or vend
 ## Verification
 - `git status --short`: only `android/**` + this report. No other top-level dirs, `.github/`, or vendored/build output touched.
 - Toolchain: Temurin JDK 17, Gradle 8.7 via wrapper, SDK at `/usr/local/lib/android/sdk`.
-- (to be filled after build: `:app:assembleTvDebug`, `:app:assembleMobileDebug` results)
+- `./gradlew :app:assembleTvDebug` → **BUILD SUCCESSFUL** (44 tasks, Hilt kapt + dex).
+- `./gradlew :app:assembleMobileDebug` → **BUILD SUCCESSFUL** (44 tasks, 10 from cache).
+- Only pre-existing warnings (deprecated `LocalLifecycleOwner`, unused `onBackClick`, `darkTheme` param noted above); no new warnings from this branch.
 
-Fix PR: (to be filled after `gh pr create`)
+Fix PR: https://github.com/tirforge/Aruvi/pull/90
