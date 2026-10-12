@@ -197,6 +197,8 @@ function FolderTreeItem({ folder, selectedId, onSelect, depth }: {
                 <button
                     type="button"
                     onClick={() => onSelect(folder.id)}
+                    aria-pressed={selectedId === folder.id}
+                    aria-label={`Select ${folder.name}`}
                     className="flex items-center gap-2 flex-1 min-w-0 text-left"
                 >
                     <FolderIcon className="w-4 h-4 text-primary-400 shrink-0" />

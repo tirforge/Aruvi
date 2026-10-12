@@ -16,7 +16,8 @@ const getAbsoluteUrl = (url: string) => {
     try {
         return new URL(url, API_BASE || window.location.origin).href;
     } catch {
-        return `${window.location.origin}/${url.replace(/^\/+/, '')}`;
+        const base = (API_BASE || window.location.origin).replace(/\/+$/, '');
+        return `${base}/${url.replace(/^\/+/, '')}`;
     }
 };
 

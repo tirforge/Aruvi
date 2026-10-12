@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../lib/store';
-import { TelegramFile, Folder, api, useFolders, getFileDownloadToken, useAccessToken, backendUrl } from '../lib/api';
+import { TelegramFile, Folder, api, useFolders, getFileDownloadToken, useAccessToken, backendUrl, isTrustedBackendUrl } from '../lib/api';
 import { Play, Download, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, ExternalLink } from 'lucide-react';
 
 export default function GlobalContextMenu() {
@@ -36,6 +36,12 @@ export default function GlobalContextMenu() {
             if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
         };
     }, []);
+    // Reset the "✓ Copied!" confirmation when the menu (re)opens: without
+    // this a reopen within the 2s timer window shows a stale confirmation
+    // for an action the user hasn't taken in this menu.
+    useEffect(() => {
+        if (activeContextMenu) setCopiedId(null);
+    }, [activeContextMenu]);
     // In-flight guard for the async share/link actions. Without it the menu
     // stays open during the POST and rapid clicks mint duplicate share links
     // (or duplicate revokes). The menu intentionally stays open for the
@@ -155,6 +161,7 @@ export default function GlobalContextMenu() {
             }
         } catch (err) {
             console.error('Failed to create public link:', err);
+            addToast('Could not create share link', 'error');
         }
         return null;
     };
@@ -167,10 +174,11 @@ export default function GlobalContextMenu() {
             } catch (err) {
                 console.warn('Failed to get download token, falling back to session token:', err);
             }
-            const dlUrl = `${api.defaults.baseURL}/stream/dl?id=${file.id}&token=${encodeURIComponent(token)}`;
-            const url = dlUrl.startsWith('http')
-                ? dlUrl
-                : `${window.location.protocol}//${window.location.host}${dlUrl}`;
+            // backendUrl resolves against API_BASE: naive baseURL string
+            // concat double-slashed (and 404d) when the backend base carries
+            // a trailing slash.
+            const url = backendUrl(`/stream/dl?id=${file.id}&token=${encodeURIComponent(token)}`);
+            if (!url) throw new Error('bad download url');
             window.open(url, '_blank', 'noopener,noreferrer');
         } catch (err) {
             console.error('Failed to download:', err);
@@ -238,11 +246,19 @@ export default function GlobalContextMenu() {
                                                 try {
                                                     // backendUrl (API_BASE-aware): the frontend origin is
                                                     // wrong on split deploys, and prepending any origin
-                                                    // to an absolute stream_url corrupts it.
-                                                    const sep = f.stream_url.includes('?') ? '&' : '?';
+                                                    // to an absolute stream_url corrupts it. The minted
+                                                    // token is encoded (a future alphabet change must not
+                                                    // break the query string), and the resolved origin is
+                                                    // gated — this URL is handed to an external app, so a
+                                                    // foreign stream_url must never receive our token.
+                                                    const minted = await getFileDownloadToken(f.id);
+                                                    const base = backendUrl(f.stream_url);
+                                                    if (!isTrustedBackendUrl(base)) throw new Error('Untrusted stream origin');
+                                                    const sep = base.includes('?') ? '&' : '?';
                                                     const url = f.public_stream_url
                                                         ? backendUrl(f.public_stream_url)
-                                                        : `${backendUrl(f.stream_url)}${sep}token=${await getFileDownloadToken(f.id)}`;
+                                                        : `${base}${sep}token=${encodeURIComponent(minted)}`;
+                                                    if (!isTrustedBackendUrl(url)) throw new Error('Untrusted stream origin');
                                                     window.open(`vlc://${url}`, '_blank', 'noopener,noreferrer');
                                                 } catch (err) {
                                                     console.error('Failed to mint stream token:', err);
@@ -260,10 +276,16 @@ export default function GlobalContextMenu() {
                                             void (async () => {
                                                 try {
                                                     // backendUrl (API_BASE-aware) — see Play in VLC above.
-                                                    const sep = f.stream_url.includes('?') ? '&' : '?';
+                                                    // Same encoding + origin gate: clipboard URLs end up
+                                                    // in logs/chat history, never leak a token outward.
+                                                    const mintedCopy = await getFileDownloadToken(f.id);
+                                                    const baseCopy = backendUrl(f.stream_url);
+                                                    if (!isTrustedBackendUrl(baseCopy)) throw new Error('Untrusted stream origin');
+                                                    const sepCopy = baseCopy.includes('?') ? '&' : '?';
                                                     const url = f.public_stream_url
                                                         ? backendUrl(f.public_stream_url)
-                                                        : `${backendUrl(f.stream_url)}${sep}token=${await getFileDownloadToken(f.id)}`;
+                                                        : `${baseCopy}${sepCopy}token=${encodeURIComponent(mintedCopy)}`;
+                                                    if (!isTrustedBackendUrl(url)) throw new Error('Untrusted stream origin');
                                                     await navigator.clipboard.writeText(url);
                                                     addToast('Stream URL copied', 'success');
                                                 } catch (err) {

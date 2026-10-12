@@ -353,27 +353,32 @@ const setPreviewFile = useAppStore((s) => s.setPreviewFile);
   );
 }
 
-function GrabbedModal({ result: grabbed, copied, onClose, onCopyUrl, onWatchNow }: {
+function GrabbedModal({ result: grabbed, copied, onClose, onCopyUrl, onWatchNow }: Readonly<{
   result: GrabSelectResponse;
   copied: boolean;
   onClose: () => void;
   onCopyUrl: () => void;
   onWatchNow: () => void;
-}) {
+}>) {
   // Return focus to the opener (Grab button) on close. Safe when the result
   // list re-rendered underneath — focus() on a detached node just no-ops.
   useFocusReturn();
-  // Close on Escape; the effect owns the listener so FileBrowser's global
-  // handler can't double-close (same pattern as the other modals).
+  // Close on Escape. Document-level (not window): keydown bubbles
+  // target → … → document → window, so stopping propagation here keeps
+  // FileBrowser's window-level handler from ALSO firing and clearing the
+  // file selection behind the modal. stopPropagation alone is not enough —
+  // same-node listeners still run — so stopImmediatePropagation too.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
+        const stopImmediate = (e as unknown as { stopImmediatePropagation?: () => void }).stopImmediatePropagation;
+        if (typeof stopImmediate === 'function') stopImmediate.call(e);
         onClose();
       }
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
   }, [onClose]);
   return (
         <div

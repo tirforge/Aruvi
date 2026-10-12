@@ -2,6 +2,7 @@ import { Files, Clock, PlayCircle, LogOut, HardDrive, X, Users, Zap, Shield, Sea
 import logo from '../assets/logo.png';
 import { useAppStore } from '../lib/store';
 import { useStorageStats, formatFileSize, useLogoutAll, useCurrentUser } from '../lib/api';
+import { useFocusReturn } from '../lib/useFocusReturn';
 import { memo, useCallback, useEffect, useState, type ComponentType } from 'react';
 
 interface SidebarProps {
@@ -20,6 +21,9 @@ function Sidebar({ isOpen, onClose }: SidebarProps) {
     const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
     const [showLogoutAllConfirm, setShowLogoutAllConfirm] = useState(false);
     const logoutAllMutation = useLogoutAll();
+    // Focus return for the logout confirmations: every other modal restores
+    // focus to its opener on dismiss, these dropped keyboard users to <body>.
+    const logoutOpen = showLogoutConfirm || showLogoutAllConfirm;
 
     // Escape dismisses the logout confirmations, like every other modal in the
     // app (document-level so FileBrowser's global handler can't double-close).
@@ -158,6 +162,7 @@ function Sidebar({ isOpen, onClose }: SidebarProps) {
             </aside>
 
             {/* Logout Modal */}
+            {logoutOpen ? <LogoutFocusHelper /> : null}
             {showLogoutConfirm && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
                     <div className="bg-dark-900 border border-white/10 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl animate-scale-in">
@@ -224,6 +229,13 @@ function Sidebar({ isOpen, onClose }: SidebarProps) {
 }
 
 type SectionId = 'files' | 'recent' | 'continue_watching' | 'grab';
+
+// Helper component so the focus-return hook mounts only while a logout
+// confirmation is open (hooks can't run conditionally in Sidebar itself).
+function LogoutFocusHelper() {
+    useFocusReturn();
+    return null;
+}
 
 // Module scope: a component defined inside Sidebar's render body is a NEW
 // type on every render, so React unmounts/remounts all nav buttons whenever
