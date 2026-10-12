@@ -15,6 +15,7 @@ import androidx.compose.ui.res.stringResource
 import com.aruvi.tir.data.model.FileItem
 import com.aruvi.tir.data.model.Folder
 import com.aruvi.tir.data.model.FolderWithChildren
+import com.aruvi.tir.ui.components.toUserFriendlyMessage
 
 @Composable
 fun FileOptionsButton(
@@ -112,7 +113,7 @@ fun InputDialog(title: String, initialValue: String = "", onDismiss: () -> Unit,
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = { OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true) },
-        confirmButton = { TextButton(onClick = { onConfirm(text) }) { Text("Confirm") } },
+        confirmButton = { TextButton(onClick = { onConfirm(text.trim()) }, enabled = text.isNotBlank()) { Text("Confirm") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
@@ -131,11 +132,16 @@ fun MovePickerDialog(
     var error by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        val tree = loadFolderTree()
-        rootTree = tree
-        isLoading = false
-        if (tree.isEmpty()) {
-            error = "No folders found"
+        try {
+            val tree = loadFolderTree()
+            rootTree = tree
+            if (tree.isEmpty()) {
+                error = "No folders found"
+            }
+        } catch (e: Exception) {
+            error = e.toUserFriendlyMessage()
+        } finally {
+            isLoading = false
         }
     }
 
