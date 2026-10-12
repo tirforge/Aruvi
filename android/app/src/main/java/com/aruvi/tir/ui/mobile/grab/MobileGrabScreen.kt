@@ -281,14 +281,14 @@ modifier = Modifier.size(48.dp)
                         val vlcIntent = Intent(Intent.ACTION_VIEW).apply {
                             setDataAndType(Uri.parse(result.streamUrl), "video/*")
                             setPackage("org.videolan.vlc")
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
                         try {
                             context.startActivity(vlcIntent)
                         } catch (e: Exception) {
                             val genericIntent = Intent(Intent.ACTION_VIEW).apply {
                                 setDataAndType(Uri.parse(result.streamUrl), "video/*")
-                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             }
                             try {
                                 context.startActivity(genericIntent)
