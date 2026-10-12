@@ -89,6 +89,26 @@ async def sample_user(temp_db):
     return user
 
 
+@pytest_asyncio.fixture
+async def sample_file(temp_db, sample_user):
+    from app.models import File
+
+    f = File(
+        user_id=sample_user.id,
+        file_id="pyrogram-file-id",
+        file_unique_id="uniq-cov-1",
+        file_name="movie.mp4",
+        file_size=1000,
+        mime_type="video/mp4",
+        file_type="video",
+        channel_message_id=77,
+    )
+    temp_db.add(f)
+    await temp_db.commit()
+    await temp_db.refresh(f)
+    return f
+
+
 def _make_mock_request(token: str):
     """Create a mock request with proper query_params interface."""
 
@@ -1052,6 +1072,359 @@ class TestSpaStaticAllowlist:
                 "content-type", ""
             ), f"suspicious body via {p}"
 
+
+class TestVerifyTokenHardening:
+    """verify_token must reject missing / non-numeric subjects."""
+
+    def test_garbage_token_returns_none(self):
+        from app.auth import verify_token
+
+        assert verify_token("not-a-token") is None
+
+    def test_non_numeric_sub_returns_none(self):
+        from jose import jwt
+        from app.auth import verify_token, settings
+        from datetime import datetime, timezone, timedelta
+
+        payload = {
+            "sub": "not-a-number",
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+            "type": "access",
+            "ver": 0,
+        }
+        token = jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+        assert verify_token(token) is None
+
+    def test_missing_sub_returns_none(self):
+        from jose import jwt
+        from app.auth import verify_token, settings
+        from datetime import datetime, timezone, timedelta
+
+        payload = {
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+            "type": "access",
+            "ver": 0,
+        }
+        token = jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+        assert verify_token(token) is None
+
+    def test_valid_token_still_works(self):
+        from app.auth import create_access_token, verify_token
+
+        token = create_access_token(999999, version=0)
+        assert verify_token(token) == 999999
+
+
+class TestParseMemEnv:
+    """_parse_mem_env must never raise; garbage falls back to 16 GiB."""
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("3G", 3 * 1024**3),
+            ("512M", 512 * 1024**2),
+            ("1.5G", int(1.5 * 1024**3)),
+            (" 2 gib ", 2 * 1024**3),
+            ("1024", 1024),
+            ("", 16 * 1024**3),
+            ("garbage", 16 * 1024**3),
+            ("10XB", 16 * 1024**3),
+            (None, 16 * 1024**3),
+        ],
+    )
+    def test_variants(self, raw, expected):
+        from app.status import _parse_mem_env
+
+        assert _parse_mem_env(raw) == expected
+
+
+class TestRemoveDirSymlinkSafe:
+    """_remove_dir must never follow symlinks outside the cache."""
+
+    def test_symlinked_dir_is_unlinked_not_followed(self, tmp_path):
+        from app.disk_cache import DiskChunkCache
+
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        victim = outside / "keep.bin"
+        victim.write_bytes(b"precious")
+        link = tmp_path / "linkdir"
+        link.symlink_to(outside, target_is_directory=True)
+
+        DiskChunkCache._remove_dir(link)
+
+        assert not link.exists() or link.is_symlink() is False
+        assert victim.read_bytes() == b"precious"
+
+    def test_missing_dir_does_not_raise(self, tmp_path):
+        from app.disk_cache import DiskChunkCache
+
+        DiskChunkCache._remove_dir(tmp_path / "nope")  # must not raise
+
+    def test_nested_symlink_file_removed(self, tmp_path):
+        from app.disk_cache import DiskChunkCache
+
+        d = tmp_path / "d"
+        d.mkdir()
+        (d / "real.bin").write_bytes(b"x")
+        secret = tmp_path / "secret.bin"
+        secret.write_bytes(b"s")
+        (d / "evil").symlink_to(secret)
+        (d / "sublink").symlink_to(tmp_path, target_is_directory=True)
+
+        DiskChunkCache._remove_dir(d)
+
+        assert secret.read_bytes() == b"s"
+        assert not (d / "real.bin").exists()
+        assert not (d / "evil").exists() or (d / "evil").is_symlink() is False
+
+
+class TestSweepSkipsSymlinks:
+    """sweep() must skip symlinked entries and survive unreadable dirs."""
+
+    def test_symlink_subdir_not_followed(self, tmp_path):
+        from app.disk_cache import DiskChunkCache
+
+        cache = tmp_path / "cache"
+        cache.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "chunk0").write_bytes(b"data")
+        (cache / "1_2").symlink_to(outside, target_is_directory=True)
+
+        result = DiskChunkCache(cache_dir=cache).sweep()
+
+        assert isinstance(result, int)
+        assert (outside / "chunk0").read_bytes() == b"data"
+        assert (cache / "1_2").is_symlink()
+
+    def test_file_as_cache_dir_returns_zero(self, tmp_path):
+        from app.disk_cache import DiskChunkCache
+
+        f = tmp_path / "notadir"
+        f.write_bytes(b"x")
+        assert DiskChunkCache(cache_dir=f).sweep() == 0
+
+
+class TestDetectImageMime:
+    """_detect_image_mime handles empty input and GIF magic."""
+
+    @pytest.mark.parametrize(
+        "data,expected",
+        [
+            (b"", "image/jpeg"),
+            (b"GIF87a123", "image/gif"),
+            (b"GIF89a123", "image/gif"),
+            (b"\x89PNG\r\n\x1a\n", "image/png"),
+            (b"\xff\xd8\xff\xe0", "image/jpeg"),
+            (b"BM1234", "image/bmp"),
+            (b"RIFF1234WEBP", "image/webp"),
+            (b"????", "image/jpeg"),
+        ],
+    )
+    def test_variants(self, data, expected):
+        from app.routers.streaming import _detect_image_mime
+
+        assert _detect_image_mime(data) == expected
+
+
+class TestBatchDeleteCaps:
+    """Batch deletes reject > 500 IDs before touching the DB."""
+
+    @pytest.mark.asyncio
+    async def test_files_batch_delete_cap(self):
+        from fastapi import HTTPException
+        from app.routers.files import batch_delete_files
+
+        with pytest.raises(HTTPException) as exc_info:
+            await batch_delete_files(
+                [1] * 501, db=None, current_user=None
+            )
+        assert exc_info.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_folders_batch_delete_cap(self):
+        from fastapi import HTTPException
+        from app.routers.folders import batch_delete_folders
+
+        with pytest.raises(HTTPException) as exc_info:
+            await batch_delete_folders(
+                [1] * 501, db=None, current_user=None
+            )
+        assert exc_info.value.status_code == 400
+
+
+class TestOwnershipRecheckPaths:
+    """Successful update/share/revoke flows execute the post-commit re-check."""
+
+    @pytest.mark.asyncio
+    async def test_update_file_reread(self, temp_db, sample_user, sample_file):
+        from app.routers.files import update_file
+        from app.schemas import FileUpdate
+
+        resp = await update_file(
+            sample_file.id,
+            FileUpdate(file_name="renamed.mp4"),
+            db=temp_db,
+            current_user=sample_user,
+        )
+        assert resp.file_name == "renamed.mp4"
+
+    @pytest.mark.asyncio
+    async def test_share_and_revoke_reread(
+        self, temp_db, sample_user, sample_file
+    ):
+        from app.routers.files import share_file, revoke_share
+
+        shared = await share_file(
+            sample_file.id, db=temp_db, current_user=sample_user
+        )
+        assert shared.id == sample_file.id
+        revoked = await revoke_share(
+            sample_file.id, db=temp_db, current_user=sample_user
+        )
+        assert revoked.id == sample_file.id
+
+
+class TestSchemaValidators:
+    """Strict schema validators: bools pass, non-finite floats rejected."""
+
+    def test_bool_position_passes_through(self):
+        from app.schemas import WatchProgressUpdate
+
+        # bool survives the "before" validator (no int() coercion crash);
+        # pydantic then coerces it to int as before.
+        assert WatchProgressUpdate(position=True).position == 1
+
+    def test_finite_float_truncated(self):
+        from app.schemas import WatchProgressUpdate
+
+        assert WatchProgressUpdate(position=1.9).position == 1
+
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+    def test_non_finite_rejected(self, bad):
+        from pydantic import ValidationError
+        from app.schemas import WatchProgressUpdate
+
+        with pytest.raises(ValidationError):
+            WatchProgressUpdate(position=bad)
+
+    def test_empty_name_rejected(self):
+        from pydantic import ValidationError
+        from app.schemas import FileCreate
+
+        with pytest.raises(ValidationError):
+            FileCreate(
+                name="",
+                file_name="a.mp4",
+                file_size=1,
+                file_type="video",
+                file_id="x",
+                file_unique_id="y",
+            )
+
+    def test_batch_move_ids_cap(self):
+        from pydantic import ValidationError
+        from app.schemas import BatchMoveRequest
+
+        with pytest.raises(ValidationError):
+            BatchMoveRequest(ids=list(range(501)), folder_id=None)
+
+
+class TestLogBackgroundResult:
+    """_log_background_result discards tasks and logs failures."""
+
+    @pytest.mark.asyncio
+    async def test_ok_task_discarded(self):
+        from app.utils import _background_tasks, _log_background_result
+
+        async def fine():
+            return 1
+
+        task = asyncio.ensure_future(fine())
+        _background_tasks.add(task)
+        await asyncio.sleep(0)
+        _log_background_result(task)
+        assert task not in _background_tasks
+
+    @pytest.mark.asyncio
+    async def test_failed_task_logged(self, caplog):
+        import logging
+        from app.utils import _background_tasks, _log_background_result
+
+        async def boom():
+            raise RuntimeError("kablam")
+
+        task = asyncio.ensure_future(boom())
+        _background_tasks.add(task)
+        await asyncio.sleep(0)
+        with caplog.at_level(logging.ERROR):
+            _log_background_result(task)
+        assert task not in _background_tasks
+        assert "kablam" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_cancelled_task_ignored(self):
+        from app.utils import _background_tasks, _log_background_result
+
+        async def hung():
+            await asyncio.sleep(60)
+
+        task = asyncio.ensure_future(hung())
+        _background_tasks.add(task)
+        task.cancel()
+        await asyncio.sleep(0)
+        _log_background_result(task)
+        assert task not in _background_tasks
+
+
+class TestStaticPage404:
+    """Missing status/download pages return JSON 404 instead of 500."""
+
+    def _site(self, tmp_path, monkeypatch, with_pages):
+        from app import main as mainmod
+        from app.static_allowlist import build_static_allowlist
+
+        static = tmp_path / "site" / "app" / "static"
+        (static / "assets").mkdir(parents=True)
+        (static / "index.html").write_bytes(b"<html>spa</html>")
+        if with_pages:
+            (static / "status.html").write_bytes(b"<html>status</html>")
+            (static / "download.html").write_bytes(b"<html>dl</html>")
+        monkeypatch.chdir(tmp_path / "site")
+        monkeypatch.setattr(
+            mainmod, "STATIC_ALLOWLIST", build_static_allowlist("app/static")
+        )
+
+    def test_missing_pages_404(self, tmp_path, monkeypatch):
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        self._site(tmp_path, monkeypatch, with_pages=False)
+        c = TestClient(app, raise_server_exceptions=False)
+        assert c.get("/status").status_code == 404
+        assert c.get("/download").status_code == 404
+
+    def test_present_pages_200(self, tmp_path, monkeypatch):
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        self._site(tmp_path, monkeypatch, with_pages=True)
+        c = TestClient(app, raise_server_exceptions=False)
+        assert c.get("/status").status_code == 200
+        assert c.get("/download").status_code == 200
+
+
+class TestGetCpuNonNegative:
+    """get_cpu never reports negative utilization."""
+
+    def test_cpu_reading_non_negative(self):
+        from app import status as statusmod
+
+        first = statusmod.get_cpu()
+        second = statusmod.get_cpu()
+        assert first >= 0.0
+        assert second >= 0.0
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
