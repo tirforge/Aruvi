@@ -133,6 +133,45 @@ export const api = axios.create({
 baseURL: API_BASE + '/api',
 });
 
+// Resolve a backend path or URL against the backend origin (API_BASE), so
+// split frontend/backend deploys build working URLs instead of 404ing on the
+// frontend origin. Absolute URLs pass through untouched (concatenating an
+// origin onto them would corrupt them into `https://fehttps://be/...`).
+export const backendUrl = (url: string): string => {
+if (!url) return '';
+// Prefix slice instead of /^https?:\/\//i: the regex has super-linear
+// backtracking behavior on adversarial input, a plain prefix test cannot.
+// Explicitly normalize protocol-relative `//host/path` to an absolute URL
+// so its foreign origin is visible to callers (and to isTrustedBackendUrl)
+// instead of silently inheriting the backend protocol via `new URL`.
+const lower = url.slice(0, 8).toLowerCase();
+if (lower.startsWith('http://') || lower.startsWith('https://')) return url;
+if (url.startsWith('//')) return `${window.location.protocol}${url}`;
+try {
+return new URL(url, API_BASE || window.location.origin).href;
+} catch {
+const base = (API_BASE || window.location.origin).replace(/\/+$/, '');
+return `${base}/${url.replace(/^\/+/, '')}`;
+}
+};
+
+// Shared credential-destination policy (same rule as AuthImage's fetch
+// guard): an absolute URL is safe to attach tokens/cookies to only when it
+// resolves to our own backend (API_BASE) or the frontend origin. Callers
+// that append access/download tokens or `window.open` a backend-derived URL
+// must refuse foreign origins instead of leaking credentials outward.
+export const isTrustedBackendUrl = (absoluteUrl: string): boolean => {
+try {
+const ownOrigins = new Set([
+new URL(API_BASE || window.location.origin, window.location.origin).origin,
+window.location.origin,
+]);
+return ownOrigins.has(new URL(absoluteUrl, window.location.origin).origin);
+} catch {
+return false;
+}
+};
+
 // Add auth token to requests
 api.interceptors.request.use((config) => {
 const token = localStorage.getItem('access_token');
@@ -781,7 +820,7 @@ queryClient.invalidateQueries({ queryKey: ['admin', 'stats'] });
 
 export const formatFileSize = (bytes: number | string): string => {
 const value = typeof bytes === 'string' ? Number(bytes) : bytes;
-if (!Number.isFinite(value)) return '—';
+if (!Number.isFinite(value) || value < 0) return '—';
 const units = ['B', 'KB', 'MB', 'GB', 'TB'];
 let size = value;
 let unitIndex = 0;
@@ -793,8 +832,15 @@ return `${size.toFixed(1)} ${units[unitIndex]}`;
 };
 
 export const formatDuration = (seconds: number | null): string => {
-if (!seconds) return '';
+// Nullish (cleared/unset) is "no value"; NaN/non-finite is corrupt data;
+// negatives are invalid; but zero is a real position (0:00), not absence —
+// the old falsy check rendered it as '' and the minimized bar showed a bare
+// separator.
+if (seconds === null || typeof seconds === 'undefined') return '';
+if (typeof seconds !== 'number' || Number.isNaN(seconds)) return '—';
 if (!Number.isFinite(seconds)) return '—';
+if (seconds < 0) return '';
+if (seconds === 0) return '0:00';
 const hours = Math.floor(seconds / 3600);
 const minutes = Math.floor((seconds % 3600) / 60);
 const secs = Math.floor(seconds % 60);

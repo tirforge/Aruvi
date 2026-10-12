@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../lib/store';
-import { TelegramFile, Folder, api, useFolders, getFileDownloadToken, useAccessToken } from '../lib/api';
+import { TelegramFile, Folder, api, useFolders, getFileDownloadToken, useAccessToken, backendUrl, isTrustedBackendUrl } from '../lib/api';
 import { Play, Download, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, ExternalLink } from 'lucide-react';
 
 export default function GlobalContextMenu() {
@@ -13,6 +13,7 @@ export default function GlobalContextMenu() {
     const setDeleteConfirm = useAppStore((s) => s.setDeleteConfirm);
     const setRenameFile = useAppStore((s) => s.setRenameFile);
     const setRenameFolder = useAppStore((s) => s.setRenameFolder);
+    const addToast = useAppStore((s) => s.addToast);
     const selectedFileIds = useAppStore((s) => s.selectedFileIds);
     const selectedFolderIds = useAppStore((s) => s.selectedFolderIds);
     const selectedFiles = useAppStore((s) => s.selectedFiles);
@@ -26,6 +27,21 @@ export default function GlobalContextMenu() {
     const selectedFolders = folders?.filter(f => selectedFolderIds.has(f.id)) || [];
     const menuRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
+    // One timer drives the "✓ Copied!" reset: without the ref, rapid copies
+    // stacked timers and an early one cleared a newer confirmation; without
+    // the unmount cleanup the timer could setState on an unmounted menu.
+    const copyTimerRef = useRef<number | null>(null);
+    useEffect(() => {
+        return () => {
+            if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+        };
+    }, []);
+    // Reset the "✓ Copied!" confirmation when the menu (re)opens: without
+    // this a reopen within the 2s timer window shows a stale confirmation
+    // for an action the user hasn't taken in this menu.
+    useEffect(() => {
+        if (activeContextMenu) setCopiedId(null);
+    }, [activeContextMenu]);
     // In-flight guard for the async share/link actions. Without it the menu
     // stays open during the POST and rapid clicks mint duplicate share links
     // (or duplicate revokes). The menu intentionally stays open for the
@@ -101,9 +117,14 @@ export default function GlobalContextMenu() {
         try {
             await navigator.clipboard.writeText(text);
             setCopiedId(id);
-            setTimeout(() => setCopiedId(null), 2000);
+            if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+            copyTimerRef.current = window.setTimeout(() => {
+                setCopiedId(null);
+                copyTimerRef.current = null;
+            }, 2000);
         } catch (err) {
             console.error('Failed to copy:', err);
+            addToast('Copy failed (browser blocked clipboard)', 'error');
         }
     };
 
@@ -125,8 +146,10 @@ export default function GlobalContextMenu() {
     };
 
     const ensurePublicLink = async (file: TelegramFile): Promise<string | null> => {
+        // backendUrl resolves against API_BASE: the frontend origin is wrong
+        // on split deploys, and public_stream_url is a backend-relative path.
         if (file.public_stream_url) {
-            return `${window.location.protocol}//${window.location.host}${file.public_stream_url}`;
+            return backendUrl(file.public_stream_url);
         }
         try {
             const { data } = await api.post(`/files/${file.id}/share`);
@@ -134,10 +157,11 @@ export default function GlobalContextMenu() {
                 if (activeContextMenu && activeContextMenu.type === 'file') {
                     setActiveContextMenu({ ...activeContextMenu, item: data });
                 }
-                return `${window.location.protocol}//${window.location.host}${data.public_stream_url}`;
+                return backendUrl(data.public_stream_url);
             }
         } catch (err) {
             console.error('Failed to create public link:', err);
+            addToast('Could not create share link', 'error');
         }
         return null;
     };
@@ -150,10 +174,11 @@ export default function GlobalContextMenu() {
             } catch (err) {
                 console.warn('Failed to get download token, falling back to session token:', err);
             }
-            const dlUrl = `${api.defaults.baseURL}/stream/dl?id=${file.id}&token=${encodeURIComponent(token)}`;
-            const url = dlUrl.startsWith('http')
-                ? dlUrl
-                : `${window.location.protocol}//${window.location.host}${dlUrl}`;
+            // backendUrl resolves against API_BASE: naive baseURL string
+            // concat double-slashed (and 404d) when the backend base carries
+            // a trailing slash.
+            const url = backendUrl(`/stream/dl?id=${file.id}&token=${encodeURIComponent(token)}`);
+            if (!url) throw new Error('bad download url');
             window.open(url, '_blank', 'noopener,noreferrer');
         } catch (err) {
             console.error('Failed to download:', err);
@@ -219,13 +244,25 @@ export default function GlobalContextMenu() {
                                             // external app — never embed the account-wide JWT.
                                             void (async () => {
                                                 try {
-                                                    const baseUrl = `${window.location.protocol}//${window.location.host}`;
+                                                    // backendUrl (API_BASE-aware): the frontend origin is
+                                                    // wrong on split deploys, and prepending any origin
+                                                    // to an absolute stream_url corrupts it. The minted
+                                                    // token is encoded (a future alphabet change must not
+                                                    // break the query string), and the resolved origin is
+                                                    // gated — this URL is handed to an external app, so a
+                                                    // foreign stream_url must never receive our token.
+                                                    const minted = await getFileDownloadToken(f.id);
+                                                    const base = backendUrl(f.stream_url);
+                                                    if (!isTrustedBackendUrl(base)) throw new Error('Untrusted stream origin');
+                                                    const sep = base.includes('?') ? '&' : '?';
                                                     const url = f.public_stream_url
-                                                        ? `${baseUrl}${f.public_stream_url}`
-                                                        : `${baseUrl}${f.stream_url}?token=${await getFileDownloadToken(f.id)}`;
-                                                    window.open(`vlc://${url}`, '_blank');
+                                                        ? backendUrl(f.public_stream_url)
+                                                        : `${base}${sep}token=${encodeURIComponent(minted)}`;
+                                                    if (!isTrustedBackendUrl(url)) throw new Error('Untrusted stream origin');
+                                                    window.open(`vlc://${url}`, '_blank', 'noopener,noreferrer');
                                                 } catch (err) {
                                                     console.error('Failed to mint stream token:', err);
+                                                    addToast('Could not open in VLC', 'error');
                                                 }
                                             })();
                                         }}>
@@ -238,13 +275,22 @@ export default function GlobalContextMenu() {
                                             // short-lived file-bound token, not the account JWT.
                                             void (async () => {
                                                 try {
-                                                    const baseUrl = `${window.location.protocol}//${window.location.host}`;
+                                                    // backendUrl (API_BASE-aware) — see Play in VLC above.
+                                                    // Same encoding + origin gate: clipboard URLs end up
+                                                    // in logs/chat history, never leak a token outward.
+                                                    const mintedCopy = await getFileDownloadToken(f.id);
+                                                    const baseCopy = backendUrl(f.stream_url);
+                                                    if (!isTrustedBackendUrl(baseCopy)) throw new Error('Untrusted stream origin');
+                                                    const sepCopy = baseCopy.includes('?') ? '&' : '?';
                                                     const url = f.public_stream_url
-                                                        ? `${baseUrl}${f.public_stream_url}`
-                                                        : `${baseUrl}${f.stream_url}?token=${await getFileDownloadToken(f.id)}`;
+                                                        ? backendUrl(f.public_stream_url)
+                                                        : `${baseCopy}${sepCopy}token=${encodeURIComponent(mintedCopy)}`;
+                                                    if (!isTrustedBackendUrl(url)) throw new Error('Untrusted stream origin');
                                                     await navigator.clipboard.writeText(url);
+                                                    addToast('Stream URL copied', 'success');
                                                 } catch (err) {
                                                     console.error('Failed to mint stream token:', err);
+                                                    addToast('Could not copy stream URL', 'error');
                                                 }
                                             })();
                                         }}>
