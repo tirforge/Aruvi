@@ -26,8 +26,8 @@ fun ContentRow(
     useLargeCards: Boolean = false
 ) {
     Column(modifier = modifier) {
-        // Row title (skip empty titles so no blank/announced gap is laid out)
-        if (title.isNotEmpty()) {
+        // Row title (skip blank titles so no blank/announced gap is laid out)
+        if (title.isNotBlank()) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.headlineSmall,

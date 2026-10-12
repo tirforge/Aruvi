@@ -61,7 +61,10 @@ class LoginViewModel @Inject constructor(
 
     private fun loadServerUrl() {
         viewModelScope.launch {
-            val url = settingsRepository.serverUrl.first()
+            // getServerUrl (not serverUrl.first()) seeds the interceptor's
+            // in-memory cache, so the bot-info request below goes to the saved
+            // server instead of the build default.
+            val url = settingsRepository.getServerUrl()
             val bot = settingsRepository.botUsername.first()
             val botName = settingsRepository.botName.first()
             _uiState.value = _uiState.value.copy(serverUrl = url, botUsername = bot, botName = botName)
@@ -122,6 +125,10 @@ class LoginViewModel @Inject constructor(
         viewModelScope.launch {
             val url = _uiState.value.serverUrl
             if (url.isNotEmpty()) {
+                // Cancel any in-flight generator first: it may be suspended in
+                // setServerUrl or routed at the old server, and the guard in
+                // generateLoginCode would otherwise drop this replacement.
+                genJob?.cancel()
                 settingsRepository.setServerUrl(url)
                 // DynamicBaseUrlInterceptor picks the new server up on the
                 // very next request — no process restart needed anymore (the
@@ -134,8 +141,10 @@ class LoginViewModel @Inject constructor(
 
     fun generateLoginCode() {
         stopPolling()
-        // Guard rapid taps: concurrent generators would race startPolling.
-        if (genJob?.isActive == true) return
+        // Cancel-first (not drop-newest): concurrent generators would race
+        // startPolling, and dropping the newest leaves a stale old-server code
+        // on screen after a URL change. No timing change when idle.
+        genJob?.cancel()
         genJob = viewModelScope.launch {
             settingsRepository.setServerUrl(_uiState.value.serverUrl)
 

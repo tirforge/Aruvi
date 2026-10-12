@@ -130,14 +130,18 @@ fun MovePickerDialog(
     var navStack by remember { mutableStateOf(listOf<Pair<String, List<FolderWithChildren>>>()) }
     var isLoading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    var isEmptyTree by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         try {
             val tree = loadFolderTree()
             rootTree = tree
-            if (tree.isEmpty()) {
-                error = "No folders found"
-            }
+            // An empty tree is a valid success (new user, no folders yet) — not
+            // a red error. Keep it as neutral state so Root stays selectable
+            // and real request failures still reach the error handler below.
+            isEmptyTree = tree.isEmpty()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             error = e.toUserFriendlyMessage()
         } finally {
@@ -173,6 +177,20 @@ fun MovePickerDialog(
                     }
                 } else {
                     Column {
+                        if (isEmptyTree && navStack.isEmpty()) {
+                            // Valid empty account: neutral info (not a red
+                            // error) with Root still selectable as a target.
+                            Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                Text("No folders found", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            TextButton(
+                                onClick = { onConfirm(null) },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Home, null, modifier = Modifier.padding(end = 8.dp))
+                                Text("Root Directory")
+                            }
+                        }
                         if (navStack.isNotEmpty()) {
                             MoveDestinationItem(
                                 icon = Icons.Default.ArrowUpward,

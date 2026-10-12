@@ -87,16 +87,23 @@ fun TelePlayMobileTheme(
     if (!view.isInEditMode) {
         androidx.compose.runtime.SideEffect {
             // view.context may be a ContextWrapper (dialogs, previews) — never hard-cast.
+            // Seen-set + depth cap: a two-node cycle (A->B->A) never hits the
+            // self-guard and would spin forever.
             var ctx: android.content.Context? = view.context
-            while (ctx is android.content.ContextWrapper && ctx !is android.app.Activity) {
-                if (ctx.baseContext === ctx) { ctx = null; break }
-                ctx = ctx.baseContext
+            var depth = 0
+            val seen = HashSet<android.content.Context>()
+            while (ctx is android.content.ContextWrapper && ctx !is android.app.Activity && depth < 20 && seen.add(ctx)) {
+                val base = ctx.baseContext
+                if (base === ctx) { ctx = null; break }
+                ctx = base
+                depth++
             }
             val window = (ctx as? android.app.Activity)?.window ?: return@SideEffect
             window.statusBarColor = android.graphics.Color.TRANSPARENT
             window.navigationBarColor = android.graphics.Color.TRANSPARENT
-            androidx.core.view.WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
-            androidx.core.view.WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = false
+            val insets = androidx.core.view.WindowCompat.getInsetsController(window, view)
+            insets.isAppearanceLightStatusBars = false
+            insets.isAppearanceLightNavigationBars = false
         }
     }
 

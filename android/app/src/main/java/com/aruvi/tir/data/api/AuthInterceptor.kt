@@ -1,6 +1,7 @@
 package com.aruvi.tir.data.api
 
 import com.aruvi.tir.data.repository.AuthRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
 import okhttp3.Response
@@ -42,7 +43,12 @@ class AuthInterceptor @Inject constructor(
 
         // If 401, try to refresh token
         if (response.code == 401) {
-            val newToken = runBlocking { authRepository.get().refreshAccessToken() }
+            val newToken = try {
+                runBlocking { authRepository.get().refreshAccessToken() }
+            } catch (e: CancellationException) {
+                response.close()
+                throw e
+            }
 
             if (newToken != null) {
                 // Retry with new token (close the failed 401 first to free it).

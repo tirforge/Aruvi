@@ -100,7 +100,7 @@ class FileDownloader(
         updateTask(task)
 
         scope.launch(Dispatchers.IO) {
-            val ready = task.copy(localPath = createDestination(fileName, mimeType))
+            val ready = task.copy(localPath = createDestination(task.fileId, fileName, mimeType))
             updateTask(ready)
             // Start foreground service to keep downloads alive in background
             try { DownloadService.start(context) } catch (_: Exception) {}
@@ -126,8 +126,11 @@ class FileDownloader(
         return name.take(180)
     }
 
-    private fun createDestination(fileName: String, mimeType: String?): String {
-        val safeName = sanitizeFileName(fileName)
+    private fun createDestination(fileId: Int, fileName: String, mimeType: String?): String {
+        // MediaStore rows are unique per insert, so DISPLAY_NAME needs only
+        // sanitizing; the pre-29 raw path needs the fileId prefix below so two
+        // distinct server names that sanitize alike never share one file.
+        val safeName = sanitizeFileName(fileName, fallback = "download_" + fileId)
         if (Build.VERSION.SDK_INT >= 29) {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, safeName)
@@ -140,11 +143,14 @@ class FileDownloader(
             )
             if (uri != null) return uri.toString()
         }
-        return legacyPath(safeName)
+        return legacyPath(fileId, safeName)
     }
 
-    private fun legacyPath(fileName: String): String =
-        File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), sanitizeFileName(fileName)).absolutePath
+    private fun legacyPath(fileId: Int, fileName: String): String =
+        File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            "" + fileId + "_" + sanitizeFileName(fileName)
+        ).absolutePath
 
     private fun isContentUri(task: DownloadTask): Boolean =
         task.localPath?.startsWith("content://") == true
@@ -324,10 +330,16 @@ class FileDownloader(
 
         // Hoisted so the catch blocks below can release them even when the
         // failure happens mid-copy (they are assigned inside the try).
+        // netResponse mirrors the inner response: without it the
+        // Cancellation/IOException paths below cannot close the pooled
+        // connection on flaky networks.
         var pfd: android.os.ParcelFileDescriptor? = null
         var raf: RandomAccessFile? = null
+        var fos: java.io.FileOutputStream? = null
+        var netResponse: okhttp3.Response? = null
         try {
             val response = okHttpClient.newCall(requestBuilder.build()).execute()
+            netResponse = response
 
             if (!response.isSuccessful && response.code != 206) {
                 val retryable = response.code == 429 || response.code >= 500
@@ -379,6 +391,7 @@ class FileDownloader(
             }
             pfd = null
             raf = null
+            fos = null
             val output: java.nio.channels.FileChannel = try {
                 if (contentUri != null) {
                     val descriptor = context.contentResolver.openFileDescriptor(
@@ -388,7 +401,13 @@ class FileDownloader(
                         return false
                     }
                     pfd = descriptor
-                    java.io.FileOutputStream(descriptor.fileDescriptor).channel
+                    // Retain the stream: an anonymous FileOutputStream would be
+                    // unreachable after .channel, so the stream object itself
+                    // never closes and its FD bookkeeping leaks on this path.
+                    val stream = java.io.FileOutputStream(descriptor.fileDescriptor)
+                    fos = stream
+                    raf = null
+                    stream.channel
                 } else {
                     val file = File(localPath)
                     file.parentFile?.mkdirs()
@@ -401,6 +420,7 @@ class FileDownloader(
                     channel
                 }
             } catch (e: Exception) {
+                try { fos?.close() } catch (_: Exception) {}
                 try { pfd?.close() } catch (_: Exception) {}
                 try { raf?.close() } catch (_: Exception) {}
                 response.close()
@@ -446,6 +466,7 @@ class FileDownloader(
                                 speed = speed
                             ) ?: run {
                                 try { response.close() } catch (_: Exception) {}
+                                try { fos?.close() } catch (_: Exception) {}
                                 try { pfd?.close() } catch (_: Exception) {}
                                 try { raf?.close() } catch (_: Exception) {}
                                 return false
@@ -457,10 +478,12 @@ class FileDownloader(
                     try { channel.truncate(bytesWritten) } catch (_: Exception) {}
                 }
             }
+            try { fos?.close() } catch (_: Exception) {}
             try { pfd?.close() } catch (_: Exception) {}
             try { raf?.close() } catch (_: Exception) {}
             pfd = null
             raf = null
+            fos = null
 
             response.close()
 
@@ -483,15 +506,25 @@ class FileDownloader(
             ) ?: return false)
             return true
         } catch (e: CancellationException) {
+            try { netResponse?.close() } catch (_: Exception) {}
+            try { fos?.close() } catch (_: Exception) {}
             try { pfd?.close() } catch (_: Exception) {}
             try { raf?.close() } catch (_: Exception) {}
             throw e
         } catch (e: IOException) {
             // Transport errors (socket reset, timeout, DNS) - the partial file stays
             // on disk so the next attempt resumes with a Range header.
+            try { netResponse?.close() } catch (_: Exception) {}
+            try { fos?.close() } catch (_: Exception) {}
             try { pfd?.close() } catch (_: Exception) {}
             try { raf?.close() } catch (_: Exception) {}
             throw DownloadRetryableException(e.message ?: "Network error")
+        } catch (e: Exception) {
+            try { netResponse?.close() } catch (_: Exception) {}
+            try { fos?.close() } catch (_: Exception) {}
+            try { pfd?.close() } catch (_: Exception) {}
+            try { raf?.close() } catch (_: Exception) {}
+            throw e
         }
     }
 

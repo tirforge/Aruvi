@@ -168,7 +168,9 @@ class MobileHomeViewModel @Inject constructor(
     }
 
     suspend fun loadFolderTree(): List<FolderWithChildren> =
-        foldersRepository.getFolderTree().getOrNull() ?: emptyList()
+        // Propagate failures (throw) so MovePickerDialog routes them to its
+        // error handler; an empty success stays emptyList for "No folders".
+        foldersRepository.getFolderTree().getOrThrow()
 
     // Selection management
     fun toggleSelection(id: Int, isFolder: Boolean) {

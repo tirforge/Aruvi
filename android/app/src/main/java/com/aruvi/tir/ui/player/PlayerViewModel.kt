@@ -684,9 +684,13 @@ private var directUrl: String? = savedStateHandle.get<String>("directUrl")?.take
 
     @OptIn(UnstableApi::class)
     private fun getTrackName(format: Format, index: Int, type: String): String {
-        val lang = format.language?.let { tag ->
+        val lang = format.language?.takeIf { it.isNotBlank() }?.let { tag ->
             try {
-                java.util.Locale.forLanguageTag(tag).displayLanguage.takeIf { it.isNotBlank() }
+                // ExoPlayer languages may use underscores (en_US); forLanguageTag
+                // needs BCP-47 hyphens, so normalize first with legacy fallback.
+                val normalized = tag.trim().replace('_', '-')
+                java.util.Locale.forLanguageTag(normalized).displayLanguage.takeIf { it.isNotBlank() }
+                    ?: java.util.Locale(tag).displayLanguage.takeIf { it.isNotBlank() }
             } catch (_: Exception) {
                 null
             }

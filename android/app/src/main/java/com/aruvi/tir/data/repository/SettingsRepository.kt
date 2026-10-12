@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.aruvi.tir.BuildConfig
 import dagger.hilt.android.qualifiers.ApplicationContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -75,21 +76,30 @@ class SettingsRepository @Inject constructor(
      * with a confusing connection error at login.
      */
     fun normalizeServerUrl(input: String): String {
-        val trimmed = input.trim().trimEnd('/')
+        val trimmed = input.trim()
         if (trimmed.isEmpty()) return trimmed
+        // Strip trailing slashes only AFTER the scheme check: trimming first
+        // turns a bare "http://" into "http:", which would then persist as the
+        // malformed "http://http:". Validate the final parsed URL instead.
         val withScheme = if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-            trimmed
+            trimmed.trimEnd('/')
         } else {
-            "http://$trimmed"
+            "http://" + trimmed.trimEnd('/')
         }
-        // Reject bare schemes / empty hosts (e.g. "http://") so callers never
-        // persist an origin-less URL that would send tokens to the wrong host.
-        if (withScheme.equals("http://", ignoreCase = true) ||
-            withScheme.equals("https://", ignoreCase = true)
-        ) {
+        try {
+            // Reject bare schemes / empty hosts (e.g. "http://") so callers
+            // never persist an origin-less URL that would send tokens to the
+            // wrong host. Reset path/query/fragment so an embedded "/api"
+            // cannot produce a doubled "api/api/" Retrofit base, and drop any
+            // userinfo so the Retrofit base and the interceptor agree.
+            val parsed = withScheme.toHttpUrlOrNull() ?: return ""
+            if (parsed.host.isBlank()) return ""
+            return parsed.newBuilder().username("").password("")
+                .encodedPath("/").query(null).fragment(null)
+                .build().toString().trimEnd('/')
+        } catch (_: Exception) {
             return ""
         }
-        return withScheme
     }
 
     /**

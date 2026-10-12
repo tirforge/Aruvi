@@ -108,11 +108,10 @@ object NetworkModule {
         gson: Gson,
         settingsRepository: SettingsRepository
     ): Retrofit {
-        // The base URL below is only a valid-URL placeholder — every request
-        // is rewritten to the CURRENT saved server by DynamicBaseUrlInterceptor,
-        // so changing servers applies without an app restart. Never block
-        // startup on a DataStore read here (ANR); the interceptor's
-        // in-memory cache is seeded on first SettingsRepository read.
+        // Placeholder only. DynamicBaseUrlInterceptor rewrites to peekServerUrl.
+        // Cache is seeded only by getServerUrl or setServerUrl, not by Flow
+        // collection. Callers must call getServerUrl before credentialed
+        // requests or tokens go to the build default. Never block here.
         val configured = BuildConfig.DEFAULT_SERVER_URL.ifBlank { "http://localhost:7680" }
         val parsed = try {
             configured.trim().toHttpUrlOrNull()
@@ -120,7 +119,10 @@ object NetworkModule {
             null
         }
         val baseUrl = if (parsed != null && parsed.host.isNotBlank()) {
-            parsed.newBuilder().encodedPath("/").query(null).fragment(null).build().toString()
+            // Drop userinfo here: the interceptor rewrites only
+            // scheme/host/port, so a base with credentials would leak stale
+            // userinfo into every rewritten request after a server switch.
+            parsed.newBuilder().username("").password("").encodedPath("/").query(null).fragment(null).build().toString()
         } else {
             "http://localhost:7680/"
         }

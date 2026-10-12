@@ -22,9 +22,12 @@ fun Throwable.toUserFriendlyMessage(): String {
         }
         else -> {
             val raw = this.message ?: return "An unexpected error occurred. Please try again."
-            // Never surface tokens / auth material that may hide in messages.
-            var safe = raw.replace(Regex("(?i)bearer\\s+[A-Za-z0-9._~-]+"), "Bearer <redacted>")
+            // Never surface tokens / auth material that may hide in messages:
+            // Bearer values are not limited to word chars (base64 +/=), and
+            // JSON error bodies can carry {"token": "..."} fields too.
+            var safe = raw.replace(Regex("(?i)bearer\\s+\\S+"), "Bearer redacted")
             safe = safe.replace(Regex("[?&]token=[^&\\s]+"), "")
+            safe = safe.replace(Regex("(?i)(\"token\"\\s*:\\s*\")[^\"]+(\")"), "$1redacted$2")
             if (safe.length > 200) safe = safe.take(200) + "…"
             if (safe.isBlank()) "An unexpected error occurred. Please try again." else safe
         }
