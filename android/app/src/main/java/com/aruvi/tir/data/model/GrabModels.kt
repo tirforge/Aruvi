@@ -15,7 +15,7 @@ data class GrabSelectRequest(
     @SerializedName("row") val row: Int,
     @SerializedName("col") val col: Int,
     @SerializedName("msg_id") val msgId: Int? = null,
-    @SerializedName("chat_id") val chatId: Int? = null,
+    @SerializedName("chat_id") val chatId: Long? = null,
     @SerializedName("group_username") val groupUsername: String? = null,
     @SerializedName("bot_username") val botUsername: String? = null,
     // REQUIRED by the backend: without a name the delivered file cannot be

@@ -61,8 +61,17 @@ class DownloadService : Service() {
     }
 
 override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-    // Must call startForeground immediately
-    startForeground(SUMMARY_NOTIFICATION_ID, buildSummaryNotification("Preparing downloads..."))
+    // Must call startForeground immediately (with explicit type on API 29+ for Android 14).
+    val summary = buildSummaryNotification("Preparing downloads...")
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        startForeground(
+            SUMMARY_NOTIFICATION_ID,
+            summary,
+            android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        )
+    } else {
+        startForeground(SUMMARY_NOTIFICATION_ID, summary)
+    }
 
     // Cancel previous scope and recreate to prevent coroutine leaks on restart
     serviceScope.cancel()
@@ -198,8 +207,8 @@ override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
 
     private fun formatSpeed(bytesPerSec: Long): String {
         return when {
-            bytesPerSec >= 1_000_000 -> "%.1f MB/s".format(bytesPerSec / 1_000_000.0)
-            bytesPerSec >= 1_000 -> "%.0f KB/s".format(bytesPerSec / 1_000.0)
+            bytesPerSec >= 1_000_000 -> "%.1f MB/s".format(java.util.Locale.US, bytesPerSec / 1_000_000.0)
+            bytesPerSec >= 1_000 -> "%.0f KB/s".format(java.util.Locale.US, bytesPerSec / 1_000.0)
             else -> "$bytesPerSec B/s"
         }
     }
@@ -207,9 +216,9 @@ override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     private fun formatBytes(bytes: Long): String {
         return when {
             bytes < 0 -> "?"
-            bytes >= 1_000_000_000 -> "%.1f GB".format(bytes / 1_000_000_000.0)
-            bytes >= 1_000_000 -> "%.1f MB".format(bytes / 1_000_000.0)
-            bytes >= 1_000 -> "%.0f KB".format(bytes / 1_000.0)
+            bytes >= 1_000_000_000 -> "%.1f GB".format(java.util.Locale.US, bytes / 1_000_000_000.0)
+            bytes >= 1_000_000 -> "%.1f MB".format(java.util.Locale.US, bytes / 1_000_000.0)
+            bytes >= 1_000 -> "%.0f KB".format(java.util.Locale.US, bytes / 1_000.0)
             else -> "$bytes B"
         }
     }

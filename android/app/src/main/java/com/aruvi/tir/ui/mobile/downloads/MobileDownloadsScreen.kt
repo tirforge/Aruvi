@@ -161,9 +161,11 @@ fun DownloadItemCard(
                 
                 // Progress & Speed for running downloads
                 if (item.status == DownloadStatus.RUNNING) {
-                     val progress = if (item.totalSize > 0) item.downloadedSize.toFloat() / item.totalSize else 0f
-                     LinearProgressIndicator(
-                         progress = { progress },
+                     // Double-precision ratio: Float mantissa (~16M ints) jumps on GB files.
+                     val progressDouble = if (item.totalSize > 0) item.downloadedSize.toDouble() / item.totalSize.toDouble() else 0.0
+                     val progress = progressDouble.toFloat()
+                      LinearProgressIndicator(
+                          progress = { progress },
                          modifier = Modifier.fillMaxWidth().height(4.dp),
                          color = MobilePrimary,
                          trackColor = MaterialTheme.colorScheme.surfaceVariant
@@ -187,7 +189,7 @@ fun DownloadItemCard(
                      }
                 } else if (item.status == DownloadStatus.PAUSED && item.totalSize > 0) {
                     // Show progress bar for paused items
-                    val progress = item.downloadedSize.toFloat() / item.totalSize
+                    val progress = (item.downloadedSize.toDouble() / item.totalSize.toDouble()).toFloat()
                     LinearProgressIndicator(
                         progress = { progress },
                         modifier = Modifier.fillMaxWidth().height(4.dp),

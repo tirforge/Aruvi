@@ -116,12 +116,16 @@ class AuthRepository @Inject constructor(
                         saveTokens(body.accessToken, body.refreshToken)
                         body.accessToken
                     } else {
-                        clearAuth()
+                        // 200 with empty body: transient/backend bug — keep
+                        // tokens so a later refresh can retry.
                         null
                     }
-                } else {
+                } else if (response.code() == 401 || response.code() == 403) {
                     // Refresh rejected (invalid/expired session) - clear auth
                     clearAuth()
+                    null
+                } else {
+                    // Transient 429/5xx — preserve tokens for a later retry.
                     null
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -192,6 +196,8 @@ class AuthRepository @Inject constructor(
     suspend fun logout() {
         try {
             api.logout()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             // Ignore logout API errors
         }

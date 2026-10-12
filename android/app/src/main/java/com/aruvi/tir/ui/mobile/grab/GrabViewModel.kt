@@ -102,11 +102,13 @@ fun search() {
         // storage channel and inserts a DB row). Ignore taps while in flight.
         if (grabJob?.isActive == true) return
         val idx = item.row * 100 + item.col + (item.msgId % 1000) * 100000
+        // Snapshot the query before launch (see TvGrabViewModel).
+        val q = _state.value.query
         _state.value = _state.value.copy(grabbingIdx = idx, grabResult = null)
         grabJob = viewModelScope.launch {
             try {
                 val resp = api.grabSelect(GrabSelectRequest(
-                    query = _state.value.query,
+                    query = q,
                     row = item.row,
                     col = item.col,
                     msgId = item.msgId,
