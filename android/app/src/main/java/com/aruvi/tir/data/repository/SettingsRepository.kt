@@ -77,11 +77,19 @@ class SettingsRepository @Inject constructor(
     fun normalizeServerUrl(input: String): String {
         val trimmed = input.trim().trimEnd('/')
         if (trimmed.isEmpty()) return trimmed
-        return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+        val withScheme = if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
             trimmed
         } else {
             "http://$trimmed"
         }
+        // Reject bare schemes / empty hosts (e.g. "http://") so callers never
+        // persist an origin-less URL that would send tokens to the wrong host.
+        if (withScheme.equals("http://", ignoreCase = true) ||
+            withScheme.equals("https://", ignoreCase = true)
+        ) {
+            return ""
+        }
+        return withScheme
     }
 
     /**
