@@ -182,8 +182,12 @@ class DiskChunkCache:
         now = time.time()
         total = 0
         entries: list[tuple[float, Path, int]] = []
-        for d in self.cache_dir.iterdir():
-            if not d.is_dir():
+        try:
+            top = list(self.cache_dir.iterdir())
+        except OSError:
+            return 0
+        for d in top:
+            if not d.is_dir() or d.is_symlink():
                 continue
             key = _parse_key(d.name)
             if key is None:
@@ -241,8 +245,12 @@ class DiskChunkCache:
         # Recompute totals now that per-video caps may have shrunk dirs.
         entries = []
         total = 0
-        for d in self.cache_dir.iterdir():
-            if not d.is_dir():
+        try:
+            top2 = list(self.cache_dir.iterdir())
+        except OSError:
+            return 0
+        for d in top2:
+            if not d.is_dir() or d.is_symlink():
                 continue
             key = _parse_key(d.name)
             if key is None:
@@ -272,9 +280,25 @@ class DiskChunkCache:
 
     @staticmethod
     def _remove_dir(d: Path):
-        for f in d.iterdir():
+        # Never follow a symlinked dir: unlink the link itself so a planted
+        # symlink can't make the sweep delete outside the cache.
+        try:
+            if d.is_symlink():
+                try:
+                    d.unlink()
+                except OSError:
+                    pass
+                return
+        except OSError:
+            return
+        try:
+            children = list(d.iterdir())
+        except OSError:
+            return
+        for f in children:
             try:
-                f.unlink()
+                if f.is_symlink() or f.is_file():
+                    f.unlink()
             except OSError:
                 pass
         try:

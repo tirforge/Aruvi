@@ -46,7 +46,7 @@ async def list_files(
         None, description="Filter by folder ID (null for root)"
     ),
     file_type: Optional[str] = Query(None, description="Filter by file type"),
-    search: Optional[str] = Query(None, description="Search by filename"),
+    search: Optional[str] = Query(None, max_length=200, description="Search by filename"),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -177,7 +177,11 @@ async def get_file(
     return FileResponse(**add_urls_to_file(file))
 
 
-@router.patch("/{file_id}", response_model=FileResponse)
+@router.patch(
+    "/{file_id}",
+    response_model=FileResponse,
+    responses={404: {"description": "File not found"}},
+)
 async def update_file(
     file_id: int,
     update_data: FileUpdate,
@@ -211,13 +215,16 @@ async def update_file(
 
     await db.commit()
 
-    # Re-fetch with relationships
+    # Re-fetch with relationships (re-check ownership: row may have been
+    # concurrently deleted or moved between commit and re-read)
     result = await db.execute(
         select(File)
-        .where(File.id == file_id)
+        .where(File.id == file_id, File.user_id == current_user.id)
         .options(selectinload(File.watch_progress))
     )
-    file = result.scalar_one()
+    file = result.scalar_one_or_none()
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
 
     return FileResponse(**add_urls_to_file(file))
 
@@ -273,13 +280,15 @@ async def delete_file(
     return {"message": "File deleted successfully"}
 
 
-@router.post("/batch-delete")
+@router.post("/batch-delete", responses={400: {"description": "Too many file IDs"}})
 async def batch_delete_files(
     file_ids: list[int],
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Delete multiple files."""
+    if len(file_ids) > 500:
+        raise HTTPException(status_code=400, detail="Too many file IDs (max 500)")
     # Fetch all files
     result = await db.execute(
         select(File)
@@ -415,7 +424,11 @@ async def get_progress(
     return progress
 
 
-@router.post("/{file_id}/share", response_model=FileResponse)
+@router.post(
+    "/{file_id}/share",
+    response_model=FileResponse,
+    responses={404: {"description": "File not found"}},
+)
 async def share_file(
     file_id: int,
     db: AsyncSession = Depends(get_db),
@@ -438,18 +451,24 @@ async def share_file(
 
     await db.commit()
 
-    # Re-fetch with relationships
+    # Re-fetch with relationships (re-check ownership after commit)
     result = await db.execute(
         select(File)
-        .where(File.id == file_id)
+        .where(File.id == file_id, File.user_id == current_user.id)
         .options(selectinload(File.watch_progress))
     )
-    file = result.scalar_one()
+    file = result.scalar_one_or_none()
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
 
     return FileResponse(**add_urls_to_file(file))
 
 
-@router.delete("/{file_id}/share", response_model=FileResponse)
+@router.delete(
+    "/{file_id}/share",
+    response_model=FileResponse,
+    responses={404: {"description": "File not found"}},
+)
 async def revoke_share(
     file_id: int,
     db: AsyncSession = Depends(get_db),
@@ -470,13 +489,15 @@ async def revoke_share(
 
     await db.commit()
 
-    # Re-fetch with relationships
+    # Re-fetch with relationships (re-check ownership after commit)
     result = await db.execute(
         select(File)
-        .where(File.id == file_id)
+        .where(File.id == file_id, File.user_id == current_user.id)
         .options(selectinload(File.watch_progress))
     )
-    file = result.scalar_one()
+    file = result.scalar_one_or_none()
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
 
     return FileResponse(**add_urls_to_file(file))
 
