@@ -259,6 +259,14 @@ export default function GlobalContextMenu() {
                                                         ? backendUrl(f.public_stream_url)
                                                         : `${base}${sep}token=${encodeURIComponent(minted)}`;
                                                     if (!isTrustedBackendUrl(url)) throw new Error('Untrusted stream origin');
+                                                    // Sink-side scheme gate (tssecurity:S6105): the
+                                                    // open-redirect sink must visibly refuse
+                                                    // non-http(s) URLs instead of relying only on
+                                                    // the origin helper above.
+                                                    {
+                                                        const protocol = new URL(url).protocol;
+                                                        if (protocol !== 'http:' && protocol !== 'https:') throw new Error('Untrusted stream origin');
+                                                    }
                                                     window.open(`vlc://${url}`, '_blank', 'noopener,noreferrer');
                                                 } catch (err) {
                                                     console.error('Failed to mint stream token:', err);

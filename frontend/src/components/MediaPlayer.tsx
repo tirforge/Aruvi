@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMemo, useRef, useEffect, useCallback } from 'react';
 import { X, Play, Pause, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, Music, Film, ChevronDown, ChevronUp, Subtitles, Search, Loader2 } from 'lucide-react';
-import { TelegramFile, formatDuration, useUpdateProgress, useFile, getFileDownloadToken, useAccessToken, searchInternetSubtitles, fetchSubtitleContent, SubtitleCandidate, API_BASE, backendUrl, isTrustedBackendUrl } from '../lib/api';
+import { TelegramFile, formatDuration, useUpdateProgress, useFile, getFileDownloadToken, useAccessToken, searchInternetSubtitles, fetchSubtitleContent, SubtitleCandidate, API_BASE, backendUrl, isTrustedBackendUrl, stripTrailingSlashes, stripLeadingSlashes } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import AuthImage from './AuthImage';
 
@@ -59,6 +59,21 @@ function loadMoviPlayer(): Promise<boolean> {
         document.head.appendChild(s);
     });
     return moviLoadPromise;
+}
+
+// Download-tab helpers, kept at module scope so handleDownload stays under
+// the cognitive-complexity budget (typescript:S3776): detach the blank tab's
+// opener (reverse-tabnabbing) and navigate either the new tab or this page.
+function detachDownloadOpener(win: Window | null) {
+    if (!win) return;
+    try {
+        win.opener = null;
+    } catch { /* cross-origin opener nulling is best-effort */ }
+}
+
+function navigateDownloadTo(win: Window | null, url: string) {
+    if (win) win.location.href = url;
+    else window.location.href = url;
 }
 
 function MediaPlayer() {
@@ -322,8 +337,8 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         try {
             return new URL(url, API_BASE || window.location.origin).href;
         } catch {
-            const base = (API_BASE || window.location.origin).replace(/\/+$/, '');
-            return `${base}/${url.replace(/^\/+/, '')}`;
+            const base = stripTrailingSlashes(API_BASE || window.location.origin);
+            return `${base}/${stripLeadingSlashes(url)}`;
         }
     };
 
@@ -413,30 +428,27 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         // was blocked (win === null). Detached opener: the blank tab must not
         // retain a handle back to the authenticated app page.
         const win = window.open('', '_blank', 'noopener,noreferrer');
-        if (win) {
-            try {
-                win.opener = null;
-            } catch { /* noop */ }
-        }
+        detachDownloadOpener(win);
         try {
             const token = await getFileDownloadToken(file.id);
             // Respect split frontend/backend deploys: backendUrl resolves the
             // path against API_BASE (a base with a trailing slash used to
-            // double-slash-404 via naive string concat here).
+            // double-slash-404 via naive string concat here). Origin-gated:
+            // never navigate an authed tab to a foreign origin.
             const dlUrl = backendUrl(`/stream/dl?id=${file.id}&token=${encodeURIComponent(token)}`);
-            if (!dlUrl) throw new Error('bad download url');
-            if (win) win.location.href = dlUrl;
-            else window.location.href = dlUrl;
+            if (!dlUrl || !isTrustedBackendUrl(dlUrl)) throw new Error('bad download url');
+            navigateDownloadTo(win, dlUrl);
         } catch (err) {
             // No JWT fallback: navigating to the account-token stream URL would
             // leak it into browser history. A public link needs no token, so it
             // still downloads when the token mint fails; otherwise close the
             // blank tab opened above (don't leave it lingering) and toast.
+            // The public fallback is origin-gated too: a foreign
+            // public_stream_url must not receive navigation from this page.
             console.warn('Failed to get download token:', err);
             const pub = getAbsoluteUrl((extendedFile ?? file).public_stream_url ?? '');
-            if (pub) {
-                if (win) win.location.href = pub;
-                else window.location.href = pub;
+            if (pub && isTrustedBackendUrl(pub)) {
+                navigateDownloadTo(win, pub);
             } else {
                 if (win) win.close();
                 addToast('Download failed — please try again', 'error');
@@ -477,6 +489,18 @@ ${start.replace(',', '.')} --> ${end.replace(',', '.')}`
         void (async () => {
             const url = await mintExternalUrl();
             if (!url) { addToast('Could not open in VLC', 'error'); return; }
+            // Sink-side origin gate (tssecurity:S6105): mintExternalUrl
+            // already gates, but the open-redirect sink must not depend on
+            // inter-procedural reasoning — refuse foreign/non-http(s) origins
+            // here too before handing the URL to an external app.
+            if (!isTrustedBackendUrl(url)) { addToast('Could not open in VLC', 'error'); return; }
+            try {
+                const protocol = new URL(url).protocol;
+                if (protocol !== 'http:' && protocol !== 'https:') throw new Error('untrusted scheme');
+            } catch {
+                addToast('Could not open in VLC', 'error');
+                return;
+            }
             window.open(`vlc://${url}`, '_blank', 'noopener,noreferrer');
         })();
     };

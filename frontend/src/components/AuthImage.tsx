@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { API_BASE, useAccessToken } from '../lib/api';
+import { API_BASE, useAccessToken, stripTrailingSlashes, stripLeadingSlashes } from '../lib/api';
 
 interface AuthImageProps {
     src: string;
@@ -16,8 +16,8 @@ const getAbsoluteUrl = (url: string) => {
     try {
         return new URL(url, API_BASE || window.location.origin).href;
     } catch {
-        const base = (API_BASE || window.location.origin).replace(/\/+$/, '');
-        return `${base}/${url.replace(/^\/+/, '')}`;
+        const base = stripTrailingSlashes(API_BASE || window.location.origin);
+        return `${base}/${stripLeadingSlashes(url)}`;
     }
 };
 
@@ -101,7 +101,7 @@ export default function AuthImage({ src, alt, className }: AuthImageProps) {
             .then((res) => {
                 if (!res.ok) throw new Error('Auth failed');
                 const contentLength = res.headers.get('content-length');
-                if (contentLength && parseInt(contentLength, 10) > MAX_THUMBNAIL_BYTES) {
+                if (contentLength && Number.parseInt(contentLength, 10) > MAX_THUMBNAIL_BYTES) {
                     throw new Error('Thumbnail too large');
                 }
                 return res.blob();

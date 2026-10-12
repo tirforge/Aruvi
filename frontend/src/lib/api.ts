@@ -137,6 +137,20 @@ baseURL: API_BASE + '/api',
 // split frontend/backend deploys build working URLs instead of 404ing on the
 // frontend origin. Absolute URLs pass through untouched (concatenating an
 // origin onto them would corrupt them into `https://fehttps://be/...`).
+// Slash trims without regex: the `/\/+$/` and `/^\/+/` patterns were
+// flagged (typescript:S8786) for super-linear backtracking on adversarial
+// input. A plain charCode scan is linear and behavior-identical (strips all
+// leading/trailing `/`, `''` stays `''`).
+export const stripTrailingSlashes = (s: string): string => {
+let end = s.length;
+while (end > 0 && s.charCodeAt(end - 1) === 47) end--;
+return s.slice(0, end);
+};
+export const stripLeadingSlashes = (s: string): string => {
+let start = 0;
+while (start < s.length && s.charCodeAt(start) === 47) start++;
+return s.slice(start);
+};
 export const backendUrl = (url: string): string => {
 if (!url) return '';
 // Prefix slice instead of /^https?:\/\//i: the regex has super-linear
@@ -150,8 +164,8 @@ if (url.startsWith('//')) return `${window.location.protocol}${url}`;
 try {
 return new URL(url, API_BASE || window.location.origin).href;
 } catch {
-const base = (API_BASE || window.location.origin).replace(/\/+$/, '');
-return `${base}/${url.replace(/^\/+/, '')}`;
+const base = stripTrailingSlashes(API_BASE || window.location.origin);
+return `${base}/${stripLeadingSlashes(url)}`;
 }
 };
 
@@ -161,6 +175,9 @@ return `${base}/${url.replace(/^\/+/, '')}`;
 // that append access/download tokens or `window.open` a backend-derived URL
 // must refuse foreign origins instead of leaking credentials outward.
 export const isTrustedBackendUrl = (absoluteUrl: string): boolean => {
+// Fail closed on empty: `new URL('', origin).origin` equals the origin, so
+// without this an empty string would wrongly pass as trusted.
+if (!absoluteUrl) return false;
 try {
 const ownOrigins = new Set([
 new URL(API_BASE || window.location.origin, window.location.origin).origin,
@@ -831,12 +848,12 @@ unitIndex++;
 return `${size.toFixed(1)} ${units[unitIndex]}`;
 };
 
-export const formatDuration = (seconds: number | null): string => {
+export const formatDuration = (seconds: number | null | undefined): string => {
 // Nullish (cleared/unset) is "no value"; NaN/non-finite is corrupt data;
 // negatives are invalid; but zero is a real position (0:00), not absence —
 // the old falsy check rendered it as '' and the minimized bar showed a bare
 // separator.
-if (seconds === null || typeof seconds === 'undefined') return '';
+if (seconds === null || seconds === undefined) return '';
 if (typeof seconds !== 'number' || Number.isNaN(seconds)) return '—';
 if (!Number.isFinite(seconds)) return '—';
 if (seconds < 0) return '';
