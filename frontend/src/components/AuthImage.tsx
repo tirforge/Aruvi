@@ -16,7 +16,8 @@ const getAbsoluteUrl = (url: string) => {
     try {
         return new URL(url, API_BASE || window.location.origin).href;
     } catch {
-        return `${window.location.origin}/${url.replace(/^\/+/, '')}`;
+        const base = (API_BASE || window.location.origin).replace(/\/+$/, '');
+        return `${base}/${url.replace(/^\/+/, '')}`;
     }
 };
 
@@ -100,7 +101,7 @@ export default function AuthImage({ src, alt, className }: AuthImageProps) {
             .then((res) => {
                 if (!res.ok) throw new Error('Auth failed');
                 const contentLength = res.headers.get('content-length');
-                if (contentLength && parseInt(contentLength) > MAX_THUMBNAIL_BYTES) {
+                if (contentLength && parseInt(contentLength, 10) > MAX_THUMBNAIL_BYTES) {
                     throw new Error('Thumbnail too large');
                 }
                 return res.blob();
