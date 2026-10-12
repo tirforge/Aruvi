@@ -39,6 +39,9 @@ settings = get_settings()
 
 router = APIRouter(prefix="/stream", tags=["Streaming"])
 
+_THUMB_NOT_FOUND_IN_MESSAGE = "Thumbnail not found in message"
+_DEFAULT_IMAGE_MIME = "image/jpeg"
+
 
 async def _user_from_download_token(request: Request, file_id: int, db: AsyncSession):
     """Resolve a user from a ``?token=`` download JWT, enforcing the token's
@@ -481,7 +484,7 @@ async def _download_thumb(msg, thumb_obj):
         return await tg_client.download_media(rt.file_id, in_memory=True)
 
 
-@router.get("/{file_id}/thumbnail")
+@router.get("/{file_id}/thumbnail", responses={404: {"description": "Thumbnail not found"}})
 async def get_thumbnail(
     request: Request,
     file_id: int,
@@ -551,17 +554,17 @@ async def get_thumbnail(
                     )
                 except Exception:
                     raise HTTPException(
-                        status_code=404, detail="Thumbnail not found in message"
+                        status_code=404, detail=_THUMB_NOT_FOUND_IN_MESSAGE
                     )
             else:
                 raise HTTPException(
-                    status_code=404, detail="Thumbnail not found in message"
+                    status_code=404, detail=_THUMB_NOT_FOUND_IN_MESSAGE
                 )
         else:  # YH
             thumb_bytes = await _download_thumb(message, thumbnail)  # KJ
             if thumb_bytes is None:
                 raise HTTPException(
-                    status_code=404, detail="Thumbnail not found in message"
+                    status_code=404, detail=_THUMB_NOT_FOUND_IN_MESSAGE
                 )
             data = (
                 thumb_bytes.getvalue()
@@ -585,18 +588,18 @@ async def get_thumbnail(
 def _detect_image_mime(data: bytes) -> str:
     """Detect image MIME type from magic bytes."""
     if not data:
-        return "image/jpeg"
+        return _DEFAULT_IMAGE_MIME
     if data[:4] == b"\x89PNG":
         return "image/png"
     if data[:2] == b"\xff\xd8":
-        return "image/jpeg"
+        return _DEFAULT_IMAGE_MIME
     if data[:6] in (b"GIF87a", b"GIF89a"):
         return "image/gif"
     if data[:2] == b"BM":
         return "image/bmp"
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "image/webp"
-    return "image/jpeg"
+    return _DEFAULT_IMAGE_MIME
 
 
 @router.get("/s/{public_hash}")

@@ -129,7 +129,7 @@ def _parse_mem_env(val: str) -> int:
                     float(val[: -len(suffix)]) * (1024**3 if suffix[0] == "G" else 1024**2)
                 )
         return int(val)
-    except ValueError:
+    except (ValueError, OverflowError):
         return 16 * 1024**3
 
 

@@ -4,6 +4,7 @@ Pydantic schemas for API request/response validation.
 
 from datetime import datetime
 from typing import Optional, List
+import math
 from pydantic import BaseModel, ConfigDict, Field, field_validator  # WP
 
 
@@ -147,7 +148,7 @@ class WatchProgressUpdate(BaseModel):  # QB
         if isinstance(v, bool):
             return v
         if isinstance(v, float):
-            if v != v or v in (float("inf"), float("-inf")):
+            if not math.isfinite(v):
                 raise ValueError("must be a finite number")
             return int(v)
         return v

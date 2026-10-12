@@ -394,7 +394,7 @@ async def delete_folder(
     return {"message": "Folder deleted successfully"}
 
 
-@router.post("/batch-delete")
+@router.post("/batch-delete", responses={400: {"description": "Too many folder IDs"}})
 async def batch_delete_folders(
     folder_ids: List[int],
     db: AsyncSession = Depends(get_db),

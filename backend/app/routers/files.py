@@ -177,7 +177,11 @@ async def get_file(
     return FileResponse(**add_urls_to_file(file))
 
 
-@router.patch("/{file_id}", response_model=FileResponse)
+@router.patch(
+    "/{file_id}",
+    response_model=FileResponse,
+    responses={404: {"description": "File not found"}},
+)
 async def update_file(
     file_id: int,
     update_data: FileUpdate,
@@ -276,7 +280,7 @@ async def delete_file(
     return {"message": "File deleted successfully"}
 
 
-@router.post("/batch-delete")
+@router.post("/batch-delete", responses={400: {"description": "Too many file IDs"}})
 async def batch_delete_files(
     file_ids: list[int],
     db: AsyncSession = Depends(get_db),
@@ -420,7 +424,11 @@ async def get_progress(
     return progress
 
 
-@router.post("/{file_id}/share", response_model=FileResponse)
+@router.post(
+    "/{file_id}/share",
+    response_model=FileResponse,
+    responses={404: {"description": "File not found"}},
+)
 async def share_file(
     file_id: int,
     db: AsyncSession = Depends(get_db),
@@ -456,7 +464,11 @@ async def share_file(
     return FileResponse(**add_urls_to_file(file))
 
 
-@router.delete("/{file_id}/share", response_model=FileResponse)
+@router.delete(
+    "/{file_id}/share",
+    response_model=FileResponse,
+    responses={404: {"description": "File not found"}},
+)
 async def revoke_share(
     file_id: int,
     db: AsyncSession = Depends(get_db),
