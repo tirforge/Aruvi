@@ -137,7 +137,7 @@ jobs:
 
       - name: Upload verdict artifact
         if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.area == 'all' || inputs.area == matrix.area) }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # gitlab-opencode port: per-run prefix (job_prefix idea) so weekly
           # backend/frontend/android reports never overwrite each other.
