@@ -56,7 +56,7 @@ jobs:
           git diff --stat "$RANGE" > release-evidence/diffstat.txt || true
           wc -l release-evidence/*
 
-      - uses: anomalyco/opencode/github@545f51d26cc39a907d2867492d498d9607ea5fa4 # v1.18.32
+      - uses: anomalyco/opencode/github@9b4ec5714d481559990db0a816d5dec19541a814 # v2.0.26
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
