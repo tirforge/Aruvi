@@ -10,7 +10,7 @@ uvicorn[standard]>=0.53.0
 # Database (asyncio extra = greenlet; the app uses the async engine,
 # so this must be a hard dep, not a transitive accident)
 sqlalchemy[asyncio]>=2.0.54
-asyncpg>=0.29.0
+asyncpg>=0.31.0
 aiosqlite>=0.19.0
 alembic>=1.20.0
 
