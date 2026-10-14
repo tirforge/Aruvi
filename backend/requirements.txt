@@ -19,7 +19,7 @@ pydantic>=2.13.5
 pydantic-settings>=2.1.0
 
 # Authentication
-python-jose[cryptography]>=3.3.0
+python-jose[cryptography]>=3.5.0
 
 # Utilities
 python-multipart>=0.0.6
