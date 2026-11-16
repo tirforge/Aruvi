@@ -1,7 +1,7 @@
 name: opencode-fullscan
 
 # Full-repo audit per area: each job scans its whole tree with opencode
-# (muse-spark-1.3 xhigh) and opens a SEPARATE fix PR for backend, frontend,
+# (free tier, xhigh) and opens a SEPARATE fix PR for backend, frontend,
 # and android. Fix PRs then get the normal treatment: CI + CodeQL +
 # opencode-review + CodeRabbit + Sonar.
 # Runs weekly + on demand (Actions tab -> Run workflow).
@@ -54,13 +54,26 @@ jobs:
       # Targeted re-runs: dispatch with area=backend to scan one area only.
       # Scheduled runs and area=all scan everything (inputs.area is empty on
       # schedule, so the first clause covers it).
+      # Fallback chain, resolved against the CLI registry before burning a run:
+      # deepseek -> glm -> minimax -> big-pickle (repo vars can override either
+      # side). A model the provider dropped degrades to the next one instead of
+      # reddening the whole weekly scan.
+      - name: Resolve model (fallback chain)
+        id: model
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.area == 'all' || inputs.area == matrix.area }}
+        env:
+          OPENCODE_MODEL: ${{ vars.OPENCODE_MODEL || '' }}
+          OPENCODE_MODEL_CHAIN: ${{ vars.OPENCODE_MODEL_CHAIN || 'opencode/deepseek-v4.1-flash-free opencode/glm-5.3-flash-free opencode/minimax-m3.1-flash-free opencode/big-pickle' }}
+          OPENCODE_VARIANT_CHAIN: ${{ vars.OPENCODE_VARIANT_CHAIN || '' }}
+        run: bash .github/scripts/resolve-model.sh >> "$GITHUB_OUTPUT"
+
       - uses: anomalyco/opencode/github@9b4ec5714d481559990db0a816d5dec19541a814 # v2.0.26
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.area == 'all' || inputs.area == matrix.area }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          model: opencode/muse-spark-1.3-contributor-free
-          variant: xhigh
+          model: ${{ steps.model.outputs.model }}
+          variant: ${{ steps.model.outputs.variant }}
           use_github_token: true
           prompt: |
             Full-repo audit and fix for the `${{ matrix.area }}` codebase.

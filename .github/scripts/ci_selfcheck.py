@@ -173,8 +173,28 @@ check("trivial" in combo and "lockfile" in combo.lower(),
       "combo: trivial-PR fast path")
 check("workflow_call:" in combo and "sonar_project_key" in combo,
       "combo: reusable packaging (workflow_call + sonar key)")
-check("inputs.model ||" in combo and "inputs.variant ||" in combo,
-      "combo: model/variant parameterized with fallbacks")
+# Model rot guard: every workflow must resolve its model from the fallback
+# chain, never a single hardcoded id. A pinned id the provider drops fails in
+# 1.3s with "Model not found" and reddened the weekly fullscan for weeks
+# (2026-10) because nothing checked this.
+for _wf in ["opencode-fullscan.yml", "opencode-smoke.yml",
+            "opencode-release-notes.yml", "merge-agent.yml",
+            "merge-sweep.yml", "review-combo.yml"]:
+    _t = (W / _wf).read_text()
+    check("resolve-model.sh" in _t
+          and "steps.model.outputs.model" in _t
+          and "OPENCODE_MODEL_CHAIN" in _t,
+          f"{_wf}: model resolved from the fallback chain")
+check("steps.model.outputs.variant" in full
+      and "steps.model.outputs.variant" in combo,
+      "model: variant resolved per model (no invalid xhigh on non-xhigh models)")
+# The Sonar wait must match the real check name. "SonarCloud Code Analysis"
+# is the SonarCloud App check; this repo scans via sonar.yml, so the check is
+# the `scan` job. Matching the wrong name meant Sonar was never awaited.
+check("sonar_check_name" in combo and "SONAR_CHECK" in combo,
+      "combo: waits on the configurable Sonar check name (real job, not App)")
+check("NO_FIXER" in combo,
+      "combo: pending-check timeout tolerant when no fixer runs (dependabot)")
 check("skills_path" in combo and "verify_commands" in combo,
       "combo: language-agnostic (skills_path + verify_commands)")
 check("OPENCODE_API_KEY" in combo and "ANTHROPIC_API_KEY" in combo,
@@ -210,6 +230,19 @@ check(r.returncode == 0 and "HARVEST-FIXTURE-PASS" in r.stdout,
 r = subprocess.run(["bash", "-n", str(_scripts / "process_opencode_output.sh")],
                    capture_output=True, text=True)
 check(r.returncode == 0, "process_opencode_output.sh: bash -n OK")
+r = subprocess.run(["bash", "-n", str(_scripts / "resolve-model.sh")],
+                   capture_output=True, text=True)
+check(r.returncode == 0, "resolve-model.sh: bash -n OK")
+# Highest-effort ladder, in order. A model without `xhigh` must degrade to
+# max/high/... instead of being handed an effort flag it does not support.
+_rtext = (_scripts / "resolve-model.sh").read_text()
+check("xhigh max high medium low minimal" in _rtext
+      and "OPENCODE_VARIANT_CHAIN" in _rtext,
+      "resolve-model: highest-effort ladder (xhigh -> max -> high -> medium -> low)")
+r = subprocess.run(["bash", str(ROOT / ".github/tests/test-resolve-model.sh")],
+                   capture_output=True, text=True, cwd=ROOT)
+check(r.returncode == 0 and "RESOLVE-MODEL-FIXTURE-PASS" in r.stdout,
+      "resolve-model fixture test passes (no network)")
 for f in ["opencode-fullscan.yml", "review-combo.yml",
           "merge-agent.yml", "merge-sweep.yml", "ci-selfcheck.yml"]:
     yaml.safe_load((W / f).read_text())

@@ -30,13 +30,21 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Resolve model (fallback chain)
+        id: model
+        env:
+          OPENCODE_MODEL: ${{ vars.OPENCODE_MODEL || '' }}
+          OPENCODE_MODEL_CHAIN: ${{ vars.OPENCODE_MODEL_CHAIN || 'opencode/deepseek-v4.1-flash-free opencode/glm-5.3-flash-free opencode/minimax-m3.1-flash-free opencode/big-pickle' }}
+          OPENCODE_VARIANT_CHAIN: ${{ vars.OPENCODE_VARIANT_CHAIN || '' }}
+        run: bash .github/scripts/resolve-model.sh >> "$GITHUB_OUTPUT"
+
       - uses: anomalyco/opencode/github@9b4ec5714d481559990db0a816d5dec19541a814 # v2.0.26
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          model: opencode/muse-spark-1.3-contributor-free
-          variant: xhigh
+          model: ${{ steps.model.outputs.model }}
+          variant: ${{ steps.model.outputs.variant }}
           agent: sweeper
           use_github_token: true # skip App-token exchange (its backend 502s); GITHUB_TOKEN works - merger/review/fullscan all use it
           prompt: |

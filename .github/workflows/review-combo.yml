@@ -32,15 +32,20 @@ on:
   workflow_call:
     inputs:
       model:
-        description: "opencode model for review + fix passes"
+        description: "Force one opencode model. Empty = repo fallback chain (deepseek -> glm -> minimax -> big-pickle)."
         required: false
         type: string
-        default: "opencode/muse-spark-1.3-contributor-free"
+        default: ""
       variant:
-        description: "opencode effort variant"
+        description: "Force one effort variant. Empty = highest the resolved model actually supports."
         required: false
         type: string
-        default: "xhigh"
+        default: ""
+      sonar_check_name:
+        description: "Check name that reports Sonar in your repo (the job name in your sonar workflow)."
+        required: false
+        type: string
+        default: "scan"
       sonar_project_key:
         description: "SonarCloud component key (org_repo)"
         required: false
@@ -137,6 +142,17 @@ jobs:
           "⏭️ **review-combo: trivial skip** — lockfile/manifest-only diff, no review burn.
           Sonar fix-pass still runs below; comment \`/fix\` if you want a full review." || true
 
+      # Chain resolved before the call: a model the provider dropped degrades to
+      # the next free one instead of failing the review in 1.3s (2026-10 rot).
+      - name: Resolve model (fallback chain)
+        id: model
+        if: steps.trivial.outputs.trivial != 'true'
+        env:
+          OPENCODE_MODEL: ${{ inputs.model }}
+          OPENCODE_MODEL_CHAIN: ${{ vars.OPENCODE_MODEL_CHAIN || 'opencode/deepseek-v4.1-flash-free opencode/glm-5.3-flash-free opencode/minimax-m3.1-flash-free opencode/big-pickle' }}
+          OPENCODE_VARIANT_CHAIN: ${{ vars.OPENCODE_VARIANT_CHAIN || '' }}
+        run: bash .github/scripts/resolve-model.sh >> "$GITHUB_OUTPUT"
+
       - uses: anomalyco/opencode/github@9b4ec5714d481559990db0a816d5dec19541a814 # v2.0.26
         if: steps.trivial.outputs.trivial != 'true'
         continue-on-error: true
@@ -147,8 +163,8 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         with:
-          model: ${{ inputs.model || 'opencode/muse-spark-1.3-contributor-free' }}
-          variant: ${{ inputs.variant || 'xhigh' }}
+          model: ${{ steps.model.outputs.model }}
+          variant: ${{ inputs.variant || steps.model.outputs.variant }}
           agent: reviewer
           use_github_token: true
           prompt: |
@@ -212,21 +228,35 @@ jobs:
         if: steps.guard.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_CHECK: ${{ inputs.sonar_check_name || 'scan' }}
+          # Dependabot PRs never get a fixer (policy), so a pending-check
+          # timeout must not redden them — warn and continue instead
+          # (2026-10-19: 20m burn, then a hard fail on a routine dep bump).
+          NO_FIXER: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
         run: |
-          # PENDING counts Sonar/CodeQL/analyze checks not yet in a terminal
-          # state. NOTE: gh reports states like SUCCESS/IN_PROGRESS, never
-          # COMPLETED — comparing against COMPLETED would burn the full 20m
-          # every run. Under bash -e a failed `gh pr checks` must not clobber
-          # a valid zero: only empty output falls back to "still pending".
-          # After 60 tries fail loud instead of harvesting incomplete data.
+          # PENDING counts the Sonar scan + CodeQL checks still in flight.
+          # The Sonar check is the `scan` JOB from sonar.yml: matching only
+          # "SonarCloud Code Analysis" (the SonarCloud *App* check, which this
+          # repo does not have) meant Sonar was never waited for and every run
+          # harvested a stale analysis. Callers with a different job name set
+          # sonar_check_name.
+          # gh reports SUCCESS/IN_PROGRESS, never COMPLETED — comparing against
+          # COMPLETED would burn the full 20m every run. Under bash -e a failed
+          # `gh pr checks` must not clobber a valid zero: only empty output
+          # falls back to "still pending".
           # gh-retry: one bounded retry per poll — a transient API blip must
           # not burn a whole 20s slot or, worse, read as "still pending".
+          FILTER=$(printf '%s' '[.[] | select((.name=="'"$SONAR_CHECK"'") or (.name=="SonarCloud Code Analysis") or (.name=="CodeQL") or (.name|startswith("analyze"))) | select(.state!="SUCCESS" and .state!="FAILURE" and .state!="CANCELLED" and .state!="SKIPPED")] | length')
           for i in $(seq 1 60); do
-            if ! PENDING=$(bash .github/scripts/gh-retry.sh pr checks ${{ github.event.pull_request.number }} --json name,state --jq '[.[] | select(.name=="SonarCloud Code Analysis" or .name=="CodeQL" or (.name|startswith("analyze"))) | select(.state!="SUCCESS" and .state!="FAILURE" and .state!="CANCELLED" and .state!="SKIPPED")] | length'); then
+            if ! PENDING=$(bash .github/scripts/gh-retry.sh pr checks ${{ github.event.pull_request.number }} --json name,state --jq "$FILTER"); then
               [ -n "$PENDING" ] || PENDING='?'
             fi
             [ "$PENDING" = "0" ] && break
             if [ "$i" = "60" ]; then
+              if [ "$NO_FIXER" = "true" ]; then
+                echo "::warning::Checks still pending after 20m (PENDING=$PENDING) — no fixer runs on this PR type, continuing with a partial harvest."
+                break
+              fi
               echo "::error::Checks still pending after 20m (last PENDING=$PENDING). Failing to avoid harvesting incomplete Sonar/CodeQL data."
               exit 1
             fi
@@ -304,6 +334,15 @@ jobs:
           gh pr comment ${{ github.event.pull_request.number }} --body
           "✅ **review-combo: all clean** — opencode, Sonar, and CodeRabbit found nothing to fix."
 
+      - name: Resolve model (fallback chain)
+        id: model
+        if: steps.guard.outputs.skip == 'false' && steps.decide.outputs.dirty == 'true' && github.event.pull_request.user.login != 'dependabot[bot]'
+        env:
+          OPENCODE_MODEL: ${{ inputs.model }}
+          OPENCODE_MODEL_CHAIN: ${{ vars.OPENCODE_MODEL_CHAIN || 'opencode/deepseek-v4.1-flash-free opencode/glm-5.3-flash-free opencode/minimax-m3.1-flash-free opencode/big-pickle' }}
+          OPENCODE_VARIANT_CHAIN: ${{ vars.OPENCODE_VARIANT_CHAIN || '' }}
+        run: bash .github/scripts/resolve-model.sh >> "$GITHUB_OUTPUT"
+
       - uses: anomalyco/opencode/github@9b4ec5714d481559990db0a816d5dec19541a814 # v2.0.26
         id: fixer
         # No continue-on-error here on purpose: a dead fixer must go red,
@@ -317,8 +356,8 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         with:
-          model: ${{ inputs.model || 'opencode/muse-spark-1.3-contributor-free' }}
-          variant: ${{ inputs.variant || 'xhigh' }}
+          model: ${{ steps.model.outputs.model }}
+          variant: ${{ inputs.variant || steps.model.outputs.variant }}
           use_github_token: true
           prompt: |
             Fix-review pass. Read findings/merged.md FIRST — it is the deduped
