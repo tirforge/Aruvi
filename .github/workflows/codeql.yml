@@ -21,7 +21,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+      # init and analyze MUST be the same commit: the release bundles are
+      # version-locked, and mixing them fails the whole scan with
+      # "Loaded a configuration file for version '4.39.0', but running version
+      # '4.38.2'" (seen 2026-10-19 on a Dependabot bump that moved init only).
+      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           languages: ${{ matrix.language }}
 
@@ -41,4 +45,4 @@ jobs:
         run: ./gradlew :app:assembleMobileDebug :app:assembleTvDebug --no-daemon --rerun-tasks
         working-directory: android
 
-      - uses: github/codeql-action/analyze@7999b86c43a865dc79d8923397f35af22de63401 # v4
+      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2 (same commit as init)

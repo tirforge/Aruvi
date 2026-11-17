@@ -96,8 +96,12 @@ gi = (ROOT / ".gitignore").read_text()
 check("/findings/" in gi, "gitignore: findings/ is workspace-only")
 check('select(.state!="COMPLETED")' not in combo,
       "combo: wait filter not comparing COMPLETED")
-check('select(.state!="SUCCESS"' in combo,
-      "combo: wait filter uses terminal states")
+# Allowlist, not denylist: an unrecognised check state must never hold the
+# 20m wait loop open (that is how a routine Dependabot bump went red).
+check('select(.state=="PENDING"' in combo,
+      "combo: wait filter counts ONLY explicit pending states")
+check("sonar_unknown" in combo and "Report partial (Sonar unchecked)" in combo,
+      "combo: Sonar outage reported as unchecked, never as clean")
 check("exit 1" in combo, "combo: wait loop fails loud on timeout")
 combo_y = yaml.safe_load(combo)
 fixer = [s for s in combo_y["jobs"]["fix"]["steps"]
@@ -148,13 +152,16 @@ check("useDefault = true" in _toml, "gitleaks: extend/useDefault present")
 # can't drift apart (the stale `$SONAR_TOKEN:` shape once did).
 import re as _re
 _harvest = (ROOT / ".github" / "scripts" / "harvest-findings.sh").read_text()
-_curl_lines = [ln for ln in _harvest.splitlines() if "curl " in ln and "SONAR_TOKEN" in ln]
+# Any line that hands SONAR_TOKEN to a credential flag must stay allowlisted,
+# whatever shape it takes (bare -u, or a -u inside a CURL_AUTH array).
+_curl_lines = [ln for ln in _harvest.splitlines()
+               if "SONAR_TOKEN" in ln and "-u" in ln]
 _allow = _re.findall(r"'''(.+?)'''", _toml.split("[allowlist]", 1)[1])
-check(bool(_curl_lines) and any(
-    _re.search(rx, ln) for rx in _allow for ln in _curl_lines),
-    "gitleaks: allowlist regex matches live SONAR_TOKEN curl line")
+check(bool(_curl_lines) and all(
+    any(_re.search(rx, ln) for rx in _allow) for ln in _curl_lines),
+    "gitleaks: allowlist covers EVERY -u SONAR_TOKEN reference in the harvest")
 _gitleaks = (ROOT / ".gitleaks.toml").read_text()
-check("SONAR_TOKEN" in _gitleaks and "curl -sf -u" in _gitleaks,
+check("SONAR_TOKEN" in _gitleaks,
       "gitleaks: allowlist covers SONAR_TOKEN env-reference line shape")
 
 # Chat-ops + hygiene + scorecard + reusable packaging + spend guard
@@ -213,6 +220,25 @@ for _py in ["pr-hygiene.py", "scorecard.py"]:
     check(r.returncode == 0, f"{_py}: py_compile OK")
 
 # Harvest -> merge chain: one script, fixture-tested, merged-first fixer
+# Bot logins carry a [bot] suffix from the API. Matching bare
+# 'github-actions' dropped every opencode finding (opencode.md was 0 bytes).
+_harvest_txt = (_scripts / "harvest-findings.sh").read_text()
+check("github-actions[bot]" in _harvest_txt,
+      "harvest: matches the real bot login (github-actions[bot])")
+check("__unavailable__" in _harvest_txt and "UNKNOWN" in _harvest_txt,
+      "harvest: Sonar outage is UNKNOWN, never silently CLEAN")
+_fixture = (ROOT / ".github/tests/fixtures/issues-raw.json").read_text()
+check("github-actions[bot]" in _fixture,
+      "harvest fixture: uses the real bot login (catches the regression)")
+
+# CodeQL bundles are version-locked: init and analyze MUST share a commit.
+_cq = (W / "codeql.yml").read_text()
+_init_pin = re.search(r"codeql-action/init@([0-9a-f]{40})", _cq)
+_analyze_pin = re.search(r"codeql-action/analyze@([0-9a-f]{40})", _cq)
+check(bool(_init_pin) and bool(_analyze_pin)
+      and _init_pin.group(1) == _analyze_pin.group(1),
+      "codeql: init and analyze pinned to the SAME commit (no version skew)")
+
 check("harvest-findings.sh" in combo, "combo: harvest via shared script")
 check("merge-findings.py" in combo and "merged.md" in combo,
       "combo: deduped merged.md wired (merge + summary + fixer)")

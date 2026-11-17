@@ -26,14 +26,22 @@ else
   bash "$RETRY" api "repos/$REPO/pulls/$PR/comments" --paginate > "$OUT/pull-raw.json" \
     || echo '[]' > "$OUT/pull-raw.json"
   # Download to a file first, then parse — never pipe a download straight
-  # into an interpreter. Fallback keeps the job alive if the API is
-  # unreachable; empty result parses as CLEAN below. -f matters:
-  # dependabot-triggered runs get NO secrets, so the call 401s with an empty
-  # body — without -f curl exits 0, the fallback never fires, and the empty
-  # file crashes the parser below.
-  curl -sf -u "${SONAR_TOKEN:-}:" -o "$OUT/sonar.json" \
-    "https://sonarcloud.io/api/issues/search?componentKeys=$KEY&pullRequest=$PR&resolved=false&ps=100" \
-    || echo '{"issues":[]}' > "$OUT/sonar.json"
+  # into an interpreter.
+  # Auth: public SonarCloud projects answer anonymously with 200. Passing
+  # `-u ":"` when the token is empty sends an EMPTY credential, which Sonar
+  # rejects with 401 — that used to fall back to "CLEAN" and mask every real
+  # finding on any run without a token. Omit -u entirely when there is none.
+  SONAR_URL="https://sonarcloud.io/api/issues/search?componentKeys=$KEY&pullRequest=$PR&resolved=false&ps=100"
+  if [ -n "${SONAR_TOKEN:-}" ]; then
+    CURL_AUTH=(-u "$SONAR_TOKEN:")
+  else
+    CURL_AUTH=()
+  fi
+  # A genuine failure is NOT "clean": write a marker the reporter treats as
+  # unknown, so the run never claims the repo is clean without having looked.
+  if ! curl -sf ${CURL_AUTH[@]+"${CURL_AUTH[@]}"} -o "$OUT/sonar.json" "$SONAR_URL"; then
+    echo '{"__unavailable__":true}' > "$OUT/sonar.json"
+  fi
 fi
 
 # 1+2+3. Extraction is python3 (not jq): one implementation, no drift
@@ -52,9 +60,14 @@ def walk(o):
             yield from walk(v)
 issues = json.load(open(d + '/issues-raw.json'))
 pulls = json.load(open(d + '/pull-raw.json'))
+# Bots get a [bot] suffix from the API: the opencode action posts through
+# GITHUB_TOKEN, so its login is 'github-actions[bot]'. Matching bare
+# 'github-actions' silently dropped EVERY opencode finding (proven against a
+# live PR: opencode.md was 0 bytes while the bot had posted real findings).
+GH_ACTIONS = ('github-actions[bot]', 'github-actions')
 RABBIT = ('coderabbitai[bot]', 'coderabbitai')
 ga = [o['body'] for o in walk(issues)
-      if o.get('user', {}).get('login') == 'github-actions' and 'body' in o]
+      if o.get('user', {}).get('login') in GH_ACTIONS and 'body' in o]
 rb = [o['body'] for o in walk(issues)
       if o.get('user', {}).get('login') in RABBIT and 'body' in o]
 inl = []
@@ -66,11 +79,17 @@ for o in walk(pulls):
 open(d + '/opencode.md', 'w').write('\n---\n'.join(ga))
 open(d + '/rabbit-main.md', 'w').write('\n---\n'.join(rb))
 open(d + '/rabbit-inline.md', 'w').write('\n---\n'.join(inl))
-raw = open(d + '/sonar.json').read().strip() or '{"issues":[]}'
-j = json.loads(raw)
-sonar = '\n---\n'.join(
-    f"[{i['severity']}] {i['component'].split(':')[-1]}:{i.get('line','?')} "
-    f"{i['rule']} \u2014 {i['message']}" for i in j.get('issues', []))
+raw = open(d + '/sonar.json').read().strip() or '{"__unavailable__":true}'
+try:
+    j = json.loads(raw)
+except json.JSONDecodeError:
+    j = {"__unavailable__": True}
+if j.get('__unavailable__'):
+    sonar = 'UNKNOWN: Sonar API unreachable — Sonar findings were NOT verified.'
+else:
+    sonar = '\n---\n'.join(
+        f"[{i.get('severity','?')}] {i['component'].split(':')[-1]}:{i.get('line','?')} "
+        f"{i.get('rule','?')} \u2014 {i.get('message','')}" for i in j.get('issues', []))
 open(d + '/sonar.md', 'w').write(sonar or 'CLEAN: no open Sonar issues.')
 PYEOF
 wc -c "$OUT"/*.md

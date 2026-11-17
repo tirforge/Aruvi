@@ -26,6 +26,9 @@ PATTERNS = [
     # Slack / AWS / generic provider keys
     r"xox[baprs]-[A-Za-z0-9-]{8,}",
     r"AKIA[0-9A-Z]{16}",
+    # SonarCloud/SonarQube tokens (squ_...): the harvest itself handles
+    # SONAR_TOKEN, so a model echoing it back must not reach the artifacts.
+    r"squ_[A-Za-z0-9]{20,}",
     r"sk-ant-[A-Za-z0-9-_]{8,}",
     r"sk-[A-Za-z0-9-_]{20,}",
     # Private key blocks (multiline)

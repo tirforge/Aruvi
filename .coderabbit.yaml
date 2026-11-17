@@ -11,8 +11,12 @@ reviews:
   profile: assertive
   auto_review:
     enabled: true
+  # Schema-valid form: finishing_touches has no `enabled` key — a top-level
+  # `enabled:` there is silently ignored (validated against
+  # coderabbit.ai/integrations/schema.v2.json). docstrings is deprecated/no-op.
   finishing_touches:
-    enabled: false
+    unit_tests:
+      enabled: false
   # Skip 11MB vendored player bundles (third-party code + chokes reviewers)
   path_filters:
     - "!frontend/public/vendor/**"

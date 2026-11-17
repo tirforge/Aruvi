@@ -246,7 +246,10 @@ jobs:
           # falls back to "still pending".
           # gh-retry: one bounded retry per poll — a transient API blip must
           # not burn a whole 20s slot or, worse, read as "still pending".
-          FILTER=$(printf '%s' '[.[] | select((.name=="'"$SONAR_CHECK"'") or (.name=="SonarCloud Code Analysis") or (.name=="CodeQL") or (.name|startswith("analyze"))) | select(.state!="SUCCESS" and .state!="FAILURE" and .state!="CANCELLED" and .state!="SKIPPED")] | length')
+          # Allowlist, never a denylist: only states that mean "still running"
+          # count. An unrecognised state (NEUTRAL/STALE/new) must not hold the
+          # loop open for 20 minutes.
+          FILTER=$(printf '%s' '[.[] | select((.name=="'"$SONAR_CHECK"'") or (.name=="SonarCloud Code Analysis") or (.name=="CodeQL") or (.name|startswith("analyze"))) | select(.state=="PENDING" or .state=="QUEUED" or .state=="IN_PROGRESS" or .state=="WAITING" or .state=="REQUESTED")] | length')
           for i in $(seq 1 60); do
             if ! PENDING=$(bash .github/scripts/gh-retry.sh pr checks ${{ github.event.pull_request.number }} --json name,state --jq "$FILTER"); then
               [ -n "$PENDING" ] || PENDING='?'
@@ -316,6 +319,14 @@ jobs:
         id: decide
         if: steps.guard.outputs.skip == 'false'
         run: |
+          # Sonar unreachable (auth blip / API down) is NOT clean. Never claim
+          # a clean verdict for a signal we failed to read.
+          if grep -qiE '^UNKNOWN' findings/sonar.md 2>/dev/null; then
+            echo "sonar_unknown=true" >> "$GITHUB_OUTPUT"
+            echo "dirty=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "sonar_unknown=false" >> "$GITHUB_OUTPUT"
           # Precise signals only: byte-size heuristics misfire on review
           # placeholders (CodeRabbit's "in progress" alone is >2KB).
           if grep -q '```diff' findings/opencode.md 2>/dev/null \
@@ -327,12 +338,24 @@ jobs:
           fi
 
       - name: Report all-clean
-        if: steps.guard.outputs.skip == 'false' && steps.decide.outputs.dirty == 'false'
+        if: steps.guard.outputs.skip == 'false' && steps.decide.outputs.dirty == 'false' && steps.decide.outputs.sonar_unknown != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >
           gh pr comment ${{ github.event.pull_request.number }} --body
-          "✅ **review-combo: all clean** — opencode, Sonar, and CodeRabbit found nothing to fix."
+          "✅ **review-combo: nothing to fix** — every signal that ran came back clean.
+          (Review and fix passes are skipped on Dependabot PRs by policy, so this is
+          not a finding-free review.)"
+
+      # Honest partial verdict: Sonar was unreadable, so "clean" would be a lie.
+      - name: Report partial (Sonar unchecked)
+        if: steps.guard.outputs.skip == 'false' && steps.decide.outputs.dirty == 'false' && steps.decide.outputs.sonar_unknown == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          gh pr comment ${{ github.event.pull_request.number }} --body
+          "⚠️ **review-combo: Sonar unchecked** — the SonarCloud API was unreachable,
+          so this run is NOT a clean verdict. See the step summary for what was harvested."
 
       - name: Resolve model (fallback chain)
         id: model
@@ -411,6 +434,9 @@ jobs:
           "❌ **review-combo failed** — the fix pass did not complete. Check the
           [workflow logs]($LOGS_URL), or comment \`/fix\` to retry failed jobs.
           Findings so far (if any) are in the step summary + combo-findings artifact." || true
+          # Self-healing: the label does not exist in a fresh repo, and
+          # --add-label then fails silently, so the queue never worked.
+          gh label create needs-human --color B60205 --description "Needs a human decision" 2>/dev/null || true
           gh pr edit ${{ github.event.pull_request.number }} --add-label "needs-human" || true
 
       # Escalation without failure: signals are dirty but NO fixer ran on this
@@ -424,4 +450,5 @@ jobs:
         run: |
           gh pr comment ${{ github.event.pull_request.number }} --body \
           "🧑‍🔧 **review-combo: needs a human** — findings are dirty but no autonomous fixer runs on this PR type. See the harvest in the step summary." || true
+          gh label create needs-human --color B60205 --description "Needs a human decision" 2>/dev/null || true
           gh pr edit ${{ github.event.pull_request.number }} --add-label "needs-human" || true

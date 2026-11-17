@@ -41,6 +41,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Self-healing: without this the tracking label does not exist, the
+          # --add-label fails silently, and the same PR is re-nudged every week
+          # (the "nudge once" guarantee).
+          gh label create hygiene-nudged --color FBCA04 --description "Hygiene nudge already sent" 2>/dev/null || true
           while read -r ACTION PR DAYS; do
             case "$ACTION" in
               NUDGE)

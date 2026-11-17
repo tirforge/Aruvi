@@ -11,10 +11,12 @@ useDefault = true
 
 [allowlist]
 description = "SONAR_TOKEN env reference in SonarCloud API calls (variable, not a value)"
-# Matched against the detected secret, which for
-#   curl -sf -u "${SONAR_TOKEN:-}:" -o ...
-# is the literal text `${SONAR_TOKEN:-}` — a variable reference, never a
-# value. Kept tight on purpose: any real pasted credential is still flagged.
-# ci_selfcheck verifies this regex still matches the live curl line in
-# harvest-findings.sh, so the two can't drift apart silently.
-regexes = ['''\$\{SONAR_TOKEN:-\}''']
+# Matched against the detected secret, which is the VARIABLE REFERENCE, never
+# a value. Both shapes the harvest can produce must be covered:
+#   CURL_AUTH=(-u "$SONAR_TOKEN:")        -> $SONAR_TOKEN:
+#   curl -u "${SONAR_TOKEN:-}:"           -> ${SONAR_TOKEN:-}
+# So match the reference itself (`${SONAR_TOKEN` / `$SONAR_TOKEN`). A real
+# pasted credential does not contain that literal text, so it is still caught.
+# ci_selfcheck verifies this regex still matches every -u reference in
+# harvest-findings.sh, so the two cannot drift apart silently.
+regexes = ['''\$\{?SONAR_TOKEN''']
