@@ -31,7 +31,10 @@ jobs:
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
 
       - name: Set up Gradle (dependency + build cache)
-        uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d # v4
+        # Was pinned to 0b6dd653…, which exists in no repo (commits API and
+        # git-object API both 404): the action could never load. Re-pinned to
+        # the current v4 release commit.
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
         with:
           cache-cleanup: on-success
 
@@ -67,7 +70,9 @@ jobs:
       # Attach APKs to the release that triggered this run (release event)
       - name: Upload APKs to release (release event)
         if: github.event_name == 'release'
-        uses: shogo82148/actions-upload-release-asset@31b40094e247fd7281d87218fdbfa403fd31fdca # v1
+        # Was pinned to 31b40094…, which exists in no repo (both APIs 404).
+        # Re-pinned to the current v1 release commit.
+        uses: shogo82148/actions-upload-release-asset@73f83b114970a3485e1423ecc1fb93d887c9b096 # v1
         with:
           upload_url: ${{ github.event.release.upload_url }}
           asset_path: android/dist/*.apk
