@@ -329,9 +329,13 @@ jobs:
           echo "sonar_unknown=false" >> "$GITHUB_OUTPUT"
           # Precise signals only: byte-size heuristics misfire on review
           # placeholders (CodeRabbit's "in progress" alone is >2KB).
+          # Anchored: an unanchored -i 'CLEAN' also matches real findings such
+          # as "clean up this unused import", which made the whole run report
+          # itself clean and skip the fixer entirely. The harvest writes the
+          # clean marker at the very start of the file, so match it there.
           if grep -q '```diff' findings/opencode.md 2>/dev/null \
              || [ "$(wc -c < findings/rabbit-inline.md)" -ge 200 ] \
-             || ! grep -qiE 'CLEAN|no open Sonar' findings/sonar.md; then
+             || ! grep -qE '^CLEAN:' findings/sonar.md; then
             echo "dirty=true" >> "$GITHUB_OUTPUT"
           else
             echo "dirty=false" >> "$GITHUB_OUTPUT"

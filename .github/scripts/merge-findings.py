@@ -28,7 +28,10 @@ SOURCES = [
     ("rabbit-inline", "rabbit-inline.md"),
     ("sonar", "sonar.md"),
 ]
-CLEAN_MARKERS = ("CLEAN", "no open Sonar")
+# Anchored, never a substring search. "CLEAN" as a bare substring also drops
+# real findings that merely mention it — a fix for `CLEANUP_TIMEOUT` was
+# silently discarded because the block contained the letters C-L-E-A-N.
+CLEAN_MARKER = re.compile(r"^\s*(?:#{1,6}\s*)?(?:CLEAN\b|no open Sonar)", re.I)
 
 
 def main() -> None:
@@ -40,7 +43,7 @@ def main() -> None:
         if not p.exists():
             continue
         for block in [b.strip() for b in p.read_text().split("\n---\n")]:
-            if not block or any(m in block for m in CLEAN_MARKERS):
+            if not block or CLEAN_MARKER.match(block):
                 continue
             m = LOC.search(block)
             if m is None:

@@ -230,6 +230,13 @@ check("__unavailable__" in _harvest_txt and "UNKNOWN" in _harvest_txt,
 _fixture = (ROOT / ".github/tests/fixtures/issues-raw.json").read_text()
 check("github-actions[bot]" in _fixture,
       "harvest fixture: uses the real bot login (catches the regression)")
+# Substring matching on CLEAN ate real findings ("clean up this import" and
+# a fix mentioning CLEANUP_TIMEOUT both read as clean). Both sides anchor now.
+check("'^CLEAN:'" in combo,
+      "combo: sonar clean test anchored (a finding mentioning 'clean' is not clean)")
+_mf = (_scripts / "merge-findings.py").read_text()
+check("CLEAN_MARKER.match" in _mf,
+      "merge-findings: clean marker anchored, not substring")
 
 # CodeQL bundles are version-locked: init and analyze MUST share a commit.
 _cq = (W / "codeql.yml").read_text()
