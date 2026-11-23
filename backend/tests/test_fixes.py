@@ -972,6 +972,62 @@ class TestRlsAutoLockdown:
         assert not any("service_role" in c for c in revokes)
 
 
+class TestVendoredPlayer:
+    """The SPA's player URL must point at a file that actually ships.
+
+    Bumping the version means three things move together: the vendored bundle
+    in ``frontend/public/vendor``, the ``MOVI_PLAYER_URL`` constant, and the
+    built copy under ``backend/app/static`` (which is what the backend serves).
+    A half-done bump ships a 404 for the playback engine, so assert all three.
+    """
+
+    @staticmethod
+    def _repo_root():
+        from pathlib import Path
+
+        return Path(__file__).resolve().parents[2]
+
+    def test_player_url_has_a_vendored_bundle(self):
+        import re
+
+        root = self._repo_root()
+        src = (root / "frontend/src/components/MediaPlayer.tsx").read_text(
+            encoding="utf-8"
+        )
+        match = re.search(r"const MOVI_PLAYER_URL = '([^']+)'", src)
+        assert match, "MOVI_PLAYER_URL not found in MediaPlayer.tsx"
+        url = match.group(1)
+        assert url.startswith("/vendor/movi-player-"), url
+
+        vendored = root / "frontend/public" / url.lstrip("/")
+        assert vendored.is_file(), f"missing vendored bundle: {vendored}"
+
+        built = root / "backend/app/static" / url.lstrip("/")
+        assert built.is_file(), f"missing built bundle: {built} (run the frontend build)"
+        assert vendored.read_bytes() == built.read_bytes(), (
+            "backend/app/static vendor copy is stale — rebuild the frontend"
+        )
+
+    def test_vendored_bundle_is_untouched_upstream(self):
+        """No local patches: the file is a byte-for-byte upstream release."""
+        import re
+
+        root = self._repo_root()
+        src = (root / "frontend/src/components/MediaPlayer.tsx").read_text(
+            encoding="utf-8"
+        )
+        url = re.search(r"const MOVI_PLAYER_URL = '([^']+)'", src).group(1)
+        path = root / "frontend/public" / url.lstrip("/")
+
+        marker = b"ARUVI-LOCAL-PATCH"
+        with path.open("rb") as fh:
+            while chunk := fh.read(1 << 20):
+                assert marker not in chunk, (
+                    f"{path.name} carries a local patch — upgrade by replacing the "
+                    "file with the upstream release instead"
+                )
+
+
 class TestSpaStaticAllowlist:
     def test_builder_maps_nested_files_skips_gz(self, tmp_path):
         from app.static_allowlist import build_static_allowlist
