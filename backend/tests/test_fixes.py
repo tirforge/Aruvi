@@ -1180,7 +1180,7 @@ class TestSearchEscaping:
 
 
 class TestSpaStaticAllowlist:
-    def test_builder_maps_nested_files_skips_gz(self, tmp_path):
+    def test_builder_maps_nested_files_skips_encoded_siblings(self, tmp_path):
         from app.static_allowlist import build_static_allowlist
 
         (tmp_path / "index.html").write_bytes(b"<html/>")
@@ -1188,13 +1188,15 @@ class TestSpaStaticAllowlist:
         assets.mkdir()
         (assets / "app-abc123.js").write_bytes(b"js")
         (assets / "app-abc123.js.gz").write_bytes(b"gzipped")
+        (assets / "app-abc123.js.br").write_bytes(b"brotlied")
         (tmp_path / "sub").mkdir()
 
         allow = build_static_allowlist(str(tmp_path))
         assert allow["index.html"].endswith("index.html")
         assert allow["assets/app-abc123.js"].endswith("app-abc123.js")
-        # .gz siblings are never directly addressable ...
+        # precompressed siblings are never directly addressable ...
         assert "assets/app-abc123.js.gz" not in allow
+        assert "assets/app-abc123.js.br" not in allow
         # ... and directories are never servable
         assert "sub" not in allow
         assert "assets" not in allow
@@ -1220,12 +1222,112 @@ class TestSpaStaticAllowlist:
         (static / "index.html").write_bytes(b"<html>spa</html>")
         (static / "favicon.ico").write_bytes(b"ICO")
         (static / "assets" / "app-abc.js").write_bytes(b"js" * 100)
-        (static / "assets" / "app-abc.js.gz").write_bytes(b"gz")
+        (static / "assets" / "app-abc.js.gz").write_bytes(b"gzip-bytes")
+        (static / "assets" / "app-abc.js.br").write_bytes(b"brotli-bytes")
         monkeypatch.chdir(tmp_path / "site")
         monkeypatch.setattr(
             mainmod, "STATIC_ALLOWLIST", build_static_allowlist("app/static")
         )
         return mainmod
+
+    def test_accepts_encoding_tokens(self):
+        from app.main import _accepts_encoding
+
+        assert _accepts_encoding("gzip, deflate, br", "br")
+        assert _accepts_encoding("br;q=1.0, gzip;q=0.5", "gzip")
+        assert _accepts_encoding("GZIP", "gzip")
+        assert not _accepts_encoding("gzip, deflate", "br")
+        assert not _accepts_encoding("", "br")
+        # "brotli" is not the token name and must not match a substring check
+        assert not _accepts_encoding("brotli", "br")
+
+    @staticmethod
+    def _request(path: str, accept_encoding: str):
+        from starlette.requests import Request
+
+        return Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": path,
+                "raw_path": path.encode(),
+                "query_string": b"",
+                "root_path": "",
+                "scheme": "http",
+                "server": ("testserver", 80),
+                "client": ("testclient", 1234),
+                "headers": [(b"accept-encoding", accept_encoding.encode())],
+                "asgi": {"spec_version": "2.0", "version": "3.0"},
+                "extensions": {},
+            }
+        )
+
+    @pytest.mark.asyncio
+    async def test_brotli_preferred_then_gzip_then_plain(self, tmp_path, monkeypatch):
+        mainmod = self._tmp_site(tmp_path, monkeypatch)
+        from app.main import serve_spa
+
+        url = "/assets/app-abc.js"
+
+        resp = await serve_spa(self._request(url, "br, gzip"), "assets/app-abc.js")
+        assert resp.headers["content-encoding"] == "br"
+        assert resp.headers["vary"] == "Accept-Encoding"
+        assert resp.path.endswith("app-abc.js.br")
+
+        resp = await serve_spa(self._request(url, "gzip, deflate"), "assets/app-abc.js")
+        assert resp.headers["content-encoding"] == "gzip"
+        assert resp.path.endswith("app-abc.js.gz")
+
+        resp = await serve_spa(self._request(url, "identity"), "assets/app-abc.js")
+        assert "content-encoding" not in resp.headers
+        assert resp.path.endswith("app-abc.js")
+        assert mainmod.STATIC_ALLOWLIST
+
+    def test_resolve_static_returns_all_three_variants(self, tmp_path):
+        from app.main import _resolve_static
+
+        plain = tmp_path / "a.js"
+        plain.write_bytes(b"plain")
+        (tmp_path / "a.js.gz").write_bytes(b"gz")
+        (tmp_path / "a.js.br").write_bytes(b"br")
+
+        assert _resolve_static(str(plain)) == (
+            str(plain),
+            str(tmp_path / "a.js.gz"),
+            str(tmp_path / "a.js.br"),
+        )
+        assert _resolve_static(str(tmp_path / "missing.js")) == (None, None, None)
+
+    def test_resolve_static_ignores_symlinked_sibling(self, tmp_path):
+        import os
+
+        from app.main import _resolve_static
+
+        plain = tmp_path / "a.js"
+        plain.write_bytes(b"plain")
+        outside = tmp_path / "outside.br"
+        outside.write_bytes(b"secret")
+        link = tmp_path / "a.js.br"
+        try:
+            os.symlink(outside, link)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks not supported here")
+
+        assert _resolve_static(str(plain)) == (str(plain), None, None)
+
+    @pytest.mark.asyncio
+    async def test_encoded_sibling_is_not_directly_addressable(
+        self, tmp_path, monkeypatch
+    ):
+        self._tmp_site(tmp_path, monkeypatch)
+        from app.main import serve_spa
+
+        for path in ("/assets/app-abc.js.br", "/assets/app-abc.js.gz"):
+            resp = await serve_spa(
+                self._request(path, "identity"), path.lstrip("/")
+            )
+            # Missing from the allowlist -> SPA fallback, never the sibling bytes.
+            assert resp.path.endswith("index.html")
 
     def test_spa_fallback_and_api_guard(self, tmp_path, monkeypatch):
         self._tmp_site(tmp_path, monkeypatch)

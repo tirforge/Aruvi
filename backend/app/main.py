@@ -425,19 +425,38 @@ def _is_spa_bypass(full_path: str) -> bool:
     )
 
 
-def _resolve_static(static_file_path: str | None) -> tuple[str | None, str | None]:
-    """Resolve an allowlisted path to (plain, gz-or-None), re-checking symlinks."""
-    if static_file_path and os.path.isfile(static_file_path):
-        # Builder never allowlists symlinks, but re-check here: a link
-        # planted after startup (or a symlinked .gz sibling) would
-        # otherwise be followed by FileResponse out of app/static.
-        if os.path.islink(static_file_path):
-            return None, None
-        gz = static_file_path + ".gz"
-        if os.path.isfile(gz) and not os.path.islink(gz):
-            return static_file_path, gz
-        return static_file_path, None
-    return None, None
+def _resolve_static(
+    static_file_path: str | None,
+) -> tuple[str | None, str | None, str | None]:
+    """Resolve an allowlisted path to (plain, gz-or-None, br-or-None).
+
+    Builder never allowlists a symlink, but re-check here: a link planted
+    after startup (or a symlinked precompressed sibling) would otherwise be
+    followed by FileResponse out of app/static.
+    """
+    if not static_file_path or not os.path.isfile(static_file_path):
+        return None, None, None
+    if os.path.islink(static_file_path):
+        return None, None, None
+
+    def sibling(suffix: str) -> str | None:
+        path = static_file_path + suffix
+        if os.path.isfile(path) and not os.path.islink(path):
+            return path
+        return None
+
+    return static_file_path, sibling(".gz"), sibling(".br")
+
+
+def _accepts_encoding(accept_encoding: str, coding: str) -> bool:
+    """True when *coding* is one of the Accept-Encoding tokens.
+
+    q-values are not honoured: browsers do not send ``q=0`` for gzip/br, and
+    the previous substring check ignored them too.
+    """
+    return coding in {
+        token.strip().split(";")[0].lower() for token in accept_encoding.split(",")
+    }
 
 
 def _spa_index_exists() -> bool:
@@ -445,13 +464,15 @@ def _spa_index_exists() -> bool:
     return os.path.exists("app/static/index.html")
 
 
-def _gz_response(static_file: str, gz_file: str) -> FileResponse:
-    """Build the precompressed-sibling response (~70% smaller on the wire)."""
+def _encoded_response(
+    static_file: str, encoded_file: str, encoding: str
+) -> FileResponse:
+    """Build a precompressed-sibling response (~30% smaller on the wire for br)."""
     media_type = mimetypes.guess_type(static_file)[0] or "application/octet-stream"
     return FileResponse(
-        gz_file,
+        encoded_file,
         media_type=media_type,
-        headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"},
+        headers={"Content-Encoding": encoding, "Vary": "Accept-Encoding"},
     )
 
 
@@ -468,13 +489,16 @@ async def serve_spa(request: Request, full_path: str):
     # symlink escapes can't reach FileResponse.
     static_file_path = STATIC_ALLOWLIST.get(full_path or "")
 
-    accepts_gzip = "gzip" in request.headers.get("accept-encoding", "")
-    static_file, gz_file = await asyncio.to_thread(
+    accept_encoding = request.headers.get("accept-encoding", "")
+    static_file, gz_file, br_file = await asyncio.to_thread(
         _resolve_static, static_file_path
     )
     if static_file:
-        if gz_file and accepts_gzip:
-            return _gz_response(static_file, gz_file)
+        # br first: 2.55MB vs 3.65MB gzip for the vendored player.
+        if br_file and _accepts_encoding(accept_encoding, "br"):
+            return _encoded_response(static_file, br_file, "br")
+        if gz_file and _accepts_encoding(accept_encoding, "gzip"):
+            return _encoded_response(static_file, gz_file, "gzip")
         return FileResponse(static_file)
 
     if await asyncio.to_thread(_spa_index_exists):
