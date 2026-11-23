@@ -1,7 +1,31 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+    autoUpdate,
+    flip,
+    shift,
+    size,
+    useFloating,
+} from '@floating-ui/react-dom';
 import { useAppStore } from '../lib/store';
 import { TelegramFile, Folder, api, useFolders, getFileDownloadToken, useAccessToken, backendUrl, isTrustedBackendUrl } from '../lib/api';
 import { Play, Download, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, ExternalLink } from 'lucide-react';
+
+// Module-level so its identity is stable: a fresh array each render makes
+// useFloating recompute the position on every state change (busy spinner,
+// "Copied!" reset) instead of only when the anchor or size actually moves.
+const MENU_MIDDLEWARE = [
+    flip({ padding: 10 }),
+    shift({ padding: 10 }),
+    size({
+        padding: 10,
+        apply({ availableHeight, elements }) {
+            Object.assign(elements.floating.style, {
+                maxHeight: `${availableHeight}px`,
+                overflowY: 'auto',
+            });
+        },
+    }),
+];
 
 export default function GlobalContextMenu() {
     // Narrow selectors: this component mounts permanently at the app root —
@@ -25,7 +49,6 @@ export default function GlobalContextMenu() {
     const hasToken = !!useAccessToken();
     const { data: folders } = useFolders(currentFolderId, hasToken);
     const selectedFolders = folders?.filter(f => selectedFolderIds.has(f.id)) || [];
-    const menuRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
     // One timer drives the "✓ Copied!" reset: without the ref, rapid copies
     // stacked timers and an early one cleared a newer confirmation; without
@@ -83,30 +106,45 @@ export default function GlobalContextMenu() {
         };
     }, [activeContextMenu, setActiveContextMenu]);
 
+    // Placement is measured, not guessed. The old clamp assumed a 220x300 box:
+    // a multi-select file menu is eight rows tall, so on a short window its
+    // last actions were pushed off screen with no way to reach them. flip()
+    // puts the menu above the cursor when there is no room below, shift()
+    // keeps it off the right edge, and size() caps the height to the space
+    // that actually exists (the excess scrolls).
+    const { refs, floatingStyles, placement } = useFloating({
+        // transform:false keeps left/top inline instead of a translate, so the
+        // animate-scale-in keyframes still own the transform property.
+        transform: false,
+        placement: 'bottom-start',
+        strategy: 'fixed',
+        middleware: MENU_MIDDLEWARE,
+        whileElementsMounted: autoUpdate,
+    });
+
+    // A right-click anchor is a point, not a node, so the reference is a
+    // virtual element whose rect is the cursor. Re-created on every open so
+    // the menu follows the newest click instead of the first one.
+    const anchor = activeContextMenu;
+    useLayoutEffect(() => {
+        if (!anchor) return;
+        refs.setReference({
+            getBoundingClientRect: () => ({
+                x: anchor.x,
+                y: anchor.y,
+                top: anchor.y,
+                left: anchor.x,
+                right: anchor.x,
+                bottom: anchor.y,
+                width: 0,
+                height: 0,
+            }),
+        });
+    }, [anchor, refs]);
+
     if (!activeContextMenu) return null;
 
-    const { x, y } = activeContextMenu;
     const isMultiSelect = selectedFileIds.size > 1 && activeContextMenu.type === 'file' && selectedFileIds.has(activeContextMenu.item.id);
-
-    // Adjust position to keep within viewport
-    const getMenuPosition = () => {
-        const menuWidth = 220;
-        const padding = 10;
-
-        let posX = x;
-        let posY = y;
-
-        if (posX + menuWidth > window.innerWidth - padding) {
-            posX = window.innerWidth - menuWidth - padding;
-        }
-        if (posY > window.innerHeight - 300) {
-            posY = Math.max(padding, window.innerHeight - 300);
-        }
-
-        return { left: posX, top: posY };
-    };
-
-    const position = getMenuPosition();
 
     const handleAction = (action: () => void) => {
         action();
@@ -200,12 +238,11 @@ export default function GlobalContextMenu() {
 
             {/* Context Menu */}
             <div
-                ref={menuRef}
+                ref={refs.setFloating}
                 className="fixed bg-dark-800/95 backdrop-blur-xl border border-white/[0.08] rounded-xl shadow-2xl py-1.5 min-w-[220px] z-[99999] animate-scale-in"
                 style={{
-                    left: position.left,
-                    top: position.top,
-                    transformOrigin: 'top left'
+                    ...floatingStyles,
+                    transformOrigin: placement.startsWith('top') ? 'bottom left' : 'top left',
                 }}
                 onClick={(e) => e.stopPropagation()}
                 onContextMenu={(e) => e.preventDefault()}
