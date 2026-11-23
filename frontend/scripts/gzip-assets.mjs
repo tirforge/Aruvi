@@ -8,8 +8,11 @@
 import { gzipSync } from 'node:zlib';
 import { readdirSync, statSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, extname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const OUT_DIR = new URL('../../backend/app/static/', import.meta.url).pathname;
+// fileURLToPath, not URL.pathname: on Windows the latter yields "/C:/..." and
+// joining it produces "C:\C:\...". The build must work on a dev machine too.
+const OUT_DIR = fileURLToPath(new URL('../../backend/app/static/', import.meta.url));
 
 const COMPRESSIBLE = new Set(['.js', '.css', '.html', '.svg', '.json', '.webmanifest', '.ico', '.txt']);
 
