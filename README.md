@@ -188,7 +188,8 @@ cp local.properties.example local.properties
 
 - **11 bots** (1 main + 10 helpers) download chunks in parallel
 - **RAM cache**: 300 MB/video (instant replay)
-- **Disk cache**: 8 GB total / 2 GB/video (survives restarts)
+- **Disk cache**: 8 GB total / 2 GB/video (survives restarts) — SQLite-indexed
+  LRU + TTL via [diskcache](https://github.com/grantjenks/python-diskcache)
 - **Refresh tokens rotate** — replay attacks impossible
 - **Download tokens bind to file_id** — prevents cross-user access
 
