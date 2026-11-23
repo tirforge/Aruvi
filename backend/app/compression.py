@@ -1,4 +1,4 @@
-"""Content-type-filtered gzip compression for single-shot text responses.
+"""Content-type-filtered compression for single-shot text responses.
 
 Starlette's GZipMiddleware compresses ANY response when the client sends
 Accept-Encoding: gzip — including streamed video/audio (massive wasted CPU
@@ -6,9 +6,19 @@ per chunk, and range/206 semantics break). This middleware only compresses
 complete JSON/HTML/text bodies (API payloads), passes streamed bodies and
 non-200/206 responses through untouched. Large static assets (SPA bundle,
 vendored player) are served PRECOMPRESSED by main.serve_spa instead.
+
+Brotli is preferred when the client advertises it: for JSON/HTML it is both
+smaller and faster than zlib level 6 (scripts/bench_compression.py), and the
+reference C library is portable (x86_64 and aarch64 wheels). gzip via stdlib
+zlib is the fallback for clients that don't send ``br``.
 """
 
 import gzip
+
+try:
+    import brotli
+except ImportError:  # pragma: no cover - dependency is in requirements.txt
+    brotli = None
 
 # Only these get compressed — never media, never octet-stream.
 COMPRESSIBLE_TYPES = frozenset(
@@ -22,6 +32,11 @@ COMPRESSIBLE_TYPES = frozenset(
     }
 )
 
+# Brotli quality 4 is the dynamic-content sweet spot: smaller output than
+# gzip -6 at a comparable CPU cost (quality 5+ is smaller but slower).
+_BROTLI_QUALITY = 4
+_GZIP_LEVEL = 6
+
 
 def _content_type(start_message) -> str:
     for k, v in start_message.get("headers", []):
@@ -30,7 +45,38 @@ def _content_type(start_message) -> str:
     return ""
 
 
-class CompressibleGZipMiddleware:
+def _accepts(accept: bytes, coding: bytes) -> bool:
+    """True when Accept-Encoding lists ``coding`` with a non-zero q-value."""
+    for part in accept.split(b","):
+        token, _, params = part.partition(b";")
+        if token.strip().lower() != coding:
+            continue
+        for param in params.split(b";"):
+            key, _, value = param.partition(b"=")
+            if key.strip().lower() == b"q":
+                try:
+                    return float(value) > 0
+                except ValueError:
+                    return True
+        return True
+    return False
+
+
+def _pick_encoding(accept: bytes) -> bytes | None:
+    if brotli is not None and _accepts(accept, b"br"):
+        return b"br"
+    if _accepts(accept, b"gzip"):
+        return b"gzip"
+    return None
+
+
+def _compress(body: bytes, encoding: bytes) -> bytes:
+    if encoding == b"br":
+        return brotli.compress(body, quality=_BROTLI_QUALITY)
+    return gzip.compress(body, compresslevel=_GZIP_LEVEL)
+
+
+class SelectiveCompressionMiddleware:
     """Buffers the response start until the (single-shot) body is known, then
     emits start+body together — compressed when worthwhile."""
 
@@ -48,11 +94,12 @@ class CompressibleGZipMiddleware:
             if k.lower() == b"accept-encoding":
                 accept = v
                 break
-        if b"gzip" not in accept:
+        encoding = _pick_encoding(accept)
+        if encoding is None:
             await self.app(scope, receive, send)
             return
 
-        state = {}
+        state = {"encoding": encoding}
 
         async def send_wrapper(message):
             if message["type"] == "http.response.start":
@@ -74,7 +121,7 @@ class CompressibleGZipMiddleware:
 
                 body = message.get("body", b"")
                 if state.get("compress") and len(body) >= self.minimum_size:
-                    compressed = gzip.compress(body, compresslevel=6)
+                    compressed = _compress(body, state["encoding"])
                     if len(compressed) < len(body):
                         start = state.pop("start")
                         headers = [
@@ -84,7 +131,7 @@ class CompressibleGZipMiddleware:
                         ]
                         headers += [
                             (b"content-length", str(len(compressed)).encode()),
-                            (b"content-encoding", b"gzip"),
+                            (b"content-encoding", state["encoding"]),
                             (b"vary", b"accept-encoding"),
                         ]
                         start["headers"] = headers

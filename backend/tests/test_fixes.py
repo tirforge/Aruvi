@@ -1888,3 +1888,160 @@ class TestMemoryPressureFallbacks:
         real_open = open
         monkeypatch.setattr("builtins.open", _fake_open)
         assert isinstance(streaming_mod._memory_pressure(), bool)
+
+
+class TestFastCompression:
+    """Brotli/gzip middleware for complete JSON/HTML responses."""
+
+    @staticmethod
+    def _run(
+        mw,
+        *,
+        content_type: str = "application/json",
+        body: bytes = b"{}",
+        accept_encoding: bytes = b"gzip",
+        status: int = 200,
+        streamed: bool = False,
+    ):
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": [(b"accept-encoding", accept_encoding)]
+            if accept_encoding
+            else [],
+        }
+        sent = []
+
+        async def send(message):
+            sent.append(message)
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def app(scope, receive, send):
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": status,
+                    "headers": [
+                        (b"content-type", content_type.encode()),
+                        (b"content-length", str(len(body)).encode()),
+                    ],
+                }
+            )
+            if streamed:
+                await send(
+                    {"type": "http.response.body", "body": body, "more_body": True}
+                )
+                await send({"type": "http.response.body", "body": b""})
+            else:
+                await send({"type": "http.response.body", "body": body})
+
+        asyncio.run(mw(app)(scope, receive, send))
+        return sent
+
+    def test_brotli_preferred_when_advertised(self):
+        import brotli
+
+        from app.compression import SelectiveCompressionMiddleware
+
+        body = b'{"files": "' + b"x" * 5000 + b'"}'
+        start, end = self._run(
+            SelectiveCompressionMiddleware,
+            body=body,
+            accept_encoding=b"gzip, deflate, br",
+        )
+        headers = dict(start["headers"])
+        assert headers[b"content-encoding"] == b"br"
+        assert int(headers[b"content-length"]) == len(end["body"])
+        assert brotli.decompress(end["body"]) == body
+
+    def test_gzip_used_when_brotli_not_advertised(self):
+        import gzip as gz
+
+        from app.compression import SelectiveCompressionMiddleware
+
+        body = b'{"files": "' + b"x" * 5000 + b'"}'
+        start, end = self._run(
+            SelectiveCompressionMiddleware,
+            body=body,
+            accept_encoding=b"gzip, deflate",
+        )
+        headers = dict(start["headers"])
+        assert headers[b"content-encoding"] == b"gzip"
+        assert gz.decompress(end["body"]) == body
+
+    def test_brotli_q_zero_falls_back_to_gzip(self):
+        from app.compression import SelectiveCompressionMiddleware
+
+        body = b'{"files": "' + b"x" * 5000 + b'"}'
+        start, _ = self._run(
+            SelectiveCompressionMiddleware,
+            body=body,
+            accept_encoding=b"br;q=0, gzip",
+        )
+        assert dict(start["headers"])[b"content-encoding"] == b"gzip"
+
+    def test_media_body_is_not_compressed(self):
+        from app.compression import SelectiveCompressionMiddleware
+
+        start, _ = self._run(
+            SelectiveCompressionMiddleware,
+            content_type="video/mp4",
+            body=b"x" * 5000,
+            accept_encoding=b"br, gzip",
+        )
+        assert b"content-encoding" not in dict(start["headers"])
+
+    def test_partial_content_is_not_compressed(self):
+        from app.compression import SelectiveCompressionMiddleware
+
+        start, _ = self._run(
+            SelectiveCompressionMiddleware,
+            status=206,
+            body=b"x" * 5000,
+            accept_encoding=b"br, gzip",
+        )
+        assert b"content-encoding" not in dict(start["headers"])
+
+    def test_small_body_is_not_compressed(self):
+        from app.compression import SelectiveCompressionMiddleware
+
+        start, _ = self._run(
+            SelectiveCompressionMiddleware, body=b'{"ok": true}', accept_encoding=b"br"
+        )
+        assert b"content-encoding" not in dict(start["headers"])
+
+    def test_client_without_supported_encoding_gets_identity(self):
+        from app.compression import SelectiveCompressionMiddleware
+
+        body = b'{"files": "' + b"x" * 5000 + b'"}'
+        start, end = self._run(
+            SelectiveCompressionMiddleware, body=body, accept_encoding=b""
+        )
+        assert b"content-encoding" not in dict(start["headers"])
+        assert end["body"] == body
+
+    def test_streamed_body_passes_through_uncompressed(self):
+        from app.compression import SelectiveCompressionMiddleware
+
+        body = b"x" * 5000
+        sent = self._run(
+            SelectiveCompressionMiddleware,
+            body=body,
+            accept_encoding=b"br, gzip",
+            streamed=True,
+        )
+        assert b"content-encoding" not in dict(sent[0]["headers"])
+        assert sent[1]["body"] == body
+
+    def test_brotli_is_the_compressor_when_installed(self):
+        from app import compression
+
+        if compression.brotli is None:
+            pytest.skip("brotli not installed")
+        body = b"x" * 4000
+        assert compression._compress(body, b"br") == compression.brotli.compress(
+            body, quality=compression._BROTLI_QUALITY
+        )
