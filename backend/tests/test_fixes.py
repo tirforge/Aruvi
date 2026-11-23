@@ -413,19 +413,16 @@ class TestPatchListenerQueue:
 
 
 class TestDiskCacheUniqueTemp:
-    """Test disk cache uses unique temp files."""
+    """Concurrent writers of the same chunk must never produce a torn value."""
 
     @pytest.mark.asyncio
     async def test_concurrent_put_no_tear(self):
         from app.disk_cache import DiskChunkCache
         import tempfile
-        import os
+        import pathlib
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            os.environ["DISK_CACHE_DIR"] = tmpdir
-            os.environ["DISK_CACHE_ENABLED"] = "1"
-
-            cache = DiskChunkCache()
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            cache = DiskChunkCache(cache_dir=pathlib.Path(tmpdir))
             chat_id, message_id, chunk_idx = 1, 2, 3
 
             # Simulate concurrent puts
@@ -437,12 +434,10 @@ class TestDiskCacheUniqueTemp:
                 asyncio.to_thread(cache.put, chat_id, message_id, chunk_idx, data2),
             )
 
-            # One of the writes won - verify final file is complete (not torn)
-            final_path = cache._movie_dir(chat_id, message_id) / f"{chunk_idx}.bin"
-            assert final_path.exists()
-            content = final_path.read_bytes()
-            # Should be exactly one of the full payloads, not a mix
+            # One of the writes won - the stored value must be complete, not a mix
+            content = cache.get(chat_id, message_id, chunk_idx)
             assert content == data1 or content == data2
+            cache.close()
 
 
 class TestGDriveRawWrite:
@@ -702,65 +697,92 @@ class TestMemEnvParsing:
         assert _parse_mem_env("1048576") == 1048576
 
 
-class TestDiskCacheTmpSafety:
-    """Sweep/size accounting must ignore in-flight .tmp writes."""
+class TestDiskCacheSemantics:
+    """Behaviour of the diskcache-backed cold tier (payloads, LRU, TTL)."""
 
-    def test_used_bytes_excludes_tmp(self):
+    def test_put_get_roundtrip_and_indices(self, tmp_path):
         from app.disk_cache import DiskChunkCache
-        import pathlib
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cache = DiskChunkCache(cache_dir=pathlib.Path(tmpdir))
-            d = cache._movie_dir(1, 2)
-            d.mkdir(parents=True)
-            (d / "0.bin").write_bytes(b"x" * 100)
-            (d / "0.stale.tmp").write_bytes(b"y" * 500)
-            assert cache.used_bytes(max_age=0) == 100
+        cache = DiskChunkCache(cache_dir=tmp_path)
+        assert cache.get(1, 2, 0) is None
+        assert not cache.contains(1, 2, 0)
 
-    def test_sweep_spares_tmp_and_evicts_oldest_bin(self, monkeypatch):
+        cache.put(1, 2, 0, b"a" * 100)
+        cache.put(1, 2, 1, b"b" * 50)
+
+        assert cache.get(1, 2, 0) == b"a" * 100
+        assert cache.contains(1, 2, 1)
+        assert cache.chunk_indices(1, 2) == frozenset({0, 1})
+        assert cache.used_bytes() >= 150
+        cache.close()
+
+    def test_put_never_overwrites_an_existing_chunk(self, tmp_path):
+        from app.disk_cache import DiskChunkCache
+
+        cache = DiskChunkCache(cache_dir=tmp_path)
+        cache.put(1, 2, 0, b"first")
+        cache.put(1, 2, 0, b"second")
+        assert cache.get(1, 2, 0) == b"first"
+        cache.close()
+
+    def test_sweep_evicts_idle_video_after_ttl(self, tmp_path, monkeypatch):
         from app import disk_cache as dc_mod
         from app.disk_cache import DiskChunkCache
-        import pathlib
         import time as _time
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cache = DiskChunkCache(cache_dir=pathlib.Path(tmpdir))
-            d = cache._movie_dir(1, 2)
-            d.mkdir(parents=True)
-            old = _time.time() - 3600
-            tmp_f = d / "0.stale.tmp"
-            tmp_f.write_bytes(b"t" * 100)
-            os.utime(tmp_f, (old - 10, old - 10))  # oldest file overall
-            c0 = d / "0.bin"
-            c0.write_bytes(b"a" * 100)
-            os.utime(c0, (old, old))
-            c1 = d / "1.bin"
-            c1.write_bytes(b"b" * 100)
+        cache = DiskChunkCache(cache_dir=tmp_path)
+        cache.put(1, 2, 0, b"x" * 100)
+        cache._last_active[(1, 2)] = _time.time() - 3600
+        monkeypatch.setattr(dc_mod, "DISK_CACHE_TTL", 60)
 
-            monkeypatch.setattr(dc_mod, "DISK_CACHE_PER_VIDEO_BYTES", 150)
-            cache.sweep()
+        cache.sweep()
 
-            assert tmp_f.exists()  # in-flight write protected
-            assert not c0.exists()  # oldest real chunk evicted instead
-            assert c1.exists()
+        assert cache.get(1, 2, 0) is None
+        assert cache.chunk_indices(1, 2) == frozenset()
+        cache.close()
 
-    def test_sweep_prunes_last_active(self):
+    def test_sweep_prunes_last_active(self, tmp_path):
         from app.disk_cache import DiskChunkCache
-        import pathlib
         import time as _time
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cache = DiskChunkCache(cache_dir=pathlib.Path(tmpdir))
-            cache._last_active[(9, 9)] = _time.time()  # dir never existed
-            d = cache._movie_dir(3, 4)
-            d.mkdir(parents=True)
-            (d / "0.bin").write_bytes(b"x")
-            cache._last_active[(3, 4)] = _time.time()
+        cache = DiskChunkCache(cache_dir=tmp_path)
+        cache.put(3, 4, 0, b"x")
+        cache._last_active[(9, 9)] = _time.time()  # video that never existed
+        cache._last_active[(3, 4)] = _time.time()
 
-            cache.sweep()
+        cache.sweep()
 
-            assert (9, 9) not in cache._last_active
-            assert (3, 4) in cache._last_active
+        assert (9, 9) not in cache._last_active
+        assert (3, 4) in cache._last_active
+        cache.close()
+
+    def test_per_video_cap_evicts_oldest_chunk(self, tmp_path, monkeypatch):
+        from app import disk_cache as dc_mod
+        from app.disk_cache import DiskChunkCache
+
+        cache = DiskChunkCache(cache_dir=tmp_path)
+        monkeypatch.setattr(dc_mod, "DISK_CACHE_PER_VIDEO_BYTES", 150)
+        cache.put(1, 2, 0, b"a" * 100)
+        cache.put(1, 2, 1, b"b" * 100)
+
+        assert cache.get(1, 2, 0) is None  # oldest chunk evicted
+        assert cache.get(1, 2, 1) == b"b" * 100
+        cache.close()
+
+    def test_legacy_chunk_dirs_are_purged(self, tmp_path):
+        """Upgrading must not leave the old {chat}_{msg}/*.bin tree behind."""
+        from app.disk_cache import DiskChunkCache
+
+        legacy = tmp_path / "1_2"
+        legacy.mkdir()
+        (legacy / "0.bin").write_bytes(b"x" * 10)
+        (legacy / "0.tmp").write_bytes(b"y" * 10)
+
+        cache = DiskChunkCache(cache_dir=tmp_path)
+        cache.sweep()
+
+        assert not legacy.exists()
+        cache.close()
 
 
 class TestEmptyMessageCacheSkip:
@@ -1138,6 +1160,16 @@ class TestParseMemEnv:
         assert _parse_mem_env(raw) == expected
 
 
+_NO_SYMLINKS = sys.platform == "win32"  # needs Developer Mode / admin rights
+
+
+def _needs_symlinks(fn):
+    return pytest.mark.skipif(
+        _NO_SYMLINKS, reason="symlink creation requires Developer Mode on Windows"
+    )(fn)
+
+
+@_needs_symlinks
 class TestRemoveDirSymlinkSafe:
     """_remove_dir must never follow symlinks outside the cache."""
 
@@ -1179,6 +1211,7 @@ class TestRemoveDirSymlinkSafe:
         assert not (d / "evil").exists() or (d / "evil").is_symlink() is False
 
 
+@_needs_symlinks
 class TestSweepSkipsSymlinks:
     """sweep() must skip symlinked entries and survive unreadable dirs."""
 
@@ -1526,6 +1559,7 @@ class TestSweepOSErrorPaths:
         dc.DiskChunkCache._remove_dir(d)  # must not raise
         assert d.exists()
 
+    @_needs_symlinks
     def test_remove_dir_symlink_unlink_oserror(self, monkeypatch, tmp_path):
         from app import disk_cache as dc
         target = tmp_path / "real"
