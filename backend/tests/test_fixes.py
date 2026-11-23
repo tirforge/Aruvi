@@ -835,6 +835,61 @@ class TestEmptyMessageCacheSkip:
             telegram._msg_cache.pop(key, None)
 
 
+class TestTtlCaches:
+    """The hand-rolled TTL dicts are cachebox TTLCache instances now."""
+
+    def test_message_cache_is_ttl_capped(self):
+        from cachebox import TTLCache
+
+        from app import telegram
+
+        assert isinstance(telegram._msg_cache, TTLCache)
+        assert telegram._msg_cache.maxsize == telegram._MSG_CACHE_MAX
+        assert telegram._msg_cache.global_ttl == telegram.MSG_CACHE_TTL
+
+    @pytest.mark.asyncio
+    async def test_message_cache_hit_skips_rpc(self):
+        from app import telegram
+
+        calls = []
+
+        class FakeMsg:
+            empty = False
+            id = 424244
+
+        async def fake_get_messages(chat_id, message_id):
+            calls.append(message_id)
+            return FakeMsg()
+
+        key = telegram._msg_cache_key(424244)
+        telegram._msg_cache.pop(key, None)
+        orig = telegram.tg_client.get_messages
+        telegram.tg_client.get_messages = fake_get_messages
+        try:
+            first = await telegram.get_message_from_channel(424244)
+            second = await telegram.get_message_from_channel(424244)
+            assert first is second
+            assert calls == [424244]  # second call served from cache
+        finally:
+            telegram.tg_client.get_messages = orig
+            telegram._msg_cache.pop(key, None)
+
+    def test_gdrive_nonce_roundtrip_is_single_use(self):
+        from app import gdrive
+
+        gdrive._nonce_store.insert("nonce-ok", (777, "verifier"))
+        assert gdrive.consume_state("777:nonce-ok") == (777, "verifier")
+        with pytest.raises(ValueError):
+            gdrive.consume_state("777:nonce-ok")
+
+    def test_gdrive_nonce_rejects_other_user(self):
+        from app import gdrive
+
+        gdrive._nonce_store.insert("nonce-x", (777, "verifier"))
+        with pytest.raises(ValueError):
+            gdrive.consume_state("888:nonce-x")
+
+
 class TestStatusAuthGate:
     """/api/status strips logs/per_video for anonymous viewers; clear-logs
     requires the debug password."""

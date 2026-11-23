@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
+from cachebox import TTLCache
 from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2.credentials import Credentials as UserCredentials
@@ -42,17 +43,16 @@ class TokenExpiredError(Exception):
     pass
 
 
-# In-memory nonce store for OAuth CSRF protection
-# {nonce: (telegram_id, timestamp, code_verifier)}
-_nonce_store: dict[str, tuple[int, float, str]] = {}
+# In-memory nonce store for OAuth CSRF protection.
+# nonce -> (telegram_id, code_verifier); cachebox expires entries after 10
+# minutes and caps the store, so no manual sweep is needed.
 _NONCE_TTL = 600  # 10 minutes
+_nonce_store: TTLCache = TTLCache(maxsize=1024, global_ttl=_NONCE_TTL)
 
 
 def _prune_nonces():
-    now = time.monotonic()
-    expired = [k for k, (_, ts, _) in _nonce_store.items() if now - ts > _NONCE_TTL]
-    for k in expired:
-        _nonce_store.pop(k, None)
+    """Force the library's lazy TTL sweep."""
+    _nonce_store.expire()
 
 
 def _pkce_challenge(verifier: str) -> str:
@@ -89,7 +89,7 @@ def generate_auth_url(telegram_id: int) -> str:
     nonce = secrets.token_hex(16)
     code_verifier = secrets.token_urlsafe(64)
     code_challenge = _pkce_challenge(code_verifier)
-    _nonce_store[nonce] = (telegram_id, time.monotonic(), code_verifier)
+    _nonce_store.insert(nonce, (telegram_id, code_verifier))
     state = f"{telegram_id}:{nonce}"
     auth_url, _ = flow.authorization_url(
         access_type="offline",
@@ -116,7 +116,7 @@ def consume_state(state: str) -> tuple[int, str]:
     stored = _nonce_store.pop(nonce, None)
     if stored is None:
         raise ValueError("Invalid or expired nonce — please re-authorize")
-    stored_id, _, code_verifier = stored
+    stored_id, code_verifier = stored
     if stored_id != telegram_id:
         raise ValueError("telegram_id mismatch in state")
     return telegram_id, code_verifier
