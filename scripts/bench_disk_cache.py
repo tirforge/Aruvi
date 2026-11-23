@@ -14,7 +14,7 @@ Usage (from ``backend/``)::
     python ../scripts/bench_disk_cache.py --mb 256   # smaller run
     python ../scripts/bench_disk_cache.py --old      # legacy file-per-chunk impl
 
-``--old`` imports the pre-diskcache implementation from git (``HEAD~1`` by
+``--old`` imports the pre-LMDB implementation from git (``HEAD~1`` by
 default) so the two can be compared side by side on the same machine:
 
     python ../scripts/bench_disk_cache.py --old --old-ref <commit>
@@ -116,7 +116,7 @@ def main() -> int:
 
     n_chunks = max(1, args.mb)
 
-    print(f"diskcache backend ({n_chunks} x 1 MB chunks)")
+    print(f"LMDB backend ({n_chunks} x 1 MB chunks)")
     backend = pathlib.Path(__file__).resolve().parent.parent / "backend"
     new_mod = _load_module(backend / "app" / "disk_cache.py", "aruvi_disk_cache")
 

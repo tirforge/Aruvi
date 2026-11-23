@@ -190,8 +190,8 @@ cp local.properties.example local.properties
 - **MTProto AES via [kuricrypt](https://github.com/kurigram-org/kuricrypt)** (Rust)
   — upstream's pure-python fallback is ~2000× slower, so it is pinned directly
 - **RAM cache**: 300 MB/video (instant replay)
-- **Disk cache**: 8 GB total / 2 GB/video (survives restarts) — SQLite-indexed
-  LRU + TTL via [diskcache](https://github.com/grantjenks/python-diskcache)
+- **Disk cache**: 8 GB total / 2 GB/video (survives restarts) — memory-mapped
+  C B+tree ([LMDB](https://www.lmdb.tech/), ~8× faster writes than SQLite)
 - **Refresh tokens rotate** — replay attacks impossible
 - **Download tokens bind to file_id** — prevents cross-user access
 

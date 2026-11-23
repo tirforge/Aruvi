@@ -698,7 +698,7 @@ class TestMemEnvParsing:
 
 
 class TestDiskCacheSemantics:
-    """Behaviour of the diskcache-backed cold tier (payloads, LRU, TTL)."""
+    """Behaviour of the LMDB-backed cold tier (payloads, LRU, TTL)."""
 
     def test_put_get_roundtrip_and_indices(self, tmp_path):
         from app.disk_cache import DiskChunkCache
@@ -767,6 +767,64 @@ class TestDiskCacheSemantics:
 
         assert cache.get(1, 2, 0) is None  # oldest chunk evicted
         assert cache.get(1, 2, 1) == b"b" * 100
+        cache.close()
+
+    def test_chunks_indices_and_sizes_survive_restart(self, tmp_path):
+        """LMDB is the source of truth: a new process sees the existing cache."""
+        from app.disk_cache import DiskChunkCache
+
+        cache = DiskChunkCache(cache_dir=tmp_path)
+        cache.put(7, 8, 0, b"a" * 1000)
+        cache.put(7, 8, 1, b"b" * 500)
+        cache.close()
+
+        reopened = DiskChunkCache(cache_dir=tmp_path)
+        assert reopened.get(7, 8, 0) == b"a" * 1000
+        assert reopened.chunk_indices(7, 8) == frozenset({0, 1})
+        assert reopened.used_bytes() == 1500
+        reopened.close()
+
+    def test_activity_marker_survives_restart(self, tmp_path):
+        """The TTL clock is persisted, so idle videos expire after a restart."""
+        from app.disk_cache import DiskChunkCache
+
+        cache = DiskChunkCache(cache_dir=tmp_path)
+        cache.put(5, 6, 0, b"x" * 10)
+        before = cache._last_active[(5, 6)]
+        cache.close()
+
+        reopened = DiskChunkCache(cache_dir=tmp_path)
+        assert (5, 6) in reopened._last_active
+        assert abs(reopened._last_active[(5, 6)] - before) < 2
+        reopened.close()
+
+    def test_first_writer_wins_across_restart(self, tmp_path):
+        from app.disk_cache import DiskChunkCache
+
+        cache = DiskChunkCache(cache_dir=tmp_path)
+        cache.put(1, 2, 0, b"first")
+        cache.close()
+
+        reopened = DiskChunkCache(cache_dir=tmp_path)
+        reopened.put(1, 2, 0, b"second")
+        assert reopened.get(1, 2, 0) == b"first"
+        reopened.close()
+
+    def test_global_cap_evicts_least_recently_used_video(self, tmp_path, monkeypatch):
+        import time as _time
+
+        from app import disk_cache as dc_mod
+        from app.disk_cache import DiskChunkCache
+
+        cache = DiskChunkCache(cache_dir=tmp_path)
+        cache.put(1, 2, 0, b"a" * 100)
+        cache._last_active[(1, 2)] = _time.time() - 100
+        monkeypatch.setattr(dc_mod, "DISK_CACHE_MAX_BYTES", 150)
+        cache.put(3, 4, 0, b"b" * 100)
+
+        assert cache.get(1, 2, 0) is None
+        assert cache.get(3, 4, 0) == b"b" * 100
+        assert cache.used_bytes() == 100
         cache.close()
 
     def test_legacy_chunk_dirs_are_purged(self, tmp_path):
