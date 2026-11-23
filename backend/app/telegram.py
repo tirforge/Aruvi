@@ -10,6 +10,7 @@ import traceback
 from .patch import Client
 from pyrogram.types import Message
 from cachebox import TTLCache
+from .crypto_backend import log_backend
 from .config import get_settings
 from pathlib import Path
 import asyncio
@@ -102,6 +103,8 @@ for i, token in enumerate(tokens):
     clients.append(client)
 
 tg_client = clients[0]
+# A pyaes fallback caps one core at ~3 Mbit/s, so it must not pass silently.
+log_backend(logger, diag_log)
 diag_log("Module-level setup complete")
 
 

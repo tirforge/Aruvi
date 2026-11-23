@@ -45,6 +45,17 @@ diskcache>=5.6.3
 # https://github.com/awolverp/cachebox
 cachebox>=6.2.11
 
+# MTProto AES (Rust). Pyrogram silently falls back to pure-python `pyaes` when
+# this is missing, which caps a whole core at ~3 Mbit/s (0.4 MB/s) instead of
+# ~787 MiB/s. Pin the backend itself: never rely on the kurigram[fast] extra
+# alone, since constraints/--no-deps installs drop extras without a word.
+# Wheels: manylinux_2_28 + musllinux_1_2, x86_64 and aarch64, cp310-cp315.
+kuricrypt>=0.1.0
+
+# Event loop (C). run.py falls back to the stdlib loop silently; upstream does
+# not support Windows, hence the marker.
+uvloop>=0.21.0; sys_platform == "linux" or sys_platform == "darwin"
+
 # Monitor proxy (internal use)
 httpx>=0.27.0
 
