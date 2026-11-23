@@ -842,6 +842,27 @@ class TestDiskCacheSemantics:
         assert not legacy.exists()
         cache.close()
 
+    def test_old_diskcache_tree_is_purged(self, tmp_path):
+        """An upgraded box reclaims the previous diskcache tier, nothing else."""
+        from app.disk_cache import DiskChunkCache
+
+        (tmp_path / "cache.db").write_bytes(b"index" * 10)
+        (tmp_path / "cache.db-wal").write_bytes(b"wal" * 10)
+        payload = tmp_path / "ab" / "cd"
+        payload.mkdir(parents=True)
+        (payload / "deadbeef.val").write_bytes(b"x" * 1024)
+        keep = tmp_path / "keepme"
+        keep.mkdir()
+        (keep / "note.txt").write_bytes(b"keep")
+
+        cache = DiskChunkCache(cache_dir=tmp_path)
+
+        assert not (tmp_path / "cache.db").exists()
+        assert not (tmp_path / "cache.db-wal").exists()
+        assert not (tmp_path / "ab").exists()
+        assert (keep / "note.txt").read_bytes() == b"keep"
+        cache.close()
+
 
 class TestEmptyMessageCacheSkip:
     """Empty Telegram messages must not be cached for the full TTL hour."""
