@@ -1517,6 +1517,58 @@ class TestSpawnBackground:
         assert asyncio.run(_main()) is True
 
 
+class TestRamChunkCache:
+    """The RAM hot tier is cachebox's byte-weighted LRU (streaming.ChunkCache)."""
+
+    MB = 1024 * 1024
+
+    def test_byte_cap_evicts_least_recently_used(self):
+        from app.streaming import ChunkCache
+
+        cache = ChunkCache(max_bytes=3 * self.MB)
+        cache.put(0, b"a" * self.MB)
+        cache.put(1, b"b" * self.MB)
+        cache.put(2, b"c" * self.MB)
+        assert cache.get(0) == b"a" * self.MB  # chunk 0 becomes most recent
+
+        cache.put(3, b"d" * self.MB)  # evicts chunk 1, not chunk 0
+
+        assert cache.get(1) is None
+        assert cache.get(0) == b"a" * self.MB
+        assert cache.get(3) == b"d" * self.MB
+        info = cache.info
+        assert info["chunks"] == 3
+        assert info["size_mb"] == 3.0
+        assert info["max_mb"] == 3.0
+        assert info["evictions"] >= 1
+        assert info["hits"] >= 2
+
+    def test_duplicate_put_is_a_noop(self):
+        from app.streaming import ChunkCache
+
+        cache = ChunkCache(max_bytes=2 * self.MB)
+        cache.put(0, b"first")
+        cache.put(0, b"second")
+        assert cache.get(0) == b"first"
+
+    def test_oversized_chunk_is_not_stored(self):
+        from app.streaming import ChunkCache
+
+        cache = ChunkCache(max_bytes=self.MB)
+        cache.put(0, b"x" * (2 * self.MB))
+        assert cache.get(0) is None
+        assert cache.info["chunks"] == 0
+
+    def test_clear_returns_freed_bytes(self):
+        from app.streaming import ChunkCache
+
+        cache = ChunkCache(max_bytes=2 * self.MB)
+        cache.put(0, b"x" * self.MB)
+        assert cache.clear() == self.MB
+        assert cache.info["chunks"] == 0
+        assert cache.info["hits"] == 0
+
+
 class TestSweepOSErrorPaths:
     def _boom(self, *a, **k):
         raise OSError("disk gone")
