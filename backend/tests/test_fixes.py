@@ -2533,6 +2533,38 @@ class TestNativeCryptoBackend:
             re.match(r"^kuricrypt\s*[<>=!~]", line) for line in lines
         ), "kuricrypt must be pinned directly, not only via kurigram[fast]"
 
+    def test_kuricrypt_pin_is_exact(self):
+        """`>=` would let a plain `pip install -r` drift the AES backend.
+
+        kuricrypt is what every bot client runs per packet, so upgrades are
+        reviewed rather than pulled in by a resolver.
+        """
+        import re
+
+        pins = [
+            line.strip()
+            for line in self._requirements().splitlines()
+            if re.match(r"^\s*kuricrypt\s*==", line)
+        ]
+        assert len(pins) == 1, f"expected one exact kuricrypt pin, found {pins}"
+        assert re.match(
+            r"^kuricrypt==\d+\.\d+\.\d+$", pins[0]
+        ), f"kuricrypt must be pinned to an exact release, got {pins[0]!r}"
+
+    def test_tgcrypto_is_not_pinned(self):
+        """kuricrypt is the chosen backend and wins in kurigram's lookup order.
+
+        tgcrypto 1.2.5 has no aarch64 wheel (VPS is ARM) and no cp312+ wheel,
+        so listing it would only add a source build that silently loses to
+        kuricrypt anyway.
+        """
+        lines = [
+            line.strip().lower()
+            for line in self._requirements().splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        assert not any(line.startswith("tgcrypto") for line in lines)
+
     def test_pyrogram_selected_a_native_backend(self):
         from app.crypto_backend import backend_name, is_native
 

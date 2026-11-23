@@ -187,8 +187,9 @@ cp local.properties.example local.properties
 ```
 
 - **11 bots** (1 main + 10 helpers) download chunks in parallel
-- **MTProto AES via [kuricrypt](https://github.com/kurigram-org/kuricrypt)** (Rust)
-  — upstream's pure-python fallback is ~2000× slower, so it is pinned directly
+- **MTProto AES via [kuricrypt](https://github.com/kurigram-org/kuricrypt)** (Rust,
+  pinned `0.1.2`) — upstream's pure-python fallback is ~2000× slower, so it is
+  pinned directly, not left to the `kurigram[fast]` extra
 - **RAM cache**: 300 MB/video (instant replay)
 - **Disk cache**: 8 GB total / 2 GB/video (survives restarts) — memory-mapped
   C B+tree ([LMDB](https://www.lmdb.tech/), ~8× faster writes than SQLite)

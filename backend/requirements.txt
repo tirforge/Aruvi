@@ -49,8 +49,11 @@ cachebox>=6.2.11
 # this is missing, which caps a whole core at ~3 Mbit/s (0.4 MB/s) instead of
 # ~787 MiB/s. Pin the backend itself: never rely on the kurigram[fast] extra
 # alone, since constraints/--no-deps installs drop extras without a word.
-# Wheels: manylinux_2_28 + musllinux_1_2, x86_64 and aarch64, cp310-cp315.
-kuricrypt>=0.1.0
+# Exact pin: this is the crypto primitive every bot client runs, so a minor
+# bump is a reviewed change, not a silent `pip install -U`.
+# Wheels: manylinux_2_28 + musllinux_1_2, x86_64 and aarch64, cp310-cp315
+# (matches the VPS: ARM64, glibc or musl, Python 3.11).
+kuricrypt==0.1.2
 
 # Event loop (C). run.py falls back to the stdlib loop silently; upstream does
 # not support Windows, hence the marker.
