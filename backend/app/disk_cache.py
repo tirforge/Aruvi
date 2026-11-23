@@ -44,6 +44,7 @@ small and doubles on demand up to ``2 x DISK_CACHE_MAX_BYTES`` (override with
 
 import logging
 import os
+import re
 import shutil
 import struct
 import sys
@@ -83,6 +84,12 @@ _TIMESTAMP = struct.Struct("<d")
 
 _CHUNK_PREFIX = "chunk:"
 _ACTIVITY_PREFIX = "@act:"
+
+# diskcache left its SQLite index next to two levels of hex payload dirs
+# (<dir>/ab/cd/<name>.val). Detect the index first so an unrelated hex-named
+# directory is never touched.
+_DISKCACHE_FILES = ("cache.db", "cache.db-wal", "cache.db-shm", "cache.db-journal")
+_HEX_DIR = re.compile(r"[0-9a-f]{2}\Z")
 
 
 def _parse_key(dir_name: str) -> tuple[int, int] | None:
@@ -196,6 +203,18 @@ class DiskChunkCache:
             if freed:
                 logger.info(
                     "Disk cache: purged %.1f MB of legacy chunk files",
+                    freed / 1024 / 1024,
+                )
+        except OSError:
+            pass
+
+        # The previous tier (diskcache) left a SQLite index and hex payload
+        # directories behind; LMDB cannot see them, so reclaim that disk now.
+        try:
+            freed = self._purge_old_tier()
+            if freed:
+                logger.info(
+                    "Disk cache: purged %.1f MB of pre-LMDB cache files",
                     freed / 1024 / 1024,
                 )
         except OSError:
@@ -624,6 +643,40 @@ class DiskChunkCache:
                 pass
 
     # ── legacy layout cleanup ───────────────────────────────────────────────
+    def _purge_old_tier(self) -> int:
+        """Remove the pre-LMDB ``diskcache`` tree (SQLite index + value dirs)."""
+        try:
+            entries = list(self.cache_dir.iterdir())
+        except OSError:
+            return 0
+        if not any(e.name == "cache.db" for e in entries):
+            return 0
+        freed = 0
+        for entry in entries:
+            try:
+                if entry.is_symlink():
+                    continue
+                if entry.is_file() and entry.name in _DISKCACHE_FILES:
+                    freed += entry.stat().st_size
+                    entry.unlink()
+                elif entry.is_dir() and _HEX_DIR.fullmatch(entry.name):
+                    freed += self._tree_size(entry)
+                    shutil.rmtree(entry, ignore_errors=True)
+            except OSError:
+                continue
+        return freed
+
+    @staticmethod
+    def _tree_size(d: Path) -> int:
+        total = 0
+        for root, _dirs, files in os.walk(d, followlinks=False):
+            for name in files:
+                try:
+                    total += os.path.getsize(os.path.join(root, name))
+                except OSError:
+                    continue
+        return total
+
     def _purge_legacy_dirs(self) -> int:
         try:
             entries = list(self.cache_dir.iterdir())
