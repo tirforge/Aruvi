@@ -58,7 +58,7 @@ testpaths = tests
 ### `TestDiskCacheUniqueTemp`
 | Test | Proves |
 |------|--------|
-| `test_concurrent_put_no_tear` | 8 concurrent `put()` calls → all 8 files intact, no temp-file clobbering |
+| `test_concurrent_put_no_tear` | Concurrent `put()` calls on one chunk → one complete value wins, never a mix |
 
 ### `TestGDriveRawWrite`
 | Test | Proves |

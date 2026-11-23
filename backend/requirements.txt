@@ -37,9 +37,9 @@ filetype>=1.2.0
 # Rate Limiting
 slowapi>=0.1.10
 
-# Disk cache tier (SQLite-indexed, atomic, size-capped LRU + TTL)
-# https://github.com/grantjenks/python-diskcache
-diskcache>=5.6.3
+# Disk cache tier (memory-mapped C B+tree; atomic writes, size-capped TTL/LRU)
+# https://github.com/jnwatson/py-lmdb  (engine: https://www.lmdb.tech/)
+lmdb>=1.6.0
 
 # RAM chunk cache (Rust-backed weighted LRU)
 # https://github.com/awolverp/cachebox

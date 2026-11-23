@@ -117,7 +117,7 @@ Streaming requests skip JWT entirely — they use the 30-day download token in t
 | `auth.py` | JWT mint/verify, token factories | `create_access_token`, `create_download_token` |
 | `streaming.py` | Cache tiers, workers, prefetcher, range logic | `_cache_manager`, `_backpressure` |
 | `telegram.py` | 11-bot pool, chunk fetch, message cache | `get_client`, `stream_media` |
-| `disk_cache.py` | Disk tier on top of `diskcache` (atomic writes, LRU + TTL) | `put`, `get`, `touch` |
+| `disk_cache.py` | Disk tier on LMDB (atomic writes, size-capped TTL + LRU) | `put`, `get`, `touch` |
 | `patch.py` | Telethon client wrapper + listener registry | `resolve_listener`, `cancel_listener` |
 | `bot.py` | Command handlers (/start codes, admin) | router registration |
 | `grabber.py` | Movie search across source channels | `search_movie` |
