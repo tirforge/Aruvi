@@ -2425,3 +2425,71 @@ class TestFastCompression:
         assert compression._compress(body, b"br") == compression.brotli.compress(
             body, quality=compression._BROTLI_QUALITY
         )
+
+
+class TestNativeCryptoBackend:
+    """MTProto must run on the native (Rust/C) AES backend.
+
+    Pyrogram falls back to pure-python `pyaes` without a word, and that
+    fallback caps a core at ~3 Mbit/s, so a stripped install has to fail the
+    build here rather than degrade silently in production.
+    """
+
+    @staticmethod
+    def _requirements() -> str:
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[1] / "requirements.txt"
+        return path.read_text(encoding="utf-8")
+
+    def test_requirement_pins_kuricrypt(self):
+        import re
+
+        lines = [
+            line.strip()
+            for line in self._requirements().splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        assert any(
+            re.match(r"^kuricrypt\s*[<>=!~]", line) for line in lines
+        ), "kuricrypt must be pinned directly, not only via kurigram[fast]"
+
+    def test_pyrogram_selected_a_native_backend(self):
+        from app.crypto_backend import backend_name, is_native
+
+        assert is_native(), (
+            f"pyrogram loaded {backend_name()!r} - the pure-python fallback is "
+            "~2000x slower; install kuricrypt"
+        )
+
+    def test_fallback_is_logged_as_an_error(self, monkeypatch, caplog):
+        import logging
+
+        from app import crypto_backend
+
+        monkeypatch.setattr(crypto_backend.aes, "_crypto_backend", None)
+        assert crypto_backend.backend_name() == "pyaes"
+        assert not crypto_backend.is_native()
+
+        seen: list[str] = []
+        with caplog.at_level(logging.ERROR):
+            crypto_backend.log_backend(logging.getLogger("crypto-test"), seen.append)
+        assert "PURE PYTHON" in caplog.text
+        assert seen and "PURE PYTHON" in seen[0]
+
+    def test_native_backend_logs_info(self, monkeypatch, caplog):
+        import logging
+        import types
+
+        from app import crypto_backend
+
+        monkeypatch.setattr(
+            crypto_backend.aes,
+            "_crypto_backend",
+            types.SimpleNamespace(__name__="kuricrypt"),
+        )
+        seen: list[str] = []
+        with caplog.at_level(logging.INFO):
+            crypto_backend.log_backend(logging.getLogger("crypto-test"), seen.append)
+        assert crypto_backend.is_native()
+        assert seen == ["MTProto crypto backend: kuricrypt (native)"]
