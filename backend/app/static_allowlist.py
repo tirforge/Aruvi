@@ -10,13 +10,18 @@ Pure stdlib on purpose: unit tests import this without pulling in the
 whole FastAPI app.
 """
 
+# Transport encodings the frontend build emits next to each asset. Kept out
+# of the allowlist so a client can never fetch the compressed bytes as if
+# they were the asset (they're only reachable through the plain entry).
+ENCODING_SUFFIXES = (".gz", ".br")
+
 
 def build_static_allowlist(base: str = "app/static") -> dict:
     """Walk *base* and return {url-relative-path: absolute-file-path}.
 
-    ``.gz`` precompressed siblings are NOT keys — they are resolved from
-    the allowlisted plain entry (``plain + ".gz"``), so they can't be
-    addressed directly either.
+    Precompressed siblings (``.gz``, ``.br``) are NOT keys — they are
+    resolved from the allowlisted plain entry (``plain + ".gz"``), so they
+    can't be addressed directly either.
     """
     import os
 
@@ -26,7 +31,7 @@ def build_static_allowlist(base: str = "app/static") -> dict:
         return allow
     for root, _dirs, files in os.walk(base_abs):
         for name in files:
-            if name.endswith(".gz"):
+            if name.endswith(ENCODING_SUFFIXES):
                 continue
             abs_path = os.path.join(root, name)
             # Never allowlist a symlink — FileResponse would follow it out
