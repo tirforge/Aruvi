@@ -12,11 +12,6 @@ from sqlalchemy.orm import defer
 from .media_types import classify_file_type
 
 
-def escape_like(value: str) -> str:
-    """Escape special LIKE/ILIKE characters to prevent SQL injection."""
-    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-
-
 def add_urls_to_file(file: File) -> dict:
     """Add stream and thumbnail URLs to file response."""
     # Recompute the effective type from mime/extension so pre-migration rows

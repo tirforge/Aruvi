@@ -7,6 +7,8 @@ import asyncio
 import json
 import shutil
 import logging
+
+import filetype
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
 from fastapi.responses import StreamingResponse, HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -586,20 +588,18 @@ async def get_thumbnail(
 
 
 def _detect_image_mime(data: bytes) -> str:
-    """Detect image MIME type from magic bytes."""
+    """Detect image MIME type from magic bytes.
+
+    filetype (https://github.com/h2non/filetype.py) knows 100+ formats and,
+    unlike the old hand-rolled sniffer, correctly labels AVIF/HEIC/TIFF
+    thumbnails instead of falling back to JPEG.
+    """
     if not data:
         return _DEFAULT_IMAGE_MIME
-    if data[:4] == b"\x89PNG":
-        return "image/png"
-    if data[:2] == b"\xff\xd8":
+    kind = filetype.guess(data)
+    if kind is None or not kind.mime.startswith("image/"):
         return _DEFAULT_IMAGE_MIME
-    if data[:6] in (b"GIF87a", b"GIF89a"):
-        return "image/gif"
-    if data[:2] == b"BM":
-        return "image/bmp"
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "image/webp"
-    return _DEFAULT_IMAGE_MIME
+    return kind.mime
 
 
 @router.get("/s/{public_hash}")

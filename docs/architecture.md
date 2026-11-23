@@ -117,7 +117,7 @@ Streaming requests skip JWT entirely — they use the 30-day download token in t
 | `auth.py` | JWT mint/verify, token factories | `create_access_token`, `create_download_token` |
 | `streaming.py` | Cache tiers, workers, prefetcher, range logic | `_cache_manager`, `_backpressure` |
 | `telegram.py` | 11-bot pool, chunk fetch, message cache | `get_client`, `stream_media` |
-| `disk_cache.py` | LRU disk tier, atomic writes | `put`, `get`, `touch` |
+| `disk_cache.py` | Disk tier on top of `diskcache` (atomic writes, LRU + TTL) | `put`, `get`, `touch` |
 | `patch.py` | Telethon client wrapper + listener registry | `resolve_listener`, `cancel_listener` |
 | `bot.py` | Command handlers (/start codes, admin) | router registration |
 | `grabber.py` | Movie search across source channels | `search_movie` |
@@ -139,7 +139,7 @@ Streaming requests skip JWT entirely — they use the 30-day download token in t
 | `STREAM_PREFETCH_AHEAD_MB` | 192 | How far ahead to prefetch |
 | `STREAM_BATCH_SIZE` | 10 | Chunks per `stream_media` batch |
 | `DISK_CACHE_DIR` | `./data/vcache` | Disk tier location |
-| `DISK_CACHE_TTL` | 1800 s | Dir expires 30 min after last activity |
+| `DISK_CACHE_TTL` | 1800 s | Entry expires 30 min after last activity |
 | `DISK_CACHE_MAX_BYTES` | 8 GB | Total disk tier cap |
 | `DISK_CACHE_PER_VIDEO_BYTES` | 2 GB | Per-video disk cap |
 | `DISK_CACHE_ENABLED` | 1 | Set 0 to disable disk tier |

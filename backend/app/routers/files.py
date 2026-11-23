@@ -29,7 +29,6 @@ from ..telegram import (
 )
 from ..config import get_settings
 from ..services import (
-    escape_like,
     add_urls_to_file,
     fetch_recent_files,
     fetch_continue_watching_files,
@@ -74,9 +73,7 @@ async def list_files(
     if file_type:
         query = query.where(File.file_type == file_type)
     if search:
-        query = query.where(
-            File.file_name.ilike(f"%{escape_like(search)}%", escape="\\")
-        )
+        query = query.where(File.file_name.icontains(search, autoescape=True))
 
     # Direct count with same filters (avoid subquery materialization)
     count_query = select(func.count(File.id)).where(File.user_id == current_user.id)
@@ -88,7 +85,7 @@ async def list_files(
         count_query = count_query.where(File.file_type == file_type)
     if search:
         count_query = count_query.where(
-            File.file_name.ilike(f"%{escape_like(search)}%", escape="\\")
+            File.file_name.icontains(search, autoescape=True)
         )
     total = (await db.execute(count_query)).scalar()
 

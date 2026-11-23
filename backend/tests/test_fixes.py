@@ -413,19 +413,16 @@ class TestPatchListenerQueue:
 
 
 class TestDiskCacheUniqueTemp:
-    """Test disk cache uses unique temp files."""
+    """Concurrent writers of the same chunk must never produce a torn value."""
 
     @pytest.mark.asyncio
     async def test_concurrent_put_no_tear(self):
         from app.disk_cache import DiskChunkCache
         import tempfile
-        import os
+        import pathlib
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            os.environ["DISK_CACHE_DIR"] = tmpdir
-            os.environ["DISK_CACHE_ENABLED"] = "1"
-
-            cache = DiskChunkCache()
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            cache = DiskChunkCache(cache_dir=pathlib.Path(tmpdir))
             chat_id, message_id, chunk_idx = 1, 2, 3
 
             # Simulate concurrent puts
@@ -437,12 +434,10 @@ class TestDiskCacheUniqueTemp:
                 asyncio.to_thread(cache.put, chat_id, message_id, chunk_idx, data2),
             )
 
-            # One of the writes won - verify final file is complete (not torn)
-            final_path = cache._movie_dir(chat_id, message_id) / f"{chunk_idx}.bin"
-            assert final_path.exists()
-            content = final_path.read_bytes()
-            # Should be exactly one of the full payloads, not a mix
+            # One of the writes won - the stored value must be complete, not a mix
+            content = cache.get(chat_id, message_id, chunk_idx)
             assert content == data1 or content == data2
+            cache.close()
 
 
 class TestGDriveRawWrite:
@@ -702,65 +697,92 @@ class TestMemEnvParsing:
         assert _parse_mem_env("1048576") == 1048576
 
 
-class TestDiskCacheTmpSafety:
-    """Sweep/size accounting must ignore in-flight .tmp writes."""
+class TestDiskCacheSemantics:
+    """Behaviour of the diskcache-backed cold tier (payloads, LRU, TTL)."""
 
-    def test_used_bytes_excludes_tmp(self):
+    def test_put_get_roundtrip_and_indices(self, tmp_path):
         from app.disk_cache import DiskChunkCache
-        import pathlib
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cache = DiskChunkCache(cache_dir=pathlib.Path(tmpdir))
-            d = cache._movie_dir(1, 2)
-            d.mkdir(parents=True)
-            (d / "0.bin").write_bytes(b"x" * 100)
-            (d / "0.stale.tmp").write_bytes(b"y" * 500)
-            assert cache.used_bytes(max_age=0) == 100
+        cache = DiskChunkCache(cache_dir=tmp_path)
+        assert cache.get(1, 2, 0) is None
+        assert not cache.contains(1, 2, 0)
 
-    def test_sweep_spares_tmp_and_evicts_oldest_bin(self, monkeypatch):
+        cache.put(1, 2, 0, b"a" * 100)
+        cache.put(1, 2, 1, b"b" * 50)
+
+        assert cache.get(1, 2, 0) == b"a" * 100
+        assert cache.contains(1, 2, 1)
+        assert cache.chunk_indices(1, 2) == frozenset({0, 1})
+        assert cache.used_bytes() >= 150
+        cache.close()
+
+    def test_put_never_overwrites_an_existing_chunk(self, tmp_path):
+        from app.disk_cache import DiskChunkCache
+
+        cache = DiskChunkCache(cache_dir=tmp_path)
+        cache.put(1, 2, 0, b"first")
+        cache.put(1, 2, 0, b"second")
+        assert cache.get(1, 2, 0) == b"first"
+        cache.close()
+
+    def test_sweep_evicts_idle_video_after_ttl(self, tmp_path, monkeypatch):
         from app import disk_cache as dc_mod
         from app.disk_cache import DiskChunkCache
-        import pathlib
         import time as _time
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cache = DiskChunkCache(cache_dir=pathlib.Path(tmpdir))
-            d = cache._movie_dir(1, 2)
-            d.mkdir(parents=True)
-            old = _time.time() - 3600
-            tmp_f = d / "0.stale.tmp"
-            tmp_f.write_bytes(b"t" * 100)
-            os.utime(tmp_f, (old - 10, old - 10))  # oldest file overall
-            c0 = d / "0.bin"
-            c0.write_bytes(b"a" * 100)
-            os.utime(c0, (old, old))
-            c1 = d / "1.bin"
-            c1.write_bytes(b"b" * 100)
+        cache = DiskChunkCache(cache_dir=tmp_path)
+        cache.put(1, 2, 0, b"x" * 100)
+        cache._last_active[(1, 2)] = _time.time() - 3600
+        monkeypatch.setattr(dc_mod, "DISK_CACHE_TTL", 60)
 
-            monkeypatch.setattr(dc_mod, "DISK_CACHE_PER_VIDEO_BYTES", 150)
-            cache.sweep()
+        cache.sweep()
 
-            assert tmp_f.exists()  # in-flight write protected
-            assert not c0.exists()  # oldest real chunk evicted instead
-            assert c1.exists()
+        assert cache.get(1, 2, 0) is None
+        assert cache.chunk_indices(1, 2) == frozenset()
+        cache.close()
 
-    def test_sweep_prunes_last_active(self):
+    def test_sweep_prunes_last_active(self, tmp_path):
         from app.disk_cache import DiskChunkCache
-        import pathlib
         import time as _time
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cache = DiskChunkCache(cache_dir=pathlib.Path(tmpdir))
-            cache._last_active[(9, 9)] = _time.time()  # dir never existed
-            d = cache._movie_dir(3, 4)
-            d.mkdir(parents=True)
-            (d / "0.bin").write_bytes(b"x")
-            cache._last_active[(3, 4)] = _time.time()
+        cache = DiskChunkCache(cache_dir=tmp_path)
+        cache.put(3, 4, 0, b"x")
+        cache._last_active[(9, 9)] = _time.time()  # video that never existed
+        cache._last_active[(3, 4)] = _time.time()
 
-            cache.sweep()
+        cache.sweep()
 
-            assert (9, 9) not in cache._last_active
-            assert (3, 4) in cache._last_active
+        assert (9, 9) not in cache._last_active
+        assert (3, 4) in cache._last_active
+        cache.close()
+
+    def test_per_video_cap_evicts_oldest_chunk(self, tmp_path, monkeypatch):
+        from app import disk_cache as dc_mod
+        from app.disk_cache import DiskChunkCache
+
+        cache = DiskChunkCache(cache_dir=tmp_path)
+        monkeypatch.setattr(dc_mod, "DISK_CACHE_PER_VIDEO_BYTES", 150)
+        cache.put(1, 2, 0, b"a" * 100)
+        cache.put(1, 2, 1, b"b" * 100)
+
+        assert cache.get(1, 2, 0) is None  # oldest chunk evicted
+        assert cache.get(1, 2, 1) == b"b" * 100
+        cache.close()
+
+    def test_legacy_chunk_dirs_are_purged(self, tmp_path):
+        """Upgrading must not leave the old {chat}_{msg}/*.bin tree behind."""
+        from app.disk_cache import DiskChunkCache
+
+        legacy = tmp_path / "1_2"
+        legacy.mkdir()
+        (legacy / "0.bin").write_bytes(b"x" * 10)
+        (legacy / "0.tmp").write_bytes(b"y" * 10)
+
+        cache = DiskChunkCache(cache_dir=tmp_path)
+        cache.sweep()
+
+        assert not legacy.exists()
+        cache.close()
 
 
 class TestEmptyMessageCacheSkip:
@@ -811,6 +833,61 @@ class TestEmptyMessageCacheSkip:
         finally:
             telegram.tg_client.get_messages = orig
             telegram._msg_cache.pop(key, None)
+
+
+class TestTtlCaches:
+    """The hand-rolled TTL dicts are cachebox TTLCache instances now."""
+
+    def test_message_cache_is_ttl_capped(self):
+        from cachebox import TTLCache
+
+        from app import telegram
+
+        assert isinstance(telegram._msg_cache, TTLCache)
+        assert telegram._msg_cache.maxsize == telegram._MSG_CACHE_MAX
+        assert telegram._msg_cache.global_ttl == telegram.MSG_CACHE_TTL
+
+    @pytest.mark.asyncio
+    async def test_message_cache_hit_skips_rpc(self):
+        from app import telegram
+
+        calls = []
+
+        class FakeMsg:
+            empty = False
+            id = 424244
+
+        async def fake_get_messages(chat_id, message_id):
+            calls.append(message_id)
+            return FakeMsg()
+
+        key = telegram._msg_cache_key(424244)
+        telegram._msg_cache.pop(key, None)
+        orig = telegram.tg_client.get_messages
+        telegram.tg_client.get_messages = fake_get_messages
+        try:
+            first = await telegram.get_message_from_channel(424244)
+            second = await telegram.get_message_from_channel(424244)
+            assert first is second
+            assert calls == [424244]  # second call served from cache
+        finally:
+            telegram.tg_client.get_messages = orig
+            telegram._msg_cache.pop(key, None)
+
+    def test_gdrive_nonce_roundtrip_is_single_use(self):
+        from app import gdrive
+
+        gdrive._nonce_store.insert("nonce-ok", (777, "verifier"))
+        assert gdrive.consume_state("777:nonce-ok") == (777, "verifier")
+        with pytest.raises(ValueError):
+            gdrive.consume_state("777:nonce-ok")
+
+    def test_gdrive_nonce_rejects_other_user(self):
+        from app import gdrive
+
+        gdrive._nonce_store.insert("nonce-x", (777, "verifier"))
+        with pytest.raises(ValueError):
+            gdrive.consume_state("888:nonce-x")
 
 
 class TestStatusAuthGate:
@@ -1028,6 +1105,80 @@ class TestVendoredPlayer:
                 )
 
 
+class TestSearchEscaping:
+    """Search terms are literal: LIKE metacharacters must not act as wildcards."""
+
+    @staticmethod
+    async def _seed(db, user, names):
+        from app.models import File
+
+        for i, name in enumerate(names):
+            db.add(
+                File(
+                    user_id=user.id,
+                    file_id=f"fid-{i}",
+                    file_unique_id=f"uniq-search-{i}",
+                    channel_message_id=i + 1,
+                    file_name=name,
+                    file_size=1000,
+                    file_type="video",
+                )
+            )
+        await db.commit()
+
+    @pytest.mark.asyncio
+    async def test_percent_matches_only_literal_percent(self, temp_db, sample_user):
+        from app.routers.files import list_files
+
+        await self._seed(
+            temp_db, sample_user, ["100% real.mkv", "100X other.mkv"]
+        )
+        resp = await list_files(
+            folder_id=None,
+            file_type=None,
+            search="100%",
+            page=1,
+            per_page=20,
+            db=temp_db,
+            current_user=sample_user,
+        )
+        assert [f.file_name for f in resp.files] == ["100% real.mkv"]
+        assert resp.total == 1
+
+    @pytest.mark.asyncio
+    async def test_underscore_matches_only_literal_underscore(
+        self, temp_db, sample_user
+    ):
+        from app.routers.files import list_files
+
+        await self._seed(
+            temp_db, sample_user, ["a_b literal.mkv", "aXb other.mkv"]
+        )
+        resp = await list_files(
+            folder_id=None,
+            file_type=None,
+            search="a_b",
+            page=1,
+            per_page=20,
+            db=temp_db,
+            current_user=sample_user,
+        )
+        assert [f.file_name for f in resp.files] == ["a_b literal.mkv"]
+        assert resp.total == 1
+
+    @pytest.mark.asyncio
+    async def test_tv_search_escapes_metacharacters(self, temp_db, sample_user):
+        from app.routers.tv import tv_search
+
+        await self._seed(
+            temp_db, sample_user, ["50% off.mkv", "50X other.mkv"]
+        )
+        resp = await tv_search(
+            q="50%", limit=30, db=temp_db, current_user=sample_user
+        )
+        assert [f["file_name"] for f in resp["files"]] == ["50% off.mkv"]
+
+
 class TestSpaStaticAllowlist:
     def test_builder_maps_nested_files_skips_gz(self, tmp_path):
         from app.static_allowlist import build_static_allowlist
@@ -1194,6 +1345,16 @@ class TestParseMemEnv:
         assert _parse_mem_env(raw) == expected
 
 
+_NO_SYMLINKS = sys.platform == "win32"  # needs Developer Mode / admin rights
+
+
+def _needs_symlinks(fn):
+    return pytest.mark.skipif(
+        _NO_SYMLINKS, reason="symlink creation requires Developer Mode on Windows"
+    )(fn)
+
+
+@_needs_symlinks
 class TestRemoveDirSymlinkSafe:
     """_remove_dir must never follow symlinks outside the cache."""
 
@@ -1235,6 +1396,7 @@ class TestRemoveDirSymlinkSafe:
         assert not (d / "evil").exists() or (d / "evil").is_symlink() is False
 
 
+@_needs_symlinks
 class TestSweepSkipsSymlinks:
     """sweep() must skip symlinked entries and survive unreadable dirs."""
 
@@ -1263,7 +1425,7 @@ class TestSweepSkipsSymlinks:
 
 
 class TestDetectImageMime:
-    """_detect_image_mime handles empty input and GIF magic."""
+    """_detect_image_mime sniffs thumbnail bytes via filetype."""
 
     @pytest.mark.parametrize(
         "data,expected",
@@ -1271,10 +1433,11 @@ class TestDetectImageMime:
             (b"", "image/jpeg"),
             (b"GIF87a123", "image/gif"),
             (b"GIF89a123", "image/gif"),
-            (b"\x89PNG\r\n\x1a\n", "image/png"),
-            (b"\xff\xd8\xff\xe0", "image/jpeg"),
-            (b"BM1234", "image/bmp"),
-            (b"RIFF1234WEBP", "image/webp"),
+            (b"\x89PNG\r\n\x1a\n" + b"\x00" * 16, "image/png"),
+            (b"\xff\xd8\xff\xe0" + b"\x00" * 16, "image/jpeg"),
+            (b"BM" + b"\x00" * 32, "image/bmp"),
+            (b"RIFF\x00\x00\x00\x00WEBPVP8 " + b"\x00" * 16, "image/webp"),
+            (b"II*\x00" + b"\x00" * 16, "image/tiff"),
             (b"????", "image/jpeg"),
         ],
     )
@@ -1282,6 +1445,12 @@ class TestDetectImageMime:
         from app.routers.streaming import _detect_image_mime
 
         assert _detect_image_mime(data) == expected
+
+    def test_non_image_magic_falls_back_to_jpeg(self):
+        from app.routers.streaming import _detect_image_mime
+
+        # A zip header is not an image; thumbnails should stay JPEG-default.
+        assert _detect_image_mime(b"PK\x03\x04" + b"\x00" * 16) == "image/jpeg"
 
 
 class TestBatchDeleteCaps:
@@ -1540,6 +1709,58 @@ class TestSpawnBackground:
         assert asyncio.run(_main()) is True
 
 
+class TestRamChunkCache:
+    """The RAM hot tier is cachebox's byte-weighted LRU (streaming.ChunkCache)."""
+
+    MB = 1024 * 1024
+
+    def test_byte_cap_evicts_least_recently_used(self):
+        from app.streaming import ChunkCache
+
+        cache = ChunkCache(max_bytes=3 * self.MB)
+        cache.put(0, b"a" * self.MB)
+        cache.put(1, b"b" * self.MB)
+        cache.put(2, b"c" * self.MB)
+        assert cache.get(0) == b"a" * self.MB  # chunk 0 becomes most recent
+
+        cache.put(3, b"d" * self.MB)  # evicts chunk 1, not chunk 0
+
+        assert cache.get(1) is None
+        assert cache.get(0) == b"a" * self.MB
+        assert cache.get(3) == b"d" * self.MB
+        info = cache.info
+        assert info["chunks"] == 3
+        assert info["size_mb"] == 3.0
+        assert info["max_mb"] == 3.0
+        assert info["evictions"] >= 1
+        assert info["hits"] >= 2
+
+    def test_duplicate_put_is_a_noop(self):
+        from app.streaming import ChunkCache
+
+        cache = ChunkCache(max_bytes=2 * self.MB)
+        cache.put(0, b"first")
+        cache.put(0, b"second")
+        assert cache.get(0) == b"first"
+
+    def test_oversized_chunk_is_not_stored(self):
+        from app.streaming import ChunkCache
+
+        cache = ChunkCache(max_bytes=self.MB)
+        cache.put(0, b"x" * (2 * self.MB))
+        assert cache.get(0) is None
+        assert cache.info["chunks"] == 0
+
+    def test_clear_returns_freed_bytes(self):
+        from app.streaming import ChunkCache
+
+        cache = ChunkCache(max_bytes=2 * self.MB)
+        cache.put(0, b"x" * self.MB)
+        assert cache.clear() == self.MB
+        assert cache.info["chunks"] == 0
+        assert cache.info["hits"] == 0
+
+
 class TestSweepOSErrorPaths:
     def _boom(self, *a, **k):
         raise OSError("disk gone")
@@ -1582,6 +1803,7 @@ class TestSweepOSErrorPaths:
         dc.DiskChunkCache._remove_dir(d)  # must not raise
         assert d.exists()
 
+    @_needs_symlinks
     def test_remove_dir_symlink_unlink_oserror(self, monkeypatch, tmp_path):
         from app import disk_cache as dc
         target = tmp_path / "real"
@@ -1944,3 +2166,160 @@ class TestMemoryPressureFallbacks:
         real_open = open
         monkeypatch.setattr("builtins.open", _fake_open)
         assert isinstance(streaming_mod._memory_pressure(), bool)
+
+
+class TestFastCompression:
+    """Brotli/gzip middleware for complete JSON/HTML responses."""
+
+    @staticmethod
+    def _run(
+        mw,
+        *,
+        content_type: str = "application/json",
+        body: bytes = b"{}",
+        accept_encoding: bytes = b"gzip",
+        status: int = 200,
+        streamed: bool = False,
+    ):
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": [(b"accept-encoding", accept_encoding)]
+            if accept_encoding
+            else [],
+        }
+        sent = []
+
+        async def send(message):
+            sent.append(message)
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def app(scope, receive, send):
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": status,
+                    "headers": [
+                        (b"content-type", content_type.encode()),
+                        (b"content-length", str(len(body)).encode()),
+                    ],
+                }
+            )
+            if streamed:
+                await send(
+                    {"type": "http.response.body", "body": body, "more_body": True}
+                )
+                await send({"type": "http.response.body", "body": b""})
+            else:
+                await send({"type": "http.response.body", "body": body})
+
+        asyncio.run(mw(app)(scope, receive, send))
+        return sent
+
+    def test_brotli_preferred_when_advertised(self):
+        import brotli
+
+        from app.compression import SelectiveCompressionMiddleware
+
+        body = b'{"files": "' + b"x" * 5000 + b'"}'
+        start, end = self._run(
+            SelectiveCompressionMiddleware,
+            body=body,
+            accept_encoding=b"gzip, deflate, br",
+        )
+        headers = dict(start["headers"])
+        assert headers[b"content-encoding"] == b"br"
+        assert int(headers[b"content-length"]) == len(end["body"])
+        assert brotli.decompress(end["body"]) == body
+
+    def test_gzip_used_when_brotli_not_advertised(self):
+        import gzip as gz
+
+        from app.compression import SelectiveCompressionMiddleware
+
+        body = b'{"files": "' + b"x" * 5000 + b'"}'
+        start, end = self._run(
+            SelectiveCompressionMiddleware,
+            body=body,
+            accept_encoding=b"gzip, deflate",
+        )
+        headers = dict(start["headers"])
+        assert headers[b"content-encoding"] == b"gzip"
+        assert gz.decompress(end["body"]) == body
+
+    def test_brotli_q_zero_falls_back_to_gzip(self):
+        from app.compression import SelectiveCompressionMiddleware
+
+        body = b'{"files": "' + b"x" * 5000 + b'"}'
+        start, _ = self._run(
+            SelectiveCompressionMiddleware,
+            body=body,
+            accept_encoding=b"br;q=0, gzip",
+        )
+        assert dict(start["headers"])[b"content-encoding"] == b"gzip"
+
+    def test_media_body_is_not_compressed(self):
+        from app.compression import SelectiveCompressionMiddleware
+
+        start, _ = self._run(
+            SelectiveCompressionMiddleware,
+            content_type="video/mp4",
+            body=b"x" * 5000,
+            accept_encoding=b"br, gzip",
+        )
+        assert b"content-encoding" not in dict(start["headers"])
+
+    def test_partial_content_is_not_compressed(self):
+        from app.compression import SelectiveCompressionMiddleware
+
+        start, _ = self._run(
+            SelectiveCompressionMiddleware,
+            status=206,
+            body=b"x" * 5000,
+            accept_encoding=b"br, gzip",
+        )
+        assert b"content-encoding" not in dict(start["headers"])
+
+    def test_small_body_is_not_compressed(self):
+        from app.compression import SelectiveCompressionMiddleware
+
+        start, _ = self._run(
+            SelectiveCompressionMiddleware, body=b'{"ok": true}', accept_encoding=b"br"
+        )
+        assert b"content-encoding" not in dict(start["headers"])
+
+    def test_client_without_supported_encoding_gets_identity(self):
+        from app.compression import SelectiveCompressionMiddleware
+
+        body = b'{"files": "' + b"x" * 5000 + b'"}'
+        start, end = self._run(
+            SelectiveCompressionMiddleware, body=body, accept_encoding=b""
+        )
+        assert b"content-encoding" not in dict(start["headers"])
+        assert end["body"] == body
+
+    def test_streamed_body_passes_through_uncompressed(self):
+        from app.compression import SelectiveCompressionMiddleware
+
+        body = b"x" * 5000
+        sent = self._run(
+            SelectiveCompressionMiddleware,
+            body=body,
+            accept_encoding=b"br, gzip",
+            streamed=True,
+        )
+        assert b"content-encoding" not in dict(sent[0]["headers"])
+        assert sent[1]["body"] == body
+
+    def test_brotli_is_the_compressor_when_installed(self):
+        from app import compression
+
+        if compression.brotli is None:
+            pytest.skip("brotli not installed")
+        body = b"x" * 4000
+        assert compression._compress(body, b"br") == compression.brotli.compress(
+            body, quality=compression._BROTLI_QUALITY
+        )

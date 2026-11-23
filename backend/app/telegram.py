@@ -9,6 +9,7 @@ import os
 import traceback
 from .patch import Client
 from pyrogram.types import Message
+from cachebox import TTLCache
 from .config import get_settings
 from pathlib import Path
 import asyncio
@@ -316,10 +317,9 @@ async def _warmup_messages():
                         tg_client, "pool_index", 0
                     ):
                         key = (getattr(client, "pool_index", 0), msg.id)
-                        if key not in _msg_cache:
-                            _msg_cache[key] = (time.monotonic(), msg)
+                        if _msg_cache.get(key) is None:
+                            _msg_cache.insert(key, msg)
                             count += 1
-                            _msg_cache_evict()
             return count
 
         results = await asyncio.gather(*[_warm_one(c) for c in connected])
@@ -584,9 +584,12 @@ async def stop_telegram_client():
 
 # ── Message cache ────────────────────────────────────────────────────
 
-_msg_cache: dict[tuple[int, int], tuple[float, Message]] = {}
+# TTL + LRU from cachebox (Rust): entries expire after an hour and the cap
+# evicts least-recently-used entries, so there is no per-call sweep to run.
+# Messages in the storage channel never change, so a 1-hour TTL is safe.
 MSG_CACHE_TTL = 3600  # 1 hour (messages in storage channel don't change)
 _MSG_CACHE_MAX = 5000
+_msg_cache: TTLCache = TTLCache(maxsize=_MSG_CACHE_MAX, global_ttl=MSG_CACHE_TTL)
 
 
 def _msg_cache_key(message_id: int) -> tuple[int, int]:
@@ -596,26 +599,12 @@ def _msg_cache_key(message_id: int) -> tuple[int, int]:
 
 
 def _prune_msg_cache():
-    """Remove TTL-expired entries proactively."""
-    now = time.monotonic()
-    stale = [key for key, (ts, _) in _msg_cache.items() if now - ts > MSG_CACHE_TTL]
-    for key in stale:
-        _msg_cache.pop(key, None)
-
-
-def _msg_cache_evict():
-    """Remove oldest entries if cache exceeds max size."""
-    if len(_msg_cache) <= _MSG_CACHE_MAX:
-        return
-    # Sort by timestamp and remove oldest 20%
-    by_age = sorted(_msg_cache.items(), key=lambda x: x[1][0])
-    to_remove = len(_msg_cache) - int(_MSG_CACHE_MAX * 0.8)
-    for key, _ in by_age[:to_remove]:
-        _msg_cache.pop(key, None)
+    """Force the library's lazy TTL sweep (called by housekeeping)."""
+    _msg_cache.expire()
 
 
 def invalidate_message_cache(message_id: int):
-    for key in [k for k in _msg_cache if k[1] == message_id]:
+    for key in [k for k in _msg_cache.keys() if k[1] == message_id]:
         _msg_cache.pop(key, None)
 
 
@@ -628,19 +617,11 @@ def invalidate_message_cache_batch(message_ids: list[int]):
 
 
 async def get_message_from_channel(message_id: int) -> Message:
-    # Proactively drop TTL-expired entries — without this up to 5000 stale
-    # Message objects (with parsed media/thumbs) were held until the size
-    # cap tripped.
-    try:
-        _prune_msg_cache()
-    except Exception:
-        pass
-    now = time.monotonic()
+    # get() honours the entry TTL, so an expired Message is never returned.
     key = _msg_cache_key(message_id)
-    if key in _msg_cache:
-        ts, msg = _msg_cache[key]
-        if now - ts < MSG_CACHE_TTL:
-            return msg
+    cached = _msg_cache.get(key)
+    if cached is not None:
+        return cached
     msg = await tg_client.get_messages(
         settings.telegram_storage_channel_id,
         message_id,
@@ -648,8 +629,7 @@ async def get_message_from_channel(message_id: int) -> Message:
     # Don't cache empty/missing messages — a transient fetch failure would
     # otherwise pin a useless (or wrong) result for the full TTL hour.
     if msg and not getattr(msg, "empty", False):
-        _msg_cache[key] = (now, msg)
-        _msg_cache_evict()
+        _msg_cache.insert(key, msg)
     return msg
 
 

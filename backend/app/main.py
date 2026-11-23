@@ -29,7 +29,7 @@ from .telegram import start_telegram_client, stop_telegram_client
 from .status import get_status, attach_ring_handler, clear_logs, maybe_oom_clear
 from .streaming import _evict_idle_ram_caches
 from .utils import bearer_token_matches
-from .gzip_middleware import CompressibleGZipMiddleware
+from .compression import SelectiveCompressionMiddleware
 from .static_allowlist import build_static_allowlist
 
 from .routers import (
@@ -201,7 +201,7 @@ class SecurityHeadersMiddleware:
         await self.app(scope, receive, send_wrapper)
 
 
-app.add_middleware(CompressibleGZipMiddleware, minimum_size=1024)
+app.add_middleware(SelectiveCompressionMiddleware, minimum_size=1024)
 app.add_middleware(SecurityHeadersMiddleware)
 
 # CORS middleware - added LAST so it runs FIRST (outermost) per python:S8414.
