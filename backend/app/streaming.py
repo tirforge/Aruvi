@@ -10,10 +10,14 @@ import os
 import sys
 import time
 import logging
-from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from typing import AsyncGenerator
 from contextlib import asynccontextmanager
+
+try:
+    from cachebox import LRUCache
+except ImportError:  # pragma: no cover - dependency is in requirements.txt
+    LRUCache = None
 
 try:
     _libc = ctypes.CDLL("libc.so.6")
@@ -78,22 +82,35 @@ def _get_media(message):
 
 
 class ChunkCache:
-    """Per-video FIFO cache for already-yielded chunks (backward seek support).
-    Key: chunk_idx -> bytes
-    Max size: 2GB per video, evicts oldest entries when full.
+    """Per-video LRU cache for resolved chunks (1 MB each).
+
+    The store is `cachebox` (https://github.com/awolverp/cachebox), a
+    Rust-backed cache whose LRU is weighted by the real payload size, so the
+    byte cap is exact and eviction is least-recently-*used* instead of FIFO —
+    a backward seek reuses the chunks the player just left rather than the
+    oldest ones. The wrapper only keeps hit/miss/eviction counters for
+    ``/api/debug``; all storage and eviction bookkeeping lives in the
+    extension.
     """
 
     def __init__(self, max_bytes: int = 2 * 1024 * 1024 * 1024):
-        self._data: dict[int, bytes] = {}
-        self._order: deque[int] = deque()
-        self._size = 0
         self._max = max_bytes
         self._hits = 0
         self._misses = 0
         self._evictions = 0
+        try:
+            self._cache = LRUCache(
+                maxsize=max(1, max_bytes), getsizeof=lambda _key, value: len(value)
+            )
+        except Exception:  # pragma: no cover - broken extension build
+            self._cache = None
+            logger.warning("cachebox unavailable - the RAM chunk cache is disabled")
 
     def get(self, key: int) -> bytes | None:
-        data = self._data.get(key)
+        if self._cache is None:
+            self._misses += 1
+            return None
+        data = self._cache.get(key)
         if data is not None:
             self._hits += 1
             return data
@@ -101,29 +118,27 @@ class ChunkCache:
         return None
 
     def put(self, key: int, data: bytes):
-        if key in self._data or not data:
+        if self._cache is None or not data:
             return
-        self._data[key] = data
-        self._order.append(key)
-        self._size += len(data)
-        while self._size > self._max and self._order:
-            old_key = self._order.popleft()
-            old_data = self._data.pop(old_key, None)
-            if old_data:
-                self._size -= len(old_data)
-                self._evictions += 1
-                if self._evictions == 1 or self._evictions % 10 == 0:
-                    logger.info(
-                        "Evicted %d chunks (%.1f MB)",
-                        self._evictions,
-                        self._size / 1024 / 1024,
-                    )
+        if key in self._cache:
+            return
+        if len(data) > self._max:
+            return
+        entries_before = len(self._cache)
+        try:
+            self._cache.insert(key, data)
+        except Exception:  # pragma: no cover - insertion race/overflow
+            return
+        # cachebox evicts LRU entries until the weighted total fits maxsize
+        # again. One insert grows the entry count by at most one, so any
+        # shortfall is exactly the number of chunks it dropped for us.
+        self._evictions += max(0, entries_before + 1 - len(self._cache))
 
     def clear(self) -> int:
-        freed = self._size
-        self._data.clear()
-        self._order.clear()
-        self._size = 0
+        if self._cache is None:
+            return 0
+        freed = self._cache.current_size()
+        self._cache.clear()
         self._hits = 0
         self._misses = 0
         self._evictions = 0
@@ -131,9 +146,11 @@ class ChunkCache:
 
     @property
     def info(self) -> dict:
+        size = self._cache.current_size() if self._cache is not None else 0
+        chunks = len(self._cache) if self._cache is not None else 0
         return {
-            "chunks": len(self._data),
-            "size_mb": round(self._size / 1024 / 1024, 1),
+            "chunks": chunks,
+            "size_mb": round(size / 1024 / 1024, 1),
             "max_mb": round(self._max / 1024 / 1024, 1),
             "hits": self._hits,
             "misses": self._misses,
@@ -143,7 +160,7 @@ class ChunkCache:
 
 class CacheManager:
     """Manages per-video ChunkCache instances.
-    Each (chat_id, message_id) pair gets its own 2GB FIFO cache,
+    Each (chat_id, message_id) pair gets its own byte-capped LRU cache,
     so concurrent streams don't evict each other's backward seek data.
     """
 
