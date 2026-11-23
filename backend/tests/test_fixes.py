@@ -1207,7 +1207,7 @@ class TestSweepSkipsSymlinks:
 
 
 class TestDetectImageMime:
-    """_detect_image_mime handles empty input and GIF magic."""
+    """_detect_image_mime sniffs thumbnail bytes via filetype."""
 
     @pytest.mark.parametrize(
         "data,expected",
@@ -1215,10 +1215,11 @@ class TestDetectImageMime:
             (b"", "image/jpeg"),
             (b"GIF87a123", "image/gif"),
             (b"GIF89a123", "image/gif"),
-            (b"\x89PNG\r\n\x1a\n", "image/png"),
-            (b"\xff\xd8\xff\xe0", "image/jpeg"),
-            (b"BM1234", "image/bmp"),
-            (b"RIFF1234WEBP", "image/webp"),
+            (b"\x89PNG\r\n\x1a\n" + b"\x00" * 16, "image/png"),
+            (b"\xff\xd8\xff\xe0" + b"\x00" * 16, "image/jpeg"),
+            (b"BM" + b"\x00" * 32, "image/bmp"),
+            (b"RIFF\x00\x00\x00\x00WEBPVP8 " + b"\x00" * 16, "image/webp"),
+            (b"II*\x00" + b"\x00" * 16, "image/tiff"),
             (b"????", "image/jpeg"),
         ],
     )
@@ -1226,6 +1227,12 @@ class TestDetectImageMime:
         from app.routers.streaming import _detect_image_mime
 
         assert _detect_image_mime(data) == expected
+
+    def test_non_image_magic_falls_back_to_jpeg(self):
+        from app.routers.streaming import _detect_image_mime
+
+        # A zip header is not an image; thumbnails should stay JPEG-default.
+        assert _detect_image_mime(b"PK\x03\x04" + b"\x00" * 16) == "image/jpeg"
 
 
 class TestBatchDeleteCaps:

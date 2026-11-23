@@ -26,6 +26,10 @@ python-multipart>=0.0.6
 aiofiles>=23.2.0
 python-dotenv>=1.0.0
 
+# Thumbnail MIME sniffing by magic bytes (pure Python, 100+ formats).
+# https://github.com/h2non/filetype.py
+filetype>=1.2.0
+
 # Rate Limiting
 slowapi>=0.1.10
 
