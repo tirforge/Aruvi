@@ -13,7 +13,6 @@ from ..models import File, User, Folder
 from ..auth import get_current_user
 from ..config import get_settings
 from ..services import (
-    escape_like,
     add_urls_to_file,
     fetch_recent_files,
     fetch_continue_watching_files,
@@ -156,7 +155,7 @@ async def tv_search(
         select(File)
         .where(
             File.user_id == current_user.id,
-            File.file_name.ilike(f"%{escape_like(q)}%", escape="\\"),
+            File.file_name.icontains(q, autoescape=True),
         )
         .options(selectinload(File.watch_progress), defer(File.thumbnail_data))
         .order_by(desc(File.created_at))
@@ -170,7 +169,7 @@ async def tv_search(
         select(Folder)
         .where(
             Folder.user_id == current_user.id,
-            Folder.name.ilike(f"%{escape_like(q)}%", escape="\\"),
+            Folder.name.icontains(q, autoescape=True),
         )
         .order_by(Folder.name)
         .limit(20)

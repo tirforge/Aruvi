@@ -972,6 +972,80 @@ class TestRlsAutoLockdown:
         assert not any("service_role" in c for c in revokes)
 
 
+class TestSearchEscaping:
+    """Search terms are literal: LIKE metacharacters must not act as wildcards."""
+
+    @staticmethod
+    async def _seed(db, user, names):
+        from app.models import File
+
+        for i, name in enumerate(names):
+            db.add(
+                File(
+                    user_id=user.id,
+                    file_id=f"fid-{i}",
+                    file_unique_id=f"uniq-search-{i}",
+                    channel_message_id=i + 1,
+                    file_name=name,
+                    file_size=1000,
+                    file_type="video",
+                )
+            )
+        await db.commit()
+
+    @pytest.mark.asyncio
+    async def test_percent_matches_only_literal_percent(self, temp_db, sample_user):
+        from app.routers.files import list_files
+
+        await self._seed(
+            temp_db, sample_user, ["100% real.mkv", "100X other.mkv"]
+        )
+        resp = await list_files(
+            folder_id=None,
+            file_type=None,
+            search="100%",
+            page=1,
+            per_page=20,
+            db=temp_db,
+            current_user=sample_user,
+        )
+        assert [f.file_name for f in resp.files] == ["100% real.mkv"]
+        assert resp.total == 1
+
+    @pytest.mark.asyncio
+    async def test_underscore_matches_only_literal_underscore(
+        self, temp_db, sample_user
+    ):
+        from app.routers.files import list_files
+
+        await self._seed(
+            temp_db, sample_user, ["a_b literal.mkv", "aXb other.mkv"]
+        )
+        resp = await list_files(
+            folder_id=None,
+            file_type=None,
+            search="a_b",
+            page=1,
+            per_page=20,
+            db=temp_db,
+            current_user=sample_user,
+        )
+        assert [f.file_name for f in resp.files] == ["a_b literal.mkv"]
+        assert resp.total == 1
+
+    @pytest.mark.asyncio
+    async def test_tv_search_escapes_metacharacters(self, temp_db, sample_user):
+        from app.routers.tv import tv_search
+
+        await self._seed(
+            temp_db, sample_user, ["50% off.mkv", "50X other.mkv"]
+        )
+        resp = await tv_search(
+            q="50%", limit=30, db=temp_db, current_user=sample_user
+        )
+        assert [f["file_name"] for f in resp["files"]] == ["50% off.mkv"]
+
+
 class TestSpaStaticAllowlist:
     def test_builder_maps_nested_files_skips_gz(self, tmp_path):
         from app.static_allowlist import build_static_allowlist
