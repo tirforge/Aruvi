@@ -1602,34 +1602,95 @@ class TestMemEnvParsingDelegation:
     """MEMORY is parsed by humanfriendly, and a bad value warns exactly once."""
 
     def test_invalid_env_warns_once(self, monkeypatch):
-        from app import status
+        from app import byte_sizes, status
 
         calls = []
-        monkeypatch.setattr(status, "_mem_env_warned", False)
+        monkeypatch.setattr(byte_sizes, "_warned", set())
         monkeypatch.setattr(
-            status.logger, "warning", lambda *a, **k: calls.append(a)
+            byte_sizes._log, "warning", lambda *a, **k: calls.append(a)
         )
-        try:
-            assert status._parse_mem_env("nonsense") == status._FALLBACK_MEM_BYTES
-            assert status._parse_mem_env("nonsense") == status._FALLBACK_MEM_BYTES
-            assert len(calls) == 1
-        finally:
-            monkeypatch.setattr(status, "_mem_env_warned", False)
+        assert status._parse_mem_env("nonsense") == status._FALLBACK_MEM_BYTES
+        assert status._parse_mem_env("nonsense") == status._FALLBACK_MEM_BYTES
+        assert len(calls) == 1
 
     def test_get_ram_survives_zero_memory_env(self, monkeypatch):
         from app import status
 
         monkeypatch.setattr(status, "_discover_cgroup_memory", lambda: (None, None))
         monkeypatch.setattr(status, "_sum_proc_rss", lambda: 0)
-        monkeypatch.setattr(status, "_mem_env_warned", False)
         monkeypatch.setenv("MEMORY", "0")
-        try:
-            ram = status.get_ram()
-        finally:
-            monkeypatch.setattr(status, "_mem_env_warned", False)
+        ram = status.get_ram()
         # MEMORY=0 used to reach 100.0 * used / total -> ZeroDivisionError.
         assert ram["total_gb"] == 16.0
         assert ram["percent"] == 0.0
+
+
+class TestByteSizeEnv:
+    """Shared human-readable byte-size parsing (app/byte_sizes.py)."""
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("8G", 8 * 1024**3),
+            ("8Gi", 8 * 1024**3),
+            ("8GiB", 8 * 1024**3),
+            ("8 GB", 8 * 1024**3),
+            ("512M", 512 * 1024**2),
+            ("2 MB", 2 * 1024**2),
+            ("1.5TB", int(1.5 * 1024**4)),
+            ("8589934592", 8589934592),
+        ],
+    )
+    def test_units(self, raw, expected):
+        from app.byte_sizes import parse_byte_size
+
+        assert parse_byte_size(raw, 123, name="X") == expected
+
+    @pytest.mark.parametrize("raw", [None, "", "   "])
+    def test_unset_is_default_without_a_warning(self, monkeypatch, raw):
+        from app import byte_sizes
+
+        calls = []
+        monkeypatch.setattr(byte_sizes, "_warned", set())
+        monkeypatch.setattr(
+            byte_sizes._log, "warning", lambda *a, **k: calls.append(a)
+        )
+        assert byte_sizes.parse_byte_size(raw, 4096, name="UNSET") == 4096
+        # An unset variable is the documented default, not an error.
+        assert calls == []
+
+    @pytest.mark.parametrize("raw", ["garbage", "-1G", "0", "0G", "1,5G", "10XB"])
+    def test_bad_values_fall_back_and_warn_once(self, monkeypatch, raw):
+        from app import byte_sizes
+
+        calls = []
+        monkeypatch.setattr(byte_sizes, "_warned", set())
+        monkeypatch.setattr(
+            byte_sizes._log, "warning", lambda *a, **k: calls.append(a)
+        )
+        assert byte_sizes.parse_byte_size(raw, 4096, name="BAD") == 4096
+        assert byte_sizes.parse_byte_size(raw, 4096, name="BAD") == 4096
+        assert len(calls) == 1
+
+    def test_disk_cache_limits_use_the_shared_parser(self):
+        from pathlib import Path
+
+        from app import disk_cache
+
+        source = (
+            Path(__file__).resolve().parents[1] / "app" / "disk_cache.py"
+        ).read_text(encoding="utf-8")
+        # The three byte-valued settings must not be plain int() anymore: a
+        # value like "8G" used to crash the backend at import time.
+        for name in (
+            "DISK_CACHE_MAX_BYTES",
+            "DISK_CACHE_PER_VIDEO_BYTES",
+            "DISK_CACHE_MAP_BYTES",
+        ):
+            assert f'int(os.environ.get("{name}"' not in source, name
+        assert source.count("parse_byte_size(") >= 3
+        assert disk_cache.DISK_CACHE_MAX_BYTES == 8 * 1024**3
+        assert disk_cache.DISK_CACHE_PER_VIDEO_BYTES == 2 * 1024**3
 
 
 class TestLastActiveThrottle:
