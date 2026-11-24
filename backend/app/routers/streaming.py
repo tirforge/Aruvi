@@ -2,7 +2,6 @@
 Streaming API endpoints for media playback.
 """
 
-import re
 import asyncio
 import json
 import shutil
@@ -16,6 +15,7 @@ from sqlalchemy import select
 
 from ..database import get_db
 from ..models import File, User
+from ..http_headers import parse_byte_range as parse_range_header
 from ..auth import (
     get_current_user,
     get_current_user_opt,
@@ -77,41 +77,6 @@ async def _user_from_download_token(request: Request, file_id: int, db: AsyncSes
     if user and (token_version is None or token_version >= user.auth_version):
         return user
     return None
-
-
-def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
-    """Parse HTTP Range header for video seeking support.
-
-    For a zero-byte file there is no body to satisfy, so the caller answers
-    ``0, -1`` + a 200 against a 0 length instead of a bogus 416. Multipart
-    ranges (``bytes=a-b,c-d``) are rejected with ``None`` — the caller turns
-    that into a 416 rather than silently serving only the first range.
-    """
-    if range_header:
-        if "," in range_header:
-            return None
-        # Suffix range: bytes=-500 (last N bytes)
-        suffix_match = re.match(r"bytes=-(\d+)", range_header)
-        if suffix_match:
-            suffix_len = int(suffix_match.group(1))
-            if file_size == 0:
-                return 0, -1
-            start = max(0, file_size - suffix_len)
-            return start, file_size - 1
-
-        match = re.match(r"bytes=(\d+)-(\d*)", range_header)
-        if not match:
-            return 0, file_size - 1
-
-        start = int(match.group(1))
-        end = int(match.group(2)) if match.group(2) else file_size - 1
-        if file_size == 0:
-            return 0, -1
-        return start, min(end, file_size - 1)
-
-    if file_size == 0:
-        return 0, -1
-    return 0, file_size - 1
 
 
 @router.get("/debug")
@@ -1000,10 +965,10 @@ async def stream_for_cast(
     range_header = request.headers.get("Range")
     seek_time = None
     start_byte = 0
-    if range_header and probe and probe["duration"]:
-        m = re.match(r"bytes=(\d+)-", range_header)
-        if m:
-            start_byte = int(m.group(1))
+    if range_header and probe and probe["duration"] and file.file_size:
+        span = parse_range_header(range_header, file.file_size)
+        if span is not None and span[1] >= 0:
+            start_byte = span[0]
             seek_time = start_byte / file.file_size * probe["duration"]
     status_code = 206 if seek_time is not None else 200
 

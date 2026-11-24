@@ -30,6 +30,7 @@ from .status import get_status, attach_ring_handler, clear_logs, maybe_oom_clear
 from .streaming import _evict_idle_ram_caches
 from .utils import bearer_token_matches
 from .compression import SelectiveCompressionMiddleware
+from .http_headers import accepts_encoding, pick_content_encoding
 from .json_response import OrjsonResponse
 from .static_allowlist import build_static_allowlist
 
@@ -454,14 +455,8 @@ def _resolve_static(
 
 
 def _accepts_encoding(accept_encoding: str, coding: str) -> bool:
-    """True when *coding* is one of the Accept-Encoding tokens.
-
-    q-values are not honoured: browsers do not send ``q=0`` for gzip/br, and
-    the previous substring check ignored them too.
-    """
-    return coding in {
-        token.strip().split(";")[0].lower() for token in accept_encoding.split(",")
-    }
+    """True when the client accepts *coding* (q-values and ``*`` honoured)."""
+    return accepts_encoding(accept_encoding, coding)
 
 
 def _spa_index_exists() -> bool:
@@ -499,10 +494,14 @@ async def serve_spa(request: Request, full_path: str):
         _resolve_static, static_file_path
     )
     if static_file:
-        # br first: 2.55MB vs 3.65MB gzip for the vendored player.
-        if br_file and _accepts_encoding(accept_encoding, "br"):
+        # Negotiate over only the siblings that exist, so a client asking for
+        # br with no .br on disk still gets gzip instead of the raw asset.
+        # Preference order is br (2.55MB) before gzip (3.65MB) for the player.
+        available = [c for c, f in (("br", br_file), ("gzip", gz_file)) if f]
+        chosen = pick_content_encoding(accept_encoding, available)
+        if chosen == "br":
             return _encoded_response(static_file, br_file, "br")
-        if gz_file and _accepts_encoding(accept_encoding, "gzip"):
+        if chosen == "gzip":
             return _encoded_response(static_file, gz_file, "gzip")
         return FileResponse(static_file)
 

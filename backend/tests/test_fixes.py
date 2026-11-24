@@ -250,8 +250,39 @@ class TestParseRangeHeader:
     def test_zero_byte_with_range(self):
         from app.routers.streaming import parse_range_header
 
-        start, end = parse_range_header("bytes=-50", 0)
-        assert (start, end) == (0, -1)
+        # No body exists, so no range is satisfiable (RFC 9110 §14.1.2).
+        assert parse_range_header("bytes=-50", 0) is None
+        assert parse_range_header("bytes=0-0", 0) is None
+
+    def test_junk_suffix_rejected(self):
+        from app.routers.streaming import parse_range_header
+
+        # The old regex matched the numeric prefix and ignored trailing junk.
+        assert parse_range_header("bytes=0-10junk", 100) is None
+
+    def test_inverted_range_rejected(self):
+        from app.routers.streaming import parse_range_header
+
+        # The old regex returned (50, 40), a start > end range.
+        assert parse_range_header("bytes=50-40", 100) is None
+
+    def test_start_past_eof_rejected(self):
+        from app.routers.streaming import parse_range_header
+
+        # The old regex clamped and served the empty tail with a 206.
+        assert parse_range_header("bytes=200-300", 100) is None
+        assert parse_range_header("bytes=100-", 100) is None
+
+    def test_zero_length_suffix_rejected(self):
+        from app.routers.streaming import parse_range_header
+
+        assert parse_range_header("bytes=-0", 100) is None
+
+    def test_case_and_whitespace_tolerated(self):
+        from app.routers.streaming import parse_range_header
+
+        assert parse_range_header("Bytes=0-10", 100) == (0, 10)
+        assert parse_range_header("bytes= 0-10", 100) == (0, 10)
 
 
 class TestDownloadTokenValidation:
@@ -1319,6 +1350,22 @@ class TestSpaStaticAllowlist:
         assert not _accepts_encoding("", "br")
         # "brotli" is not the token name and must not match a substring check
         assert not _accepts_encoding("brotli", "br")
+        # q=0 means "not acceptable" (RFC 9110 §12.5.3)
+        assert not _accepts_encoding("gzip;q=0", "gzip")
+        # the wildcard covers codings that are not named
+        assert _accepts_encoding("*", "br")
+
+    def test_pick_content_encoding_honours_q_values(self):
+        from app.http_headers import pick_content_encoding
+
+        # Client prefers gzip: br must not win just by being the server's first.
+        assert pick_content_encoding("br;q=0.1, gzip;q=0.9", ("br", "gzip")) == "gzip"
+        assert pick_content_encoding("br, gzip", ("br", "gzip")) == "br"
+        assert pick_content_encoding("gzip;q=0", ("br", "gzip")) is None
+        assert pick_content_encoding("", ("br", "gzip")) is None
+        assert pick_content_encoding("deflate", ("br", "gzip")) is None
+        # Only negotiate over codings the server can actually serve.
+        assert pick_content_encoding("br, gzip", ("gzip",)) == "gzip"
 
     @staticmethod
     def _request(path: str, accept_encoding: str):
@@ -1361,6 +1408,24 @@ class TestSpaStaticAllowlist:
         assert "content-encoding" not in resp.headers
         assert resp.path.endswith("app-abc.js")
         assert mainmod.STATIC_ALLOWLIST
+
+    @pytest.mark.asyncio
+    async def test_static_asset_respects_q_values(self, tmp_path, monkeypatch):
+        self._tmp_site(tmp_path, monkeypatch)
+        from app.main import serve_spa
+
+        url = "/assets/app-abc.js"
+        # gzip is preferred by q-value even though br is server-first.
+        resp = await serve_spa(
+            self._request(url, "br;q=0.1, gzip;q=0.9"), "assets/app-abc.js"
+        )
+        assert resp.headers["content-encoding"] == "gzip"
+
+        # gzip refused, br accepted via wildcard reordering.
+        resp = await serve_spa(
+            self._request(url, "gzip;q=0, *;q=1"), "assets/app-abc.js"
+        )
+        assert resp.headers["content-encoding"] == "br"
 
     def test_resolve_static_returns_all_three_variants(self, tmp_path):
         from app.main import _resolve_static
@@ -2504,6 +2569,24 @@ class TestFastCompression:
         assert compression._compress(body, b"br") == compression.brotli.compress(
             body, quality=compression._BROTLI_QUALITY
         )
+
+    def test_pick_encoding_honours_q_values(self):
+        from app import compression
+
+        assert compression._pick_encoding(b"gzip, deflate, br") == b"br"
+        assert compression._pick_encoding(b"br;q=0.1, gzip;q=0.9") == b"gzip"
+        assert compression._pick_encoding(b"gzip;q=0") is None
+        assert compression._pick_encoding(b"") is None
+
+    def test_unsupported_encoding_is_not_compressed(self):
+        from app.compression import SelectiveCompressionMiddleware
+
+        body = b'{"files": "' + b"x" * 5000 + b'"}'
+        start, end = self._run(
+            SelectiveCompressionMiddleware, body=body, accept_encoding=b"gzip;q=0"
+        )
+        assert b"content-encoding" not in dict(start["headers"])
+        assert end["body"] == body
 
 
 class TestNativeCryptoBackend:
