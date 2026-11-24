@@ -4090,3 +4090,145 @@ class TestContentDisposition:
         assert header.startswith("inline; ")
         assert 'filename="Am_lie (2001).mkv"' in header
         assert "filename*=UTF-8''Am%C3%A9lie%20%282001%29.mkv" in header
+
+
+class TestTelegramLinks:
+    """t.me links are parsed with ``urllib.parse``, not string surgery.
+
+    The old ``_tme_entity_from_url`` did ``url.replace(...).split("?")[0]
+    .split("/")[0]``, so a non-Telegram button URL came back as ``"https:"`` —
+    and every bot message with a YouTube button therefore looked like a
+    force-sub gate. Upper-case hosts, ``telegram.me`` and ``#fragments`` were
+    mangled the same way, and the deep-link regex forwarded the still-encoded
+    ``?start=`` payload to ``/start``.
+    """
+
+    @staticmethod
+    def _msg(text="", buttons=()):
+        from types import SimpleNamespace
+
+        markup = None
+        if buttons:
+            markup = SimpleNamespace(
+                inline_keyboard=[
+                    [SimpleNamespace(url=url) for url in row] for row in buttons
+                ]
+            )
+        return SimpleNamespace(text=text, caption=None, reply_markup=markup)
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "t.me/SomeGroup",
+            "https://t.me/SomeGroup",
+            "https://T.ME/SomeGroup",
+            "http://www.t.me/SomeGroup/",
+            "https://telegram.me/SomeGroup",
+            "https://telegram.dog/SomeGroup",
+            "https://t.me/SomeGroup?start=payload",
+            "https://t.me/SomeGroup#fragment",
+        ],
+    )
+    def test_usernames_in_every_link_form(self, url):
+        from app.grabber import _tme_entity_from_url
+
+        assert _tme_entity_from_url(url) == "SomeGroup"
+
+    @pytest.mark.parametrize(
+        "url, expected",
+        [
+            ("https://t.me/+AbCdEf", "+AbCdEf"),
+            ("t.me/+AbCdEf?start=x", "+AbCdEf"),
+            ("https://t.me/joinchat/AbCdEf", "joinchat/AbCdEf"),
+            ("https://t.me/joinchat/AbCdEf?x=1", "joinchat/AbCdEf"),
+        ],
+    )
+    def test_invite_links(self, url, expected):
+        from app.grabber import _tme_entity_from_url
+
+        assert _tme_entity_from_url(url) == expected
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "",
+            None,
+            "https://youtube.com/watch?v=1",
+            "https://github.com/tirforge/Aruvi",
+            "tg://resolve?domain=SomeGroup",
+            "https://t.me/share/url?url=x",
+            "https://t.me/s/SomeGroup",
+            "https://t.me/c/123456/789",
+        ],
+    )
+    def test_non_joinable_links(self, url):
+        from app.grabber import _tme_entity_from_url
+
+        assert _tme_entity_from_url(url) == ""
+
+    def test_foreign_button_is_not_a_force_sub_gate(self):
+        from app.grabber import _is_join_required, _join_targets_from_message
+
+        msg = self._msg(
+            "Here is your file",
+            [["https://youtube.com/watch?v=1", "https://github.com/tirforge/Aruvi"]],
+        )
+        assert _is_join_required(msg) is False
+        assert _join_targets_from_message(msg) == set()
+
+    def test_telegram_button_is_a_force_sub_gate(self):
+        from app.grabber import _is_join_required, _join_targets_from_message
+
+        msg = self._msg("", [["https://t.me/SomeChannel", "https://t.me/+AbCdEf"]])
+        assert _is_join_required(msg) is True
+        assert _join_targets_from_message(msg) == {"SomeChannel", "+AbCdEf"}
+
+    @pytest.mark.parametrize(
+        "value, expected",
+        [
+            ("https://t.me/FileBot?start=abc", ("abc", "FileBot")),
+            ("t.me/FileBot?start=abc", ("abc", "FileBot")),
+            ("https://t.me/FileBot?x=1&start=abc", ("abc", "FileBot")),
+            ("https://t.me/FileBot?start=a%2Fb", ("a/b", "FileBot")),
+            ("https://t.me/share/url?url=x&start=abc", ("abc", "")),
+            ("callback text ?start=abc", ("abc", "")),
+        ],
+    )
+    def test_deep_link_parsing(self, value, expected):
+        from app.grabber import _deep_link_from
+
+        assert _deep_link_from(value) == expected
+
+    @pytest.mark.parametrize(
+        "value", ["", "https://t.me/FileBot?start=", "no link here", "https://t.me/FileBot"]
+    )
+    def test_no_deep_link(self, value):
+        from app.grabber import _deep_link_from
+
+        assert _deep_link_from(value) is None
+
+    @pytest.mark.asyncio
+    async def test_resolve_group_normalizes_url_and_caches_it(self, monkeypatch):
+        from types import SimpleNamespace
+        from app import grabber
+
+        monkeypatch.setattr(grabber, "_GROUP_CHAT_ID_CACHE", {})
+        monkeypatch.setattr(grabber, "_join_status", lambda res: "joined")
+
+        class FakeClient:
+            def __init__(self):
+                self.joined = []
+
+            async def join_chat(self, target):
+                self.joined.append(target)
+                return SimpleNamespace(chat=SimpleNamespace(id=-100123))
+
+        client = FakeClient()
+        chat_id = await grabber._resolve_group(client, "https://t.me/+AbCdEf?start=x")
+        assert chat_id == -100123
+        assert client.joined == ["https://t.me/+AbCdEf"]
+        assert grabber._GROUP_CHAT_ID_CACHE == {"+AbCdEf": -100123}
+
+        # A second call, in another link form, is served from the cache.
+        assert await grabber._resolve_group(client, "t.me/+AbCdEf") == -100123
+        assert client.joined == ["https://t.me/+AbCdEf"]
