@@ -3796,3 +3796,111 @@ class TestJoinResults:
         )
         with pytest.raises(ValueError, match="guard-bot approval"):
             await self._resolve_group(monkeypatch, result=guard)
+
+
+class TestClientStartResilience:
+    """`start_one_client` must not depend on the wording of a ConnectionError.
+
+    Pyrogram raises a plain builtin ``ConnectionError("Client is already
+    connected")`` when a concurrent start wins the race — there is no typed
+    subclass to catch. The old code substring-matched that message and
+    re-raised every other ConnectionError, which escaped ``asyncio.gather`` in
+    ``start_all_clients()`` and aborted the whole startup.
+    """
+
+    @staticmethod
+    def _shim(monkeypatch, telegram_mod):
+        """Swap telegram.asyncio for a shim whose sleep() is instant."""
+        import asyncio as real_asyncio
+        from types import SimpleNamespace
+
+        async def no_sleep(_delay):
+            return None
+
+        monkeypatch.setattr(
+            telegram_mod,
+            "asyncio",
+            SimpleNamespace(
+                wait_for=real_asyncio.wait_for,
+                sleep=no_sleep,
+                Lock=real_asyncio.Lock,
+            ),
+        )
+
+    @staticmethod
+    def _client(behaviour):
+        from types import SimpleNamespace
+
+        class FakeClient:
+            def __init__(self):
+                self.is_connected = False
+                self.start_calls = 0
+                self.get_me_calls = 0
+
+            async def start(self):
+                self.start_calls += 1
+                behaviour(self)
+
+            async def get_me(self):
+                self.get_me_calls += 1
+                return SimpleNamespace(username="somebot")
+
+        return FakeClient()
+
+    @pytest.mark.asyncio
+    async def test_connected_after_exception_counts_as_started(self, monkeypatch):
+        from app import telegram
+
+        self._shim(monkeypatch, telegram)
+
+        def behaviour(c):
+            c.is_connected = True
+            raise ConnectionError("Client is already connected")
+
+        client = self._client(behaviour)
+        await telegram.start_one_client(1, client)
+        # No retry, and no get_me: the other coroutine already finished.
+        assert client.start_calls == 1
+        assert client.get_me_calls == 0
+
+    @pytest.mark.asyncio
+    async def test_exception_wording_does_not_matter(self, monkeypatch):
+        from app import telegram
+
+        self._shim(monkeypatch, telegram)
+
+        def behaviour(c):
+            c.is_connected = True
+            raise ConnectionError("upstream reworded this in 2.3")
+
+        client = self._client(behaviour)
+        await telegram.start_one_client(1, client)
+        assert client.start_calls == 1
+
+    @pytest.mark.asyncio
+    async def test_real_connect_failure_is_retried_not_raised(self, monkeypatch):
+        from app import telegram
+
+        self._shim(monkeypatch, telegram)
+
+        def behaviour(c):
+            raise ConnectionError("Network is unreachable")
+
+        client = self._client(behaviour)
+        # Must return, not raise: start_all_clients() gathers these tasks.
+        await telegram.start_one_client(1, client)
+        assert client.start_calls == 3
+
+    @pytest.mark.asyncio
+    async def test_successful_start_fetches_me(self, monkeypatch):
+        from app import telegram
+
+        self._shim(monkeypatch, telegram)
+
+        def behaviour(c):
+            c.is_connected = True
+
+        client = self._client(behaviour)
+        await telegram.start_one_client(1, client)
+        assert client.start_calls == 1
+        assert client.get_me_calls == 1
