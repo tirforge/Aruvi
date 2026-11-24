@@ -27,6 +27,7 @@ from ..database import get_db
 from ..models import File, User
 from ..auth import get_current_user
 from ..config import get_settings
+from ..text_decode import decode_text
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -264,7 +265,7 @@ async def _os_download(sub_id: str, file_id: int | None) -> tuple[str, str]:
         raise HTTPException(
             status_code=502, detail="OpenSubtitles returned empty subtitle"
         )
-    text = content.decode("utf-8", errors="replace")
+    text = decode_text(content)
     fmt = "webvtt" if text.lstrip().startswith("WEBVTT") else "srt"
     return fmt, text
 
@@ -443,7 +444,7 @@ async def subtitle_content(
     try:
         text = target.text
     except Exception:
-        text = content.decode("utf-8", errors="replace")
+        text = decode_text(content)
 
     fmt = (getattr(target, "format", None) or "srt").lower()
     if fmt not in ("srt", "webvtt"):
