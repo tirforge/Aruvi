@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Request, Response, Query
 from fastapi.responses import StreamingResponse
 from ..config import get_settings
 from ..utils import bearer_token_matches, spawn_background
-from ..http_headers import parse_byte_range
+from ..http_headers import content_disposition, parse_byte_range
 from ..telegram import tg_client
 from ..streaming import (
     stream_file as stream_file_chunks,
@@ -172,13 +172,9 @@ async def _diag_media_response(
             logger.error("Diag stream failed for chat=%s msg=%d: %s", chat_id, msg, e)
             raise
 
-    from urllib.parse import quote
-
-    encoded_name = quote(file_name)
-
     headers = {
         "Content-Type": mime_type,
-        "Content-Disposition": f"inline; filename*=utf-8''{encoded_name}",
+        "Content-Disposition": content_disposition("inline", file_name),
         "Accept-Ranges": "bytes",
         "Cache-Control": "public, max-age=86400",
         "X-Diag-Ttfb-Ms": str(ttfb_ms),

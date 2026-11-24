@@ -1,6 +1,6 @@
-"""HTTP header parsing, delegated to Werkzeug instead of hand-rolled regexes.
+"""HTTP header parsing and formatting, delegated to Werkzeug.
 
-Both parsers here guard behaviour that is easy to get subtly wrong:
+The parsers here guard behaviour that is easy to get subtly wrong:
 
 * ``Range`` (RFC 9110 §14): suffix ranges, open-ended ranges, clamping,
   case-insensitive units, and unsatisfiable ranges. The old regex accepted
@@ -10,6 +10,9 @@ Both parsers here guard behaviour that is easy to get subtly wrong:
   old check ignored both, so ``br;q=0.1, gzip;q=1.0`` still chose br and
   ``gzip;q=0`` was treated as accepted.
 
+and ``content_disposition`` emits the RFC 6266 form instead of a hand-written
+f-string.
+
 Werkzeug is pure Python (no build step on the ARM VPS) and its HTTP parsing is
 exercised by every Flask deployment.
 """
@@ -17,10 +20,14 @@ exercised by every Flask deployment.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from urllib.parse import quote
 
 from werkzeug.datastructures import Accept
+from werkzeug.http import dump_options_header
 from werkzeug.http import parse_accept_header
 from werkzeug.http import parse_range_header as _parse_range
+
+from .utils import sanitize_filename
 
 
 def parse_byte_range(range_header: str | None, file_size: int) -> tuple[int, int] | None:
@@ -66,3 +73,28 @@ def pick_content_encoding(header: str, codings: Iterable[str]) -> str | None:
 def accepts_encoding(header: str, coding: str) -> bool:
     """True when the client explicitly (or via ``*``) accepts ``coding``."""
     return pick_content_encoding(header, (coding,)) == coding
+
+
+def content_disposition(disposition: str, filename: str) -> str:
+    """Build a ``Content-Disposition`` value for *filename* (RFC 6266).
+
+    Both parameters are emitted, as the RFC recommends:
+
+    * ``filename="..."`` — an ASCII-only, path-safe name for clients that ignore
+      the extended form. VLC and many TV players download under this name, and
+      the old header omitted it entirely (they fell back to the URL path).
+    * ``filename*=UTF-8''...`` — the real name, percent-encoded per RFC 5987.
+
+    Werkzeug's ``dump_options_header`` owns the quoting of the plain parameter
+    (embedded quotes/backslashes are escaped); ``quote(..., safe="")`` encodes
+    the extended one, including ``/`` — the previous ``quote(name)`` left path
+    separators raw.
+    """
+    ascii_name = filename.encode("ascii", "replace").decode("ascii")
+    return dump_options_header(
+        disposition,
+        {
+            "filename": sanitize_filename(ascii_name),
+            "filename*": "UTF-8''" + quote(filename, safe=""),
+        },
+    )
