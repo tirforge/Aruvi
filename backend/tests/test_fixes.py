@@ -3904,3 +3904,94 @@ class TestClientStartResilience:
         await telegram.start_one_client(1, client)
         assert client.start_calls == 1
         assert client.get_me_calls == 1
+
+
+class TestGDriveInvalidGrant:
+    """`invalid_grant` is read from the token response, not from the message.
+
+    google-auth raises one ``RefreshError`` for every token-endpoint failure and
+    attaches the decoded body as ``args[1]``. Substring-matching the message
+    both false-positives on an ``error_description`` that mentions the phrase
+    and depends on google-auth keeping the ``"invalid_grant: ..."`` prefix.
+    """
+
+    @staticmethod
+    def _err(message, body=None):
+        from google.auth.exceptions import RefreshError
+
+        if body is None:
+            return RefreshError(message)
+        return RefreshError(message, body)
+
+    def test_invalid_grant_comes_from_the_response_body(self):
+        from app.gdrive import _is_invalid_grant
+
+        exc = self._err(
+            "invalid_grant: Token has been expired or revoked.",
+            {
+                "error": "invalid_grant",
+                "error_description": "Token has been expired or revoked.",
+            },
+        )
+        assert _is_invalid_grant(exc) is True
+
+    def test_other_error_mentioning_invalid_grant_is_not_invalid_grant(self):
+        from app.gdrive import _is_invalid_grant
+
+        exc = self._err(
+            "internal_failure: backend error",
+            {"error": "internal_failure", "error_description": "was invalid_grant"},
+        )
+        assert _is_invalid_grant(exc) is False
+
+    def test_message_fallback_when_no_body_is_attached(self):
+        from app.gdrive import _is_invalid_grant
+
+        assert _is_invalid_grant(self._err("invalid_grant: expired")) is True
+        assert _is_invalid_grant(self._err("boom")) is False
+
+    def test_refresh_clears_the_dead_token(self, monkeypatch):
+        from app import gdrive
+
+        class DeadCreds:
+            expired = True
+            refresh_token = "rt"
+            token = "old"
+            expiry = None
+
+            def refresh(self, request):
+                raise gdrive.RefreshError(
+                    "invalid_grant: revoked", {"error": "invalid_grant"}
+                )
+
+        monkeypatch.setattr(gdrive, "_creds_from_dict", lambda d: DeadCreds())
+        token_dict = {"refresh_token": "rt", "expiry": "2026-01-01T00:00:00"}
+
+        with pytest.raises(gdrive.TokenExpiredError):
+            gdrive._refresh_creds(token_dict)
+
+        assert token_dict["refresh_token"] is None
+        assert "expiry" not in token_dict
+
+    def test_refresh_reraises_transient_errors_without_clearing(self, monkeypatch):
+        from app import gdrive
+
+        class FlakyCreds:
+            expired = True
+            refresh_token = "rt"
+            token = "old"
+            expiry = None
+
+            def refresh(self, request):
+                raise gdrive.RefreshError(
+                    "internal_failure: try later", {"error": "internal_failure"}
+                )
+
+        monkeypatch.setattr(gdrive, "_creds_from_dict", lambda d: FlakyCreds())
+        token_dict = {"refresh_token": "rt"}
+
+        with pytest.raises(gdrive.RefreshError):
+            gdrive._refresh_creds(token_dict)
+
+        # A transient failure must not log the user out.
+        assert token_dict["refresh_token"] == "rt"
