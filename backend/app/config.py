@@ -2,11 +2,46 @@ import secrets
 import logging
 import os
 from pathlib import Path
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from typing import Annotated
+
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic import Field, field_validator
 from functools import lru_cache
 
 logger = logging.getLogger(__name__)
+
+
+def _csv_values(value):
+    """Split one env value into list entries, dropping blanks.
+
+    pydantic-settings hands complex fields the raw env string (``NoDecode``),
+    so this is the single place that knows the CSV convention; the field type
+    still does the validation (``list[int]`` rejects junk with a clear error
+    instead of the old silent ``[]``).
+    """
+    if isinstance(value, str):
+        return [part.strip() for part in value.split(",") if part.strip()]
+    return value
+
+
+def _csv_slots(value):
+    """Like ``_csv_values`` but keeps empty slots (positional bot mapping)."""
+    if isinstance(value, str):
+        return [] if not value.strip() else [part.strip() for part in value.split(",")]
+    return value
+
+
+# Fields that accept a comma-separated env var.
+_CSV_FIELDS = (
+    "telegram_helper_bot_tokens",
+    "telegram_bot_session_strings",
+    "auth_users",
+    "admin_ids",
+    "subtitle_languages",
+    "subtitle_providers",
+    "grab_group_usernames",
+    "grab_session_strings",
+)
 
 # Where the auto-generated JWT secret is persisted so restarts stop
 # invalidating every session. Lives under the persistent data dir (bind-mounted
@@ -59,51 +94,33 @@ class Settings(BaseSettings):
     telegram_api_hash: str
     telegram_bot_token: str
 
-    telegram_helper_bot_tokens_str: str = Field("", alias="TELEGRAM_HELPER_BOT_TOKENS")
-    telegram_bot_session_strings_str: str = Field(
-        "", alias="TELEGRAM_BOT_SESSION_STRINGS"
+    telegram_helper_bot_tokens: Annotated[list[str], NoDecode] = Field(
+        default_factory=list, alias="TELEGRAM_HELPER_BOT_TOKENS"
+    )
+    telegram_bot_session_strings: Annotated[list[str], NoDecode] = Field(
+        default_factory=list, alias="TELEGRAM_BOT_SESSION_STRINGS"
     )
 
-    auth_users_str: str = Field("", alias="AUTH_USERS")
-    admin_ids_str: str = Field("", alias="ADMIN_IDS")
+    auth_users: Annotated[list[int], NoDecode] = Field(
+        default_factory=list, alias="AUTH_USERS"
+    )
+    admin_ids: Annotated[set[int], NoDecode] = Field(
+        default_factory=set, alias="ADMIN_IDS"
+    )
 
-    @property
-    def auth_users(self) -> list[int]:
-        v = self.auth_users_str
-        if not v:
-            return []
-        try:
-            return [int(u.strip()) for u in v.split(",") if u.strip()]
-        except ValueError:
-            return []
+    @field_validator(*_CSV_FIELDS, mode="before")
+    @classmethod
+    def _split_csv(cls, value):
+        return _csv_values(value)
 
-    @property
-    def admin_ids(self) -> set[int]:
-        v = self.admin_ids_str
-        if not v:
-            return set()
-        try:
-            return {int(u.strip()) for u in v.split(",") if u.strip()}
-        except ValueError:
-            return set()
-
-    @property
-    def telegram_helper_bot_tokens(self) -> list[str]:
-        v = self.telegram_helper_bot_tokens_str
-        if not v:
-            return []
-        return [t.strip() for t in v.split(",") if t.strip()]
+    @field_validator("grab_bot_usernames", mode="before")
+    @classmethod
+    def _split_bot_slots(cls, value):
+        return _csv_slots(value)
 
     @property
     def all_bot_tokens(self) -> list[str]:
         return [self.telegram_bot_token] + self.telegram_helper_bot_tokens
-
-    @property
-    def telegram_bot_session_strings(self) -> list[str]:
-        v = self.telegram_bot_session_strings_str
-        if not v:
-            return []
-        return [s.strip() for s in v.split(",") if s.strip()]
 
     telegram_storage_channel_id: int
 
@@ -133,23 +150,18 @@ class Settings(BaseSettings):
 
     # Subtitles (internet subtitle search)
     # Comma-separated two-letter/Alpha3 language codes, e.g. "en,ta"
-    subtitle_languages_str: str = Field("en", alias="SUBTITLE_LANGUAGES")
+    subtitle_languages: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["en"], alias="SUBTITLE_LANGUAGES"
+    )
     # Comma-separated provider list; keyless-first. OpenSubtitles.com requires
     # OPENSUBTITLES_USERNAME/PASSWORD/API_KEY.
-    subtitle_providers_str: str = Field(
-        "podnapisi,tvsubtitles,addic7ed", alias="SUBTITLE_PROVIDERS"
+    subtitle_providers: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["podnapisi", "tvsubtitles", "addic7ed"],
+        alias="SUBTITLE_PROVIDERS",
     )
     opensubtitles_username: str = Field("", alias="OPENSUBTITLES_USERNAME")
     opensubtitles_password: str = Field("", alias="OPENSUBTITLES_PASSWORD")
     opensubtitles_api_key: str = Field("", alias="OPENSUBTITLES_API_KEY")
-
-    @property
-    def subtitle_languages(self) -> list[str]:
-        return [c.strip() for c in self.subtitle_languages_str.split(",") if c.strip()]
-
-    @property
-    def subtitle_providers(self) -> list[str]:
-        return [p.strip() for p in self.subtitle_providers_str.split(",") if p.strip()]
 
     # Cloudflare API (tunnel/DNS management)
     cloudflare_api_token: str = Field("", alias="CLOUDFLARE_API_TOKEN")
@@ -173,30 +185,28 @@ class Settings(BaseSettings):
     # Multi-group search: comma-separated list of groups (GRAB_GROUP_USERNAMES)
     # takes precedence over GRAB_GROUP_USERNAME. GRAB_BOT_USERNAMES maps a bot to
     # each group positionally; an empty entry means auto-detect the replying bot.
-    grab_group_usernames_str: str = Field("", alias="GRAB_GROUP_USERNAMES")
-    grab_bot_usernames_str: str = Field("", alias="GRAB_BOT_USERNAMES")
+    grab_group_usernames: Annotated[list[str], NoDecode] = Field(
+        default_factory=list, alias="GRAB_GROUP_USERNAMES"
+    )
+    grab_bot_usernames: Annotated[list[str], NoDecode] = Field(
+        default_factory=list, alias="GRAB_BOT_USERNAMES"
+    )
 
     # Comma-separated list of Ivy session strings for the grabber pool.
     # When multiple are configured, N grab operations run concurrently.
     # Falls back to GRAB_SESSION_STRING, then TELEGRAM_BOT_SESSION_STRINGS.
-    grab_session_strings_str: str = Field("", alias="GRAB_SESSION_STRINGS")
+    grab_session_strings: Annotated[list[str], NoDecode] = Field(
+        default_factory=list, alias="GRAB_SESSION_STRINGS"
+    )
     grab_keep_messages: bool = Field(
         False, alias="GRAB_KEEP_MESSAGES"
     )  # if true, don't delete search/bot messages (avoids "deleted message" suspicion)
 
     @property
-    def grab_session_strings(self) -> list[str]:
-        v = self.grab_session_strings_str
-        if not v:
-            return []
-        return [s.strip() for s in v.split(",") if s.strip()]
-
-    @property
     def grab_groups(self) -> list[str]:
-        v = self.grab_group_usernames_str
-        if not v:
-            return [self.grab_group_username] if self.grab_group_username else []
-        return [g.strip() for g in v.split(",") if g.strip()]
+        if self.grab_group_usernames:
+            return self.grab_group_usernames
+        return [self.grab_group_username] if self.grab_group_username else []
 
     @property
     def grab_group_bots(self) -> list[str]:
@@ -204,10 +214,7 @@ class Settings(BaseSettings):
         groups = self.grab_groups
         if not groups:
             return []
-        v = self.grab_bot_usernames_str
-        if not v:
-            return [self.grab_bot_username] * len(groups)
-        bots = [b.strip() for b in v.split(",")]
+        bots = list(self.grab_bot_usernames)
         while len(bots) < len(groups):
             bots.append(self.grab_bot_username)
         return bots[: len(groups)]
