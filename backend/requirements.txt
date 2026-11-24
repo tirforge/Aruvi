@@ -30,6 +30,12 @@ python-multipart>=0.0.6
 aiofiles>=23.2.0
 python-dotenv>=1.0.0
 
+# JSON encoding (Rust). FastAPI's ORJSONResponse uses it for every API
+# payload: ~6x faster than json.dumps on a 400-file /api/files response
+# (scripts/bench_json.py) and ~8% smaller. Wheels: x86_64 + aarch64,
+# manylinux + musllinux, cp310-cp314.
+orjson>=3.13.0
+
 # Thumbnail MIME sniffing by magic bytes (pure Python, 100+ formats).
 # https://github.com/h2non/filetype.py
 filetype>=1.2.0
