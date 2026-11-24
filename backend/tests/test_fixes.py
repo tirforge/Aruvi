@@ -2877,3 +2877,231 @@ class TestTelegramErrors:
         from app.grabber import _flood_seconds
 
         assert _flood_seconds(errors.FloodWait(value=15)) == 15
+
+
+class TestSetupLoginFlow:
+    """The self-host setup helper must use Pyrogram's typed exceptions.
+
+    It previously imported ``SESSION_PASSWORD_NEEDED`` from ``pyrogram.errors``,
+    which does not exist, so every /setup/sign-in call raised ImportError
+    (HTTP 500) before the try block — including the 2FA branch.
+    """
+
+    @staticmethod
+    def _entry(client):
+        import time
+
+        return {"client": client, "phone": "+100000", "hash": "h", "ts": time.monotonic()}
+
+    @staticmethod
+    def _req():
+        """A real Starlette Request: slowapi's @limiter.limit requires one."""
+        from starlette.requests import Request
+
+        return Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/api/setup/sign-in",
+                "headers": [(b"host", b"testserver")],
+                "query_string": b"",
+                "client": ("127.0.0.1", 12345),
+                "server": ("testserver", 80),
+                "scheme": "http",
+            }
+        )
+
+    @staticmethod
+    async def _drain_tasks(times: int = 5) -> None:
+        """Let tracked background coroutines (the client disconnect) finish."""
+        for _ in range(times):
+            await asyncio.sleep(0)
+
+    @staticmethod
+    def _body(**kwargs):
+        from app.routers.setup import SignInIn
+
+        return SignInIn(setup_key="secret", token="tok", code="12345", **kwargs)
+
+    def _install(self, monkeypatch, client):
+        from app.routers import setup as setup_mod
+
+        monkeypatch.setenv("SETUP_PASSWORD", "secret")
+        setup_mod._pending.clear()
+        setup_mod._pending["tok"] = self._entry(client)
+        return setup_mod
+
+    @pytest.mark.asyncio
+    async def test_2fa_requests_password(self, monkeypatch):
+        from fastapi import HTTPException
+        from pyrogram.errors import SessionPasswordNeeded
+
+        class FakeClient:
+            async def sign_in(self, *a):
+                raise SessionPasswordNeeded()
+
+            async def check_password(self, pw):
+                raise AssertionError("password must not be checked yet")
+
+            async def export_session_string(self):
+                return "SESSION"
+
+            async def disconnect(self):
+                pass
+
+        setup_mod = self._install(monkeypatch, FakeClient())
+        try:
+            with pytest.raises(HTTPException) as exc:
+                await setup_mod.setup_sign_in(self._req(), self._body())
+            assert exc.value.status_code == 401
+            assert exc.value.detail == "need_password"
+        finally:
+            setup_mod._pending.clear()
+
+    @pytest.mark.asyncio
+    async def test_wrong_2fa_password_is_403(self, monkeypatch):
+        from fastapi import HTTPException
+        from pyrogram.errors import PasswordHashInvalid, SessionPasswordNeeded
+
+        class FakeClient:
+            async def sign_in(self, *a):
+                raise SessionPasswordNeeded()
+
+            async def check_password(self, pw):
+                raise PasswordHashInvalid()
+
+            async def export_session_string(self):
+                return "SESSION"
+
+            async def disconnect(self):
+                pass
+
+        setup_mod = self._install(monkeypatch, FakeClient())
+        try:
+            with pytest.raises(HTTPException) as exc:
+                await setup_mod.setup_sign_in(self._req(), self._body(password="bad"))
+            assert exc.value.status_code == 403
+            assert "Wrong 2FA password" in exc.value.detail
+        finally:
+            setup_mod._pending.clear()
+
+    @pytest.mark.asyncio
+    async def test_2fa_success_returns_session_and_disconnects(self, monkeypatch):
+        from pyrogram.errors import SessionPasswordNeeded
+
+        class FakeClient:
+            def __init__(self):
+                self.disconnected = False
+
+            async def sign_in(self, *a):
+                raise SessionPasswordNeeded()
+
+            async def check_password(self, pw):
+                assert pw == "good"
+
+            async def export_session_string(self):
+                return "SESSION-STRING"
+
+            async def disconnect(self):
+                self.disconnected = True
+
+        client = FakeClient()
+        setup_mod = self._install(monkeypatch, client)
+        try:
+            result = await setup_mod.setup_sign_in(self._req(), self._body(password="good"))
+            assert result == {"session_string": "SESSION-STRING"}
+            assert "tok" not in setup_mod._pending
+            await self._drain_tasks()  # let the tracked disconnect task run
+            assert client.disconnected
+        finally:
+            setup_mod._pending.clear()
+
+    @pytest.mark.asyncio
+    async def test_invalid_and_expired_codes_are_400(self, monkeypatch):
+        from fastapi import HTTPException
+        from pyrogram.errors import PhoneCodeExpired, PhoneCodeInvalid
+
+        class InvalidClient:
+            async def sign_in(self, *a):
+                raise PhoneCodeInvalid()
+
+            async def disconnect(self):
+                pass
+
+        class ExpiredClient:
+            async def sign_in(self, *a):
+                raise PhoneCodeExpired()
+
+            async def disconnect(self):
+                pass
+
+        for client, needle in (
+            (InvalidClient(), "Invalid login code"),
+            (ExpiredClient(), "Login code expired"),
+        ):
+            setup_mod = self._install(monkeypatch, client)
+            try:
+                with pytest.raises(HTTPException) as exc:
+                    await setup_mod.setup_sign_in(self._req(), self._body())
+                assert exc.value.status_code == 400
+                assert needle in exc.value.detail
+            finally:
+                setup_mod._pending.clear()
+
+    @pytest.mark.asyncio
+    async def test_expired_entry_is_disconnected(self, monkeypatch):
+        import time
+
+        from app.routers import setup as setup_mod
+
+        class FakeClient:
+            def __init__(self):
+                self.disconnected = False
+
+            async def disconnect(self):
+                self.disconnected = True
+
+        client = FakeClient()
+        setup_mod._pending.clear()
+        setup_mod._pending["old"] = {
+            "client": client,
+            "phone": "",
+            "hash": "",
+            "ts": time.monotonic() - setup_mod._TTL_SECONDS - 1,
+        }
+        try:
+            setup_mod._cleanup_expired()
+            assert "old" not in setup_mod._pending
+            await self._drain_tasks()
+            assert client.disconnected
+        finally:
+            setup_mod._pending.clear()
+
+    @pytest.mark.asyncio
+    async def test_pending_store_is_bounded(self, monkeypatch):
+        from app.routers import setup as setup_mod
+
+        class FakeClient:
+            async def disconnect(self):
+                pass
+
+        setup_mod._pending.clear()
+        try:
+            for i in range(setup_mod._MAX_PENDING):
+                setup_mod._pending[f"t{i}"] = self._entry(FakeClient())
+            setup_mod._evict_oldest()
+            assert len(setup_mod._pending) == setup_mod._MAX_PENDING - 1
+            assert "t0" not in setup_mod._pending
+            assert "t1" in setup_mod._pending
+            await self._drain_tasks()
+        finally:
+            setup_mod._pending.clear()
+
+    def test_no_legacy_constant_import(self):
+        from pathlib import Path
+
+        source = (
+            Path(__file__).resolve().parents[1] / "app" / "routers" / "setup.py"
+        ).read_text(encoding="utf-8")
+        assert "SESSION_PASSWORD_NEEDED" not in source
+        assert "SessionPasswordNeeded" in source
