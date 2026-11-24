@@ -3995,3 +3995,98 @@ class TestGDriveInvalidGrant:
 
         # A transient failure must not log the user out.
         assert token_dict["refresh_token"] == "rt"
+
+
+class TestContentDisposition:
+    """``Content-Disposition`` is RFC 6266, not a hand-written f-string.
+
+    The old code emitted only ``filename*=utf-8''<quote(name)>``:
+
+    * clients that ignore the extended parameter (VLC, several TV players)
+      saved the file under the URL path, and
+    * ``quote(name)`` leaves ``/`` unescaped, so a name with a slash could be
+      read as a path by a naive downloader.
+
+    The helper now emits both parameters and lets Werkzeug escape the quoted
+    one.
+    """
+
+    @staticmethod
+    def _cd(name, disposition="attachment"):
+        from app.http_headers import content_disposition
+
+        return content_disposition(disposition, name)
+
+    def test_ascii_name_keeps_plain_filename(self):
+        header = self._cd("Kantara (2025) 1080p WEB-DL x264.mkv")
+        assert header.startswith("attachment; ")
+        assert 'filename="Kantara (2025) 1080p WEB-DL x264.mkv"' in header
+        assert (
+            "filename*=UTF-8''Kantara%20%282025%29%201080p%20WEB-DL%20x264.mkv"
+            in header
+        )
+
+    def test_non_ascii_name_gets_ascii_fallback_and_utf8(self):
+        header = self._cd("Amélie (2001).mkv")
+        assert 'filename="Am_lie (2001).mkv"' in header
+        assert "filename*=UTF-8''Am%C3%A9lie%20%282001%29.mkv" in header
+
+    def test_path_separators_are_safe_in_both_parameters(self):
+        header = self._cd("a/b.mkv")
+        # Werkzeug quotes only when required, so a token-safe fallback is bare.
+        assert "filename=a_b.mkv;" in header
+        # The extended parameter must escape "/" too, or a client may treat the
+        # decoded name as a path.
+        assert "filename*=UTF-8''a%2Fb.mkv" in header
+
+    def test_percent_and_quotes_are_escaped(self):
+        assert "100%25%20legit.mkv" in self._cd("100% legit.mkv")
+        header = self._cd('we"ird\\name.mkv')
+        assert "filename=we_ird_name.mkv;" in header
+        assert "we%22ird%5Cname.mkv" in header
+
+    def test_empty_name_still_yields_a_usable_header(self):
+        header = self._cd("")
+        assert "filename=unnamed_file;" in header
+        assert "filename*=UTF-8''" in header
+
+    def test_header_is_latin1_encodable(self):
+        # Starlette writes raw header values as latin-1; a non-ASCII plain
+        # filename would raise at response time.
+        self._cd("日本語のファイル.mkv").encode("latin-1")
+        self._cd("Amélie (2001).mkv").encode("latin-1")
+
+    def test_inline_disposition_is_preserved(self):
+        assert self._cd("a.mp4", "inline").startswith("inline; ")
+
+    @pytest.mark.asyncio
+    async def test_diag_stream_uses_the_helper(self, monkeypatch):
+        from starlette.requests import Request
+        from app.routers import diagnostic
+
+        monkeypatch.setattr(diagnostic, "_check_auth", lambda request: None)
+
+        async def fake_fetch(client, chat_id, msg):
+            return object()
+
+        monkeypatch.setattr(diagnostic, "_fetch_message", fake_fetch)
+        monkeypatch.setattr(
+            diagnostic,
+            "_get_file_attrs",
+            lambda message: (1000, "video/mp4", "Amélie (2001).mkv"),
+        )
+        request = Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/diag/stream",
+                "headers": [(b"authorization", b"Bearer testdebug")],
+                "query_string": b"",
+                "client": ("127.0.0.1", 12345),
+            }
+        )
+        resp = await diagnostic._diag_media_response(request, msg=1, chat=-100, head=True)
+        header = resp.headers["content-disposition"]
+        assert header.startswith("inline; ")
+        assert 'filename="Am_lie (2001).mkv"' in header
+        assert "filename*=UTF-8''Am%C3%A9lie%20%282001%29.mkv" in header

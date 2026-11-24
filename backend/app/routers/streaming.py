@@ -15,6 +15,7 @@ from sqlalchemy import select
 
 from ..database import get_db
 from ..models import File, User
+from ..http_headers import content_disposition
 from ..http_headers import parse_byte_range as parse_range_header
 from ..telegram_errors import is_auth_bytes_invalid
 from ..auth import (
@@ -265,18 +266,15 @@ async def stream_file_head(
     except Exception:
         pass  # best-effort
 
-    from urllib.parse import quote
-
     mime_type = file.mime_type or "application/octet-stream"
     disposition = (
         "inline"
         if ("video/" in mime_type or "audio/" in mime_type or "image/" in mime_type)
         else "attachment"
     )
-    encoded_filename = quote(file.file_name)
     headers = {
         "Content-Type": mime_type,
-        "Content-Disposition": f"{disposition}; filename*=utf-8''{encoded_filename}",
+        "Content-Disposition": content_disposition(disposition, file.file_name),
         "Accept-Ranges": "bytes",
         "Cache-Control": "private, max-age=300",
         "Content-Length": str(file.file_size),
@@ -401,14 +399,10 @@ async def stream_file(
         )
     )
 
-    from urllib.parse import quote
-
-    encoded_filename = quote(file.file_name)
-
     content_length = until_bytes - from_bytes + 1
     headers = {
         "Content-Type": mime_type,
-        "Content-Disposition": f"{disposition}; filename*=utf-8''{encoded_filename}",
+        "Content-Disposition": content_disposition(disposition, file.file_name),
         "Accept-Ranges": "bytes",
         "Cache-Control": "no-store" if download else "private, max-age=300",
         "Content-Length": str(content_length),
@@ -674,14 +668,10 @@ async def stream_public_file(
         )
     )
 
-    from urllib.parse import quote
-
-    encoded_filename = quote(file.file_name)
-
     content_length = until_bytes - from_bytes + 1
     headers = {
         "Content-Type": mime_type,
-        "Content-Disposition": f"{disposition}; filename*=utf-8''{encoded_filename}",
+        "Content-Disposition": content_disposition(disposition, file.file_name),
         "Accept-Ranges": "bytes",
         "Cache-Control": "public, max-age=86400",
         "Content-Length": str(content_length),
@@ -918,12 +908,10 @@ async def stream_for_cast(
     # (Default ignores AUDIO MediaTracks, so we make the mobile's choice the file's sole default audio)
     if not is_mkv and audio is None and not audio_lang:
         mime_type = "video/mp4"
-        from urllib.parse import quote
-
-        encoded_filename = quote(file.file_name.rsplit(".", 1)[0] + ".mp4")
+        mp4_name = file.file_name.rsplit(".", 1)[0] + ".mp4"
         headers = {
             "Content-Type": mime_type,
-            "Content-Disposition": f"inline; filename*=utf-8''{encoded_filename}",
+            "Content-Disposition": content_disposition("inline", mp4_name),
             "Accept-Ranges": "bytes",
             "Cache-Control": "private, max-age=300",
             "Content-Length": str(file.file_size),
@@ -947,9 +935,7 @@ async def stream_for_cast(
             detail="ffmpeg not installed on server – cannot remux MKV for Cast",
         )
 
-    from urllib.parse import quote
-
-    encoded_filename = quote(file.file_name.rsplit(".", 1)[0] + ".mp4")
+    mp4_name = file.file_name.rsplit(".", 1)[0] + ".mp4"
 
     # Probe once (header only) so we can (a) map the requested audio to the exact
     # ffmpeg stream and (b) only map subtitle tracks that MP4 can actually carry.
@@ -975,7 +961,7 @@ async def stream_for_cast(
 
     headers = {
         "Content-Type": "video/mp4",
-        "Content-Disposition": f"inline; filename*=utf-8''{encoded_filename}",
+        "Content-Disposition": content_disposition("inline", mp4_name),
         "Cache-Control": "no-store",
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length, Content-Type",
