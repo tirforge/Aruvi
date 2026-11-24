@@ -1632,6 +1632,123 @@ class TestMemEnvParsingDelegation:
         assert ram["percent"] == 0.0
 
 
+class TestLastActiveThrottle:
+    """`last_active` is written at most once per user per 5 minutes.
+
+    The throttle marker used to be a plain dict keyed by telegram_id, so every
+    user that ever authenticated stayed in it for the life of the process. It is
+    now a TTL cache: the entry exists exactly while it still suppresses writes.
+    """
+
+    def test_cache_is_ttl_capped(self):
+        from cachebox import TTLCache
+
+        from app import auth
+
+        assert isinstance(auth._last_active_touch, TTLCache)
+        assert auth._last_active_touch.global_ttl == auth._LAST_ACTIVE_TOUCH_TTL
+        assert auth._last_active_touch.maxsize > 0
+
+    @staticmethod
+    def _fresh_cache(monkeypatch, ttl=None):
+        from cachebox import TTLCache
+
+        from app import auth
+
+        monkeypatch.setattr(
+            auth,
+            "_last_active_touch",
+            TTLCache(maxsize=100, global_ttl=ttl or auth._LAST_ACTIVE_TOUCH_TTL),
+        )
+
+    @staticmethod
+    def _count_updates(db, monkeypatch):
+        """Wrap db.execute so the test can count UPDATE statements."""
+        from sqlalchemy import Update
+
+        seen = []
+        original = db.execute
+
+        async def counting_execute(statement, *args, **kwargs):
+            if isinstance(statement, Update):
+                seen.append(statement)
+            return await original(statement, *args, **kwargs)
+
+        monkeypatch.setattr(db, "execute", counting_execute)
+        return seen
+
+    @pytest.mark.asyncio
+    async def test_second_request_skips_the_write(
+        self, temp_db, sample_user, monkeypatch
+    ):
+        from app.auth import create_access_token, get_current_user
+
+        self._fresh_cache(monkeypatch)
+        writes = self._count_updates(temp_db, monkeypatch)
+        token = create_access_token(sample_user.telegram_id, version=0)
+
+        await get_current_user(
+            request=_make_mock_request(token), credentials=None, db=temp_db
+        )
+        await get_current_user(
+            request=_make_mock_request(token), credentials=None, db=temp_db
+        )
+
+        assert len(writes) == 1
+
+    @pytest.mark.asyncio
+    async def test_failed_write_still_throttles(
+        self, temp_db, sample_user, monkeypatch
+    ):
+        from sqlalchemy import Update
+
+        from app.auth import create_access_token, get_current_user
+
+        self._fresh_cache(monkeypatch)
+        attempts = []
+        original = temp_db.execute
+
+        async def failing_execute(statement, *args, **kwargs):
+            if isinstance(statement, Update):
+                attempts.append(statement)
+                raise RuntimeError("db down")
+            return await original(statement, *args, **kwargs)
+
+        monkeypatch.setattr(temp_db, "execute", failing_execute)
+        token = create_access_token(sample_user.telegram_id, version=0)
+
+        # The failure is swallowed (the request must still succeed)...
+        user = await get_current_user(
+            request=_make_mock_request(token), credentials=None, db=temp_db
+        )
+        assert user is not None
+        # ...but the marker was set first, so a retry does not hammer the DB.
+        await get_current_user(
+            request=_make_mock_request(token), credentials=None, db=temp_db
+        )
+        assert len(attempts) == 1
+
+    @pytest.mark.asyncio
+    async def test_write_resumes_after_the_window(
+        self, temp_db, sample_user, monkeypatch
+    ):
+        from app.auth import create_access_token, get_current_user
+
+        self._fresh_cache(monkeypatch, ttl=0.05)
+        writes = self._count_updates(temp_db, monkeypatch)
+        token = create_access_token(sample_user.telegram_id, version=0)
+
+        await get_current_user(
+            request=_make_mock_request(token), credentials=None, db=temp_db
+        )
+        await asyncio.sleep(0.1)
+        await get_current_user(
+            request=_make_mock_request(token), credentials=None, db=temp_db
+        )
+
+        assert len(writes) == 2
+
+
 _NO_SYMLINKS = sys.platform == "win32"  # needs Developer Mode / admin rights
 
 
