@@ -157,16 +157,17 @@ async def start_one_client(i, c):
                 label = "Main" if i == 0 else "Helper"
                 diag_log(f"Client {i} ({label}) started → @{me.username}")
                 return
-            except ConnectionError as e:
-                err_str = str(e).lower()
-                if "already connected" in err_str:
-                    # Another coroutine won the race and finished the start.
+            except Exception as e:
+                # A concurrent start() that won the race raises a plain builtin
+                # ConnectionError("Client is already connected") — pyrogram has
+                # no typed subclass for it, and matching the message text broke
+                # whenever upstream reworded it. The client's own state is the
+                # reliable signal: connected means the start already happened.
+                if c.is_connected:
                     diag_log(
                         f"Client {i}: already connected (caught) — treating as started"
                     )
                     return
-                raise
-            except Exception as e:
                 # Flood wait: sleep for the value Telegram sent, then retry.
                 # Reading str(e) with a bare \d+ picked up the status code
                 # ("[420 FLOOD_WAIT_X] - wait 42 seconds" -> 420), so every
@@ -176,6 +177,10 @@ async def start_one_client(i, c):
                     diag_log(f"Client {i}: flood wait {wait}s, retrying...")
                     await asyncio.sleep(wait)
                     continue
+                # A failed connect must be retried here, never re-raised:
+                # start_all_clients() gathers these tasks, so one escaping
+                # ConnectionError aborted the entire startup instead of
+                # leaving just this client down.
                 if attempt < max_attempts:
                     delay = 2**attempt
                     diag_log(
