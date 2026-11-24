@@ -1014,22 +1014,54 @@ async def stream_for_cast(
                     pass
 
         feed_task = asyncio.create_task(feed_stdin())
+
+        # Drain stderr while streaming. The pipe buffer is ~64 KB: an ffmpeg
+        # that keeps logging (corrupt packets log one line each) fills it,
+        # blocks on write and stops producing stdout, so the cast stalled until
+        # the client gave up. Reading it only after proc.wait() made that
+        # guaranteed. Keep just the tail for the exit log.
+        stderr_tail = bytearray()
+
+        async def drain_stderr():
+            try:
+                while proc.stderr is not None:
+                    data = await proc.stderr.read(8192)
+                    if not data:
+                        break
+                    if len(stderr_tail) < 8192:
+                        stderr_tail.extend(data)
+            except Exception:
+                pass
+
+        stderr_task = asyncio.create_task(drain_stderr())
         try:
             while True:
                 out = await proc.stdout.read(64 * 1024)
                 if not out:
                     break
                 yield out
-            await feed_task
             rc = await proc.wait()
             if rc != 0:
-                err = (await proc.stderr.read()).decode(errors="ignore")[:2000]
-                logger.warning("ffmpeg remux exited %d: %s", rc, err)
+                logger.warning(
+                    "ffmpeg remux exited %d: %s",
+                    rc,
+                    stderr_tail.decode(errors="ignore")[:2000],
+                )
         finally:
             feed_task.cancel()
+            stderr_task.cancel()
+            for task in (feed_task, stderr_task):
+                try:
+                    await task
+                except BaseException:
+                    pass
             try:
                 proc.terminate()
             except Exception:
+                pass
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except BaseException:
                 pass
 
     return StreamingResponse(
