@@ -11,6 +11,7 @@ import os
 from dataclasses import dataclass, field
 
 from pyrogram import Client
+from cachebox import TTLCache
 
 from .database import async_session
 from .models import User, File
@@ -44,9 +45,14 @@ class _SlowError(Exception):
 
 _GROUP_CHAT_ID_CACHE: dict[str, int] = {}
 
-_BOT_USER_CACHE: dict[str, tuple[float, object]] = {}
+# Resolved bot users, one per username. Keys can come from arbitrary
+# t.me/<name>?start= URLs inside bot messages, so the cache must be bounded:
+# cachebox caps it at 200 entries and expires each after an hour.
 _BOT_USER_CACHE_TTL = 3600  # 1h — resolves the bot once per hour, not per grab
 _BOT_USER_CACHE_MAX = 200
+_BOT_USER_CACHE: TTLCache = TTLCache(
+    maxsize=_BOT_USER_CACHE_MAX, global_ttl=_BOT_USER_CACHE_TTL
+)
 
 
 MAX_OPTIONS = 30  # merged across channels (final response cap)
@@ -885,10 +891,9 @@ async def _get_bot_user(ivy: Client, username: str):
     """
     if not username:
         return None
-    now = asyncio.get_event_loop().time()
     cached = _BOT_USER_CACHE.get(username)
-    if cached and now - cached[0] < _BOT_USER_CACHE_TTL:
-        return cached[1]
+    if cached is not None:
+        return cached
     try:
         bot_user = await ivy.get_users(username)
     except Exception as e:
@@ -898,19 +903,7 @@ async def _get_bot_user(ivy: Client, username: str):
             e,
         )
         return None
-    _BOT_USER_CACHE[username] = (now, bot_user)
-    # Evict expired entries and cap size — keys can come from arbitrary
-    # t.me/<name>?start= URLs inside bot messages, so the dict must not be
-    # allowed to grow without bound.
-    if len(_BOT_USER_CACHE) > _BOT_USER_CACHE_MAX:
-        for k in [
-            k
-            for k, (ts, _) in _BOT_USER_CACHE.items()
-            if now - ts >= _BOT_USER_CACHE_TTL
-        ]:
-            _BOT_USER_CACHE.pop(k, None)
-        while len(_BOT_USER_CACHE) > _BOT_USER_CACHE_MAX:
-            _BOT_USER_CACHE.pop(next(iter(_BOT_USER_CACHE)))
+    _BOT_USER_CACHE.insert(username, bot_user)
     return bot_user
 
 

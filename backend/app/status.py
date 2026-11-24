@@ -4,6 +4,9 @@ import time
 import logging
 import threading
 from collections import deque
+
+from cachebox import TTLCache
+
 from .streaming import (
     _cache_manager,
     get_forward_snapshot,
@@ -22,8 +25,11 @@ _sample_lock = threading.Lock()
 _history = deque(maxlen=60)
 _last_oom_clear = 0.0
 _OOM_CLEAR_COOLDOWN = 20  # seconds
-_proc_rss_cache = (0.0, 0)  # (timestamp, value)
+# RSS of the whole cgroup is a full /proc scan; cache it briefly so a status
+# poll does not walk every PID. Single-entry TTL cache — cachebox handles the
+# expiry, so there is no timestamp tuple to compare by hand.
 _PROC_RSS_TTL = 10  # seconds
+_proc_rss_cache: TTLCache = TTLCache(maxsize=1, global_ttl=_PROC_RSS_TTL)
 
 
 def _read_int(path: str) -> int | None:
@@ -239,10 +245,9 @@ def _own_cgroup_path() -> str | None:
 
 
 def _sum_proc_rss() -> int:
-    global _proc_rss_cache
-    now = time.monotonic()
-    if now - _proc_rss_cache[0] < _PROC_RSS_TTL:
-        return _proc_rss_cache[1]
+    cached = _proc_rss_cache.get("rss")
+    if cached is not None:
+        return cached
     own_cgroup = _own_cgroup_path()
     total = 0
     for entry in os.listdir("/proc"):
@@ -269,7 +274,7 @@ def _sum_proc_rss() -> int:
         except OSError:
             pass
     result = total * 1024
-    _proc_rss_cache = (now, result)
+    _proc_rss_cache.insert("rss", result)
     return result
 
 

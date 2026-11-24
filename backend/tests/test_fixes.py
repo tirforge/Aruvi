@@ -3105,3 +3105,257 @@ class TestSetupLoginFlow:
         ).read_text(encoding="utf-8")
         assert "SESSION_PASSWORD_NEEDED" not in source
         assert "SessionPasswordNeeded" in source
+
+
+class TestInProcessCaches:
+    """In-process TTL caches are cachebox ``TTLCache`` instances.
+
+    The hand-rolled versions stored ``(timestamp, value)`` tuples and pruned by
+    hand. ``streaming.py`` needed four containers kept in lockstep, so a key
+    that fell out of one but not the others either leaked or served a dead file
+    reference; ``status._proc_rss_cache`` compared a timestamp tuple on every
+    poll. cachebox owns expiry and the size cap in one place.
+    """
+
+    # ── streaming: per-(bot, chat, message) message cache ──────────────────
+
+    def test_message_cache_is_ttl_capped(self):
+        from cachebox import TTLCache
+
+        from app import streaming
+
+        assert isinstance(streaming._msg_cache, TTLCache)
+        assert streaming._msg_cache.maxsize == streaming._MSG_CACHE_MAX
+        assert streaming._msg_cache.global_ttl == streaming._MSG_CACHE_TTL
+
+    def test_message_state_lives_in_one_entry(self):
+        from app import streaming
+
+        # The four hand-maintained containers and their prune helpers are gone.
+        for gone in (
+            "_msg_refresh_locks",
+            "_msg_last_force",
+            "_msg_poisoned",
+            "_prune_msg_state",
+            "_get_msg_refresh_lock",
+        ):
+            assert not hasattr(streaming, gone), gone
+        # ...and the per-key record is the only place the state now lives.
+        entry = streaming._MsgEntry()
+        assert entry.fetched is False
+        assert entry.poisoned is False
+        assert entry.last_force == 0.0
+        assert hasattr(entry, "lock")
+
+    @pytest.mark.asyncio
+    async def test_fetch_message_serves_from_cache(self):
+        from app import streaming
+
+        calls = []
+
+        class FakeMsg:
+            id = 111
+
+        class FakeClient:
+            pool_index = 0
+
+            async def get_messages(self, chat_id, message_id):
+                calls.append(message_id)
+                return FakeMsg()
+
+        streaming._msg_cache.clear()
+        try:
+            client = FakeClient()
+            first = await streaming._fetch_message(client, -100, 111)
+            second = await streaming._fetch_message(client, -100, 111)
+            assert first is second
+            assert calls == [111]
+        finally:
+            streaming._msg_cache.clear()
+
+    @pytest.mark.asyncio
+    async def test_fetch_message_refetches_after_expiry(self, monkeypatch):
+        from cachebox import TTLCache
+
+        from app import streaming
+
+        calls = []
+
+        class FakeClient:
+            pool_index = 0
+
+            async def get_messages(self, chat_id, message_id):
+                calls.append(message_id)
+                return object()
+
+        # Real TTL expiry: swap in a cache whose entries die in 20ms.
+        monkeypatch.setattr(
+            streaming, "_msg_cache", TTLCache(maxsize=16, global_ttl=0.02)
+        )
+        client = FakeClient()
+        await streaming._fetch_message(client, -100, 112)
+        await asyncio.sleep(0.05)
+        await streaming._fetch_message(client, -100, 112)
+        assert calls == [112, 112]
+
+    @pytest.mark.asyncio
+    async def test_force_refresh_is_throttled(self):
+        from app import streaming
+
+        calls = []
+
+        class FakeClient:
+            pool_index = 0
+
+            async def get_messages(self, chat_id, message_id):
+                calls.append(message_id)
+                return object()
+
+        streaming._msg_cache.clear()
+        try:
+            client = FakeClient()
+            await streaming._fetch_message(client, -100, 113)
+            await streaming._fetch_message(client, -100, 113, force=True)
+            # Inside _MSG_REFRESH_MIN_INTERVAL: served from cache, no RPC.
+            await streaming._fetch_message(client, -100, 113, force=True)
+            assert calls == [113, 113]
+        finally:
+            streaming._msg_cache.clear()
+
+    @pytest.mark.asyncio
+    async def test_poisoned_entry_beats_the_throttle(self):
+        from app import streaming
+
+        calls = []
+
+        class FakeClient:
+            pool_index = 0
+
+            async def get_messages(self, chat_id, message_id):
+                calls.append(message_id)
+                return object()
+
+        streaming._msg_cache.clear()
+        try:
+            client = FakeClient()
+            await streaming._fetch_message(client, -100, 114)
+            await streaming._fetch_message(client, -100, 114, force=True)
+            # The cached Message is now the dead one: a throttled force refresh
+            # must still hit Telegram instead of handing back the same broken
+            # file reference forever.
+            streaming._mark_msg_poisoned(client, -100, 114)
+            await streaming._fetch_message(client, -100, 114, force=True)
+            assert calls == [114, 114, 114]
+            entry = streaming._msg_cache.get((0, -100, 114))
+            assert entry is not None and entry.poisoned is False
+        finally:
+            streaming._msg_cache.clear()
+
+    @pytest.mark.asyncio
+    async def test_missing_message_is_cached_not_hammered(self):
+        from app import streaming
+
+        calls = []
+
+        class FakeClient:
+            pool_index = 0
+
+            async def get_messages(self, chat_id, message_id):
+                calls.append(message_id)
+                return None
+
+        streaming._msg_cache.clear()
+        try:
+            client = FakeClient()
+            assert await streaming._fetch_message(client, -100, 115) is None
+            assert await streaming._fetch_message(client, -100, 115) is None
+            # None is a cached answer for the TTL, not a miss: one RPC only.
+            assert calls == [115]
+        finally:
+            streaming._msg_cache.clear()
+
+    # ── grabber: resolved bot users ───────────────────────────────────────
+
+    def test_bot_user_cache_is_ttl_capped(self):
+        from cachebox import TTLCache
+
+        from app import grabber
+
+        assert isinstance(grabber._BOT_USER_CACHE, TTLCache)
+        assert grabber._BOT_USER_CACHE.maxsize == grabber._BOT_USER_CACHE_MAX
+        assert grabber._BOT_USER_CACHE.global_ttl == grabber._BOT_USER_CACHE_TTL
+
+    @pytest.mark.asyncio
+    async def test_get_bot_user_caches_resolution(self):
+        from app import grabber
+
+        calls = []
+
+        class FakeIvy:
+            async def get_users(self, username):
+                calls.append(username)
+                return {"username": username}
+
+        grabber._BOT_USER_CACHE.clear()
+        try:
+            first = await grabber._get_bot_user(FakeIvy(), "somebot")
+            second = await grabber._get_bot_user(FakeIvy(), "somebot")
+            assert first is second
+            assert calls == ["somebot"]
+        finally:
+            grabber._BOT_USER_CACHE.clear()
+
+    @pytest.mark.asyncio
+    async def test_get_bot_user_failure_is_not_cached(self):
+        from app import grabber
+
+        class FailingIvy:
+            async def get_users(self, username):
+                raise RuntimeError("boom")
+
+        grabber._BOT_USER_CACHE.clear()
+        try:
+            assert await grabber._get_bot_user(FailingIvy(), "deadbot") is None
+            assert grabber._BOT_USER_CACHE.get("deadbot") is None
+        finally:
+            grabber._BOT_USER_CACHE.clear()
+
+    def test_bot_user_cache_is_bounded(self):
+        from app import grabber
+
+        grabber._BOT_USER_CACHE.clear()
+        try:
+            for i in range(grabber._BOT_USER_CACHE_MAX + 50):
+                grabber._BOT_USER_CACHE.insert(f"bot{i}", i)
+            assert len(grabber._BOT_USER_CACHE) <= grabber._BOT_USER_CACHE_MAX
+        finally:
+            grabber._BOT_USER_CACHE.clear()
+
+    # ── status: cgroup RSS sample ─────────────────────────────────────────
+
+    def test_proc_rss_cache_is_single_entry_ttl(self):
+        from cachebox import TTLCache
+
+        from app import status
+
+        assert isinstance(status._proc_rss_cache, TTLCache)
+        assert status._proc_rss_cache.maxsize == 1
+        assert status._proc_rss_cache.global_ttl == status._PROC_RSS_TTL
+
+    def test_sum_proc_rss_uses_cache(self, monkeypatch):
+        from app import status
+
+        def boom():
+            raise AssertionError("must not scan /proc on a cache hit")
+
+        monkeypatch.setattr(status, "_own_cgroup_path", boom)
+        status._proc_rss_cache.clear()
+        try:
+            status._proc_rss_cache.insert("rss", 12_345)
+            assert status._sum_proc_rss() == 12_345
+            # 0 is a valid sample and must not be treated as a miss.
+            status._proc_rss_cache.clear()
+            status._proc_rss_cache.insert("rss", 0)
+            assert status._sum_proc_rss() == 0
+        finally:
+            status._proc_rss_cache.clear()
