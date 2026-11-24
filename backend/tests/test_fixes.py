@@ -3359,3 +3359,95 @@ class TestInProcessCaches:
             assert status._sum_proc_rss() == 0
         finally:
             status._proc_rss_cache.clear()
+
+
+class TestDiagRangeParsing:
+    """/diag/stream uses the same Werkzeug Range parser as the real routes.
+
+    The inline ``re.match(r"bytes=(\\d+)-(\\d*)")`` ignored every header it
+    could not match, so a suffix range (``bytes=-500``, which movi-player's
+    HttpSource sends) returned the whole file with a 200, and a multipart range
+    served only its first part under a 206.
+    """
+
+    @staticmethod
+    def _req(range_header: str | None = None):
+        from starlette.requests import Request
+
+        headers = [(b"authorization", b"Bearer testdebug")]
+        if range_header is not None:
+            headers.append((b"range", range_header.encode()))
+        return Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/diag/stream",
+                "headers": headers,
+                "query_string": b"",
+                "client": ("127.0.0.1", 12345),
+            }
+        )
+
+    async def _probe(self, monkeypatch, range_header, size=1000):
+        from app.routers import diagnostic
+
+        monkeypatch.setattr(diagnostic, "_check_auth", lambda request: None)
+
+        async def fake_fetch(client, chat_id, msg):
+            return object()
+
+        monkeypatch.setattr(diagnostic, "_fetch_message", fake_fetch)
+        monkeypatch.setattr(
+            diagnostic,
+            "_get_file_attrs",
+            lambda message: (size, "video/mp4", "a.mp4"),
+        )
+        return await diagnostic._diag_media_response(
+            self._req(range_header), msg=1, chat=-100, head=True
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_range_serves_whole_file(self, monkeypatch):
+        resp = await self._probe(monkeypatch, None)
+        assert resp.status_code == 200
+        assert resp.headers["content-length"] == "1000"
+        assert "content-range" not in resp.headers
+
+    @pytest.mark.asyncio
+    async def test_suffix_range_is_honoured(self, monkeypatch):
+        resp = await self._probe(monkeypatch, "bytes=-500")
+        assert resp.status_code == 206
+        assert resp.headers["content-range"] == "bytes 500-999/1000"
+        assert resp.headers["content-length"] == "500"
+
+    @pytest.mark.asyncio
+    async def test_open_ended_and_clamped_ranges(self, monkeypatch):
+        resp = await self._probe(monkeypatch, "bytes=100-")
+        assert resp.headers["content-range"] == "bytes 100-999/1000"
+        resp = await self._probe(monkeypatch, "bytes=0-999999")
+        assert resp.headers["content-range"] == "bytes 0-999/1000"
+
+    @pytest.mark.asyncio
+    async def test_unit_is_case_insensitive(self, monkeypatch):
+        resp = await self._probe(monkeypatch, "Bytes=0-9")
+        assert resp.status_code == 206
+        assert resp.headers["content-range"] == "bytes 0-9/1000"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "range_header",
+        [
+            "bytes=0-10,20-30",  # multipart: not supported
+            "bytes=2000-3000",  # start past EOF
+            "bytes=0-10junk",  # junk suffix
+            "bytes=50-40",  # inverted
+            "bytes=-0",  # zero-length suffix
+        ],
+    )
+    async def test_unsatisfiable_ranges_are_416(self, monkeypatch, range_header):
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc:
+            await self._probe(monkeypatch, range_header)
+        assert exc.value.status_code == 416
+        assert exc.value.headers["Content-Range"] == "bytes */1000"
