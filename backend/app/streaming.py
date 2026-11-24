@@ -14,7 +14,7 @@ import logging
 from .telegram_errors import is_auth_bytes_invalid, is_stale_session
 from concurrent.futures import ThreadPoolExecutor
 from typing import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 
 from cachebox import TTLCache
 
@@ -178,10 +178,16 @@ class CacheManager:
             self._caches[key] = ChunkCache(max_bytes=self._per_video_max)
         return self._caches[key]
 
-    def remove(self, chat_id: int, message_id: int):
+    def remove(self, chat_id: int, message_id: int) -> int:
+        """Drop one video's RAM cache and return the bytes freed.
+
+        The TTL sweeper logs what it reclaimed, so this must return a number
+        (it used to return ``None``, which made every eviction log line
+        unreachable).
+        """
         key = (chat_id, message_id)
-        if key in self._caches:
-            self._caches.pop(key).clear()
+        cache = self._caches.pop(key, None)
+        return cache.clear() if cache is not None else 0
 
     def clear_all(self, exclude_keys: set[tuple[int, int]] | None = None) -> int:
         total = 0
@@ -2022,21 +2028,29 @@ async def stream_file(
 
     await _stream_semaphore.acquire()
     try:
-        async for chunk in parallel_stream_generator(
-            message, from_bytes, total_bytes_needed, request=request
-        ):
-            if bytes_to_skip > 0:
-                chunk = chunk[bytes_to_skip:]
-                bytes_to_skip = 0
+        # Close the inner generator deterministically. ``async for`` does NOT
+        # close its iterator on ``break`` (or when this generator is closed
+        # mid-range), so without ``aclosing`` the worker tasks, in-flight
+        # futures and the _forward_streams registration would survive until
+        # the async-generator finalizer eventually ran.
+        async with aclosing(
+            parallel_stream_generator(
+                message, from_bytes, total_bytes_needed, request=request
+            )
+        ) as chunks:
+            async for chunk in chunks:
+                if bytes_to_skip > 0:
+                    chunk = chunk[bytes_to_skip:]
+                    bytes_to_skip = 0
 
-            remaining = total_bytes_needed - bytes_yielded
-            if len(chunk) > remaining:
-                chunk = chunk[:remaining]
+                remaining = total_bytes_needed - bytes_yielded
+                if len(chunk) > remaining:
+                    chunk = chunk[:remaining]
 
-            yield chunk
-            bytes_yielded += len(chunk)
-            if bytes_yielded >= total_bytes_needed:
-                break
+                yield chunk
+                bytes_yielded += len(chunk)
+                if bytes_yielded >= total_bytes_needed:
+                    break
     finally:
         _stream_semaphore.release()
 

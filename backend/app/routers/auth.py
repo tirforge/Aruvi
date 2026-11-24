@@ -9,7 +9,7 @@ from hashlib import sha256
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 
 from ..database import get_db
 from ..models import User, LoginCode, RefreshSession
@@ -120,13 +120,33 @@ async def refresh_token(
         raise HTTPException(status_code=401, detail="Refresh token has expired")
 
     # Rotate: old session is consumed, new one replaces it.
+    #
+    # The SELECT above is only a pre-check. Two requests replaying the same
+    # refresh token can both pass it, so the actual rotation must be a single
+    # conditional UPDATE: whichever request commits first changes the hash,
+    # and the loser's WHERE no longer matches (rowcount 0 -> 401). A
+    # read-then-write rotation let both callers mint a valid token.
     new_access_token = create_access_token(telegram_id, version=user.auth_version)
     new_refresh_token = create_refresh_token(telegram_id, version=user.auth_version)
-    session.token_hash = sha256(new_refresh_token.encode()).hexdigest()
-    session.last_used_at = datetime.now(timezone.utc).replace(tzinfo=None)
-    session.expires_at = (
-        datetime.now(timezone.utc).replace(tzinfo=None) + REFRESH_TOKEN_DURATION
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    claim = await db.execute(
+        update(RefreshSession)
+        .where(
+            RefreshSession.id == session.id,
+            RefreshSession.user_id == user.id,
+            RefreshSession.token_hash == presented_hash,
+        )
+        .values(
+            token_hash=sha256(new_refresh_token.encode()).hexdigest(),
+            last_used_at=now,
+            expires_at=now + REFRESH_TOKEN_DURATION,
+        )
     )
+    if claim.rowcount != 1:
+        await db.rollback()
+        raise HTTPException(
+            status_code=401, detail="Refresh token has been invalidated"
+        )
     await db.commit()
 
     return Token(

@@ -511,12 +511,18 @@ async def batch_move_folders(
 
         descendants_cte = (
             select(Folder.id)
-            .where(Folder.id.in_(folder_ids))
+            .where(
+                Folder.id.in_(folder_ids),
+                Folder.user_id == current_user.id,
+            )
             .cte(name="descendants", recursive=True)
         )
         d_alias = aliased(Folder)
         descendants_cte = descendants_cte.union_all(
-            select(d_alias.id).where(d_alias.parent_id == descendants_cte.c.id)
+            select(d_alias.id).where(
+                d_alias.parent_id == descendants_cte.c.id,
+                d_alias.user_id == current_user.id,
+            )
         )
         desc_result = await db.execute(select(descendants_cte.c.id))
         descendant_ids = set(desc_result.scalars().all())
