@@ -4866,3 +4866,146 @@ class TestDeepHuntFixes:
             )
             == "'a''b'"
         )
+
+
+class TestBotDeepHunt:
+    """Regressions for the bot / bootstrap audit pass."""
+
+    @staticmethod
+    def _session_factory(monkeypatch, session):
+        from app import bot
+
+        class _CM:
+            async def __aenter__(self):
+                return session
+
+            async def __aexit__(self, *exc):
+                return False
+
+        monkeypatch.setattr(bot, "async_session", lambda: _CM())
+        return bot
+
+    @staticmethod
+    def _message(user_id: int, command: list):
+        from types import SimpleNamespace
+
+        class _Msg:
+            def __init__(self):
+                self.from_user = SimpleNamespace(id=user_id)
+                self.command = command
+                self.replies = []
+
+            async def reply(self, text, **kwargs):
+                self.replies.append(text)
+
+        return _Msg()
+
+    def test_folder_file_filter_is_owner_scoped(self):
+        from sqlalchemy import select, update
+        from app import bot
+
+        folder = bot.Folder(id=3, user_id=7, name="Movies")
+        clauses = bot._folder_file_filter(folder)
+
+        select_sql = str(select(bot.File).where(*clauses))
+        update_sql = str(
+            update(bot.File).where(*clauses).values(folder_id=None)
+        )
+        for sql in (select_sql, update_sql):
+            assert "files.folder_id" in sql
+            assert "files.user_id" in sql
+
+    @pytest.mark.asyncio
+    async def test_deletefolder_duplicate_names_does_not_crash(
+        self, temp_db, monkeypatch
+    ):
+        """/deletefolder used scalar_one_or_none on a non-unique name.
+
+        The web UI can create the same folder name at different levels, so the
+        query returned 2 rows and raised MultipleResultsFound — the command
+        never replied.
+        """
+        from app.models import Folder, User
+
+        user = User(telegram_id=4242, username="tf", first_name="T", auth_version=0)
+        temp_db.add(user)
+        await temp_db.commit()
+        await temp_db.refresh(user)
+
+        parent = Folder(user_id=user.id, name="Movies")
+        temp_db.add(parent)
+        await temp_db.commit()
+        await temp_db.refresh(parent)
+        temp_db.add(Folder(user_id=user.id, name="Movies", parent_id=parent.id))
+        await temp_db.commit()
+
+        bot = self._session_factory(monkeypatch, temp_db)
+        msg = self._message(4242, ["deletefolder", "Movies"])
+        await bot.deletefolder_command(None, msg)
+
+        assert len(msg.replies) == 1
+        assert "Multiple folders" in msg.replies[0]
+
+    @pytest.mark.asyncio
+    async def test_renamefolder_truncates_to_column_limit(
+        self, temp_db, monkeypatch
+    ):
+        """Folder.name is VARCHAR(255); the rename flow stored the raw text."""
+        from types import SimpleNamespace
+        from app.models import Folder, User
+
+        user = User(telegram_id=5555, username="tf2", first_name="T", auth_version=0)
+        temp_db.add(user)
+        await temp_db.commit()
+        await temp_db.refresh(user)
+
+        folder = Folder(user_id=user.id, name="Old")
+        temp_db.add(folder)
+        await temp_db.commit()
+        await temp_db.refresh(folder)
+        folder_id = folder.id
+
+        bot = self._session_factory(monkeypatch, temp_db)
+
+        class _Reply:
+            text = "x" * 400
+
+            def __init__(self):
+                self.replies = []
+
+            async def reply(self, text, **kwargs):
+                self.replies.append(text)
+
+        reply = _Reply()
+
+        class _Client:
+            async def wait_for_message(self, **kwargs):
+                return reply
+
+        class _Callback:
+            def __init__(self):
+                self.from_user = SimpleNamespace(id=5555)
+                self.data = f"renamefolder:{folder_id}"
+                self.answers = []
+                self.message = SimpleNamespace(
+                    chat=SimpleNamespace(id=5555),
+                    reply=self._reply,
+                    edit=self._reply,
+                )
+
+            async def _reply(self, text, **kwargs):
+                reply.replies.append(text)
+
+            async def answer(self, *args, **kwargs):
+                self.answers.append(args)
+
+        await bot.handle_callback(_Client(), _Callback())
+
+        temp_db.expire_all()
+        refreshed = (
+            await temp_db.execute(
+                __import__("sqlalchemy").select(Folder).where(Folder.id == folder_id)
+            )
+        ).scalar_one()
+        assert refreshed.name == "x" * 255
+
