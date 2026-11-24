@@ -2798,3 +2798,82 @@ class TestSubtitleTextDecoding:
         ).read_text(encoding="utf-8")
         assert "decode_text(content)" in source
         assert 'errors="replace"' not in source
+
+
+class TestTelegramErrors:
+    """Telegram failures are classified by exception type, not message text.
+
+    Kurigram exposes the number Telegram sent as ``.value`` on typed errors;
+    string parsing is only a fallback for wrapped/foreign exceptions.
+    """
+
+    def test_flood_wait_uses_typed_value(self):
+        from pyrogram import errors
+
+        from app.telegram_errors import flood_wait_seconds
+
+        assert flood_wait_seconds(errors.FloodWait(value=42)) == 42
+        assert flood_wait_seconds(errors.SlowmodeWait(value=7)) == 7
+
+    def test_flood_wait_text_fallback(self):
+        from app.telegram_errors import flood_wait_seconds
+
+        assert flood_wait_seconds(Exception("[420 FLOOD_WAIT_12]")) == 12
+        assert flood_wait_seconds(Exception("A wait of 9 seconds is required")) == 9
+        assert flood_wait_seconds(Exception("unrelated error 500")) is None
+
+    def test_typed_value_beats_status_code(self):
+        # The old telegram.py regex read the first number in the message — the
+        # 420 status code — so every wait was clamped to the 120s cap.
+        from pyrogram import errors
+
+        from app.telegram_errors import flood_wait_seconds
+
+        exc = errors.FloodWait(value=42)
+        assert "420" in str(exc)
+        assert flood_wait_seconds(exc) == 42
+
+    def test_is_flood(self):
+        from pyrogram import errors
+
+        from app.telegram_errors import is_flood
+
+        assert is_flood(errors.FloodWait(value=1))
+        assert is_flood(errors.SlowmodeWait(value=1))
+        assert is_flood(Exception("FLOOD_WAIT_3"))
+        assert not is_flood(Exception("internal error"))
+
+    def test_is_slowmode(self):
+        from pyrogram import errors
+
+        from app.telegram_errors import is_slowmode
+
+        assert is_slowmode(errors.SlowmodeWait(value=3))
+        assert not is_slowmode(errors.FloodWait(value=3))
+        assert is_slowmode(Exception("SLOWMODE_WAIT_3"))
+
+    def test_is_stale_session(self):
+        from pyrogram import errors
+
+        from app.telegram_errors import is_stale_session
+
+        assert is_stale_session(errors.AuthKeyUnregistered())
+        assert is_stale_session(errors.LimitInvalid())
+        assert is_stale_session(Exception("AUTH_KEY_UNREGISTERED"))
+        assert not is_stale_session(Exception("FLOOD_WAIT_3"))
+
+    def test_is_auth_bytes_invalid(self):
+        from pyrogram import errors
+
+        from app.telegram_errors import is_auth_bytes_invalid
+
+        assert is_auth_bytes_invalid(errors.AuthBytesInvalid())
+        assert is_auth_bytes_invalid(Exception("AUTH_BYTES_INVALID"))
+        assert not is_auth_bytes_invalid(Exception("other error"))
+
+    def test_grabber_delegates_to_shared_helper(self):
+        from pyrogram import errors
+
+        from app.grabber import _flood_seconds
+
+        assert _flood_seconds(errors.FloodWait(value=15)) == 15

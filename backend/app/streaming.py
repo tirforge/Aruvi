@@ -10,6 +10,8 @@ import os
 import sys
 import time
 import logging
+
+from .telegram_errors import is_auth_bytes_invalid, is_stale_session
 from concurrent.futures import ThreadPoolExecutor
 from typing import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -891,7 +893,7 @@ def get_client_reconnect_lock(client_index: int) -> asyncio.Lock:
 
 def _is_auth_bytes_invalid(e) -> bool:
     """True for Pyrogram AuthBytesInvalid (400 AUTH_BYTES_INVALID)."""
-    return isinstance(e, AuthBytesInvalid) or "AUTH_BYTES_INVALID" in str(e)
+    return is_auth_bytes_invalid(e)
 
 
 async def _invalidate_media_sessions(client, dc_id=None):
@@ -981,7 +983,7 @@ async def _byte_accurate_file_stream(
         async for item in _pump(refreshed_fid, remaining):
             yield item
     except Exception as _e:
-        if "AUTH_KEY_UNREGISTERED" in str(_e) or "LIMIT_INVALID" in str(_e):
+        if is_stale_session(_e):
             client.media_sessions.pop(dc_id, None)
             logger.warning("Evicted stale session for DC %d (%s)", dc_id, str(_e)[:50])
         raise
