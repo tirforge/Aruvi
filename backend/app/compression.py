@@ -20,6 +20,8 @@ try:
 except ImportError:  # pragma: no cover - dependency is in requirements.txt
     brotli = None
 
+from .http_headers import pick_content_encoding
+
 # Only these get compressed — never media, never octet-stream.
 COMPRESSIBLE_TYPES = frozenset(
     {
@@ -45,29 +47,11 @@ def _content_type(start_message) -> str:
     return ""
 
 
-def _accepts(accept: bytes, coding: bytes) -> bool:
-    """True when Accept-Encoding lists ``coding`` with a non-zero q-value."""
-    for part in accept.split(b","):
-        token, _, params = part.partition(b";")
-        if token.strip().lower() != coding:
-            continue
-        for param in params.split(b";"):
-            key, _, value = param.partition(b"=")
-            if key.strip().lower() == b"q":
-                try:
-                    return float(value) > 0
-                except ValueError:
-                    return True
-        return True
-    return False
-
-
 def _pick_encoding(accept: bytes) -> bytes | None:
-    if brotli is not None and _accepts(accept, b"br"):
-        return b"br"
-    if _accepts(accept, b"gzip"):
-        return b"gzip"
-    return None
+    """Choose br/gzip via Werkzeug's q-value + wildcard aware parser."""
+    codings = ("br", "gzip") if brotli is not None else ("gzip",)
+    chosen = pick_content_encoding(accept.decode("latin-1"), codings)
+    return chosen.encode() if chosen else None
 
 
 def _compress(body: bytes, encoding: bytes) -> bytes:
