@@ -6,8 +6,8 @@ import threading
 from collections import deque
 
 from cachebox import TTLCache
-from humanfriendly import InvalidSize, parse_size
 
+from .byte_sizes import parse_byte_size
 from .streaming import (
     _cache_manager,
     get_forward_snapshot,
@@ -35,7 +35,6 @@ _proc_rss_cache: TTLCache = TTLCache(maxsize=1, global_ttl=_PROC_RSS_TTL)
 # Default when MEMORY is unset or unparseable. 16 GiB is the container's
 # advertised limit, so the status page still reads sensibly if the env is wrong.
 _FALLBACK_MEM_BYTES = 16 * 1024**3
-_mem_env_warned = False
 
 
 def _read_int(path: str) -> int | None:
@@ -130,12 +129,8 @@ def get_cpu() -> float:
 def _parse_mem_env(val: str) -> int:
     """Parse the ``MEMORY`` env var ("16Gi", "3G", "512M", "1048576") into bytes.
 
-    Parsing is delegated to humanfriendly's ``parse_size``. It is pure Python
-    (nothing to build on the ARM VPS) and is the same parser `coloredlogs` and
-    `verboselogs` have shipped for years.
-
-    ``binary=True`` keeps the units the previous code used: ``M``/``MB``/``MiB``
-    are all 1024**2, matching how cgroup limits are reported.
+    Parsing lives in :mod:`app.byte_sizes` (humanfriendly), shared with the
+    disk-cache byte limits. It is pure Python — nothing to build on the ARM VPS.
 
     The hand-rolled suffix loop this replaces had three failure modes:
 
@@ -149,21 +144,7 @@ def _parse_mem_env(val: str) -> int:
     Anything unparseable, or a non-positive size, falls back to 16 GiB with a
     single warning rather than a warning per poll.
     """
-    global _mem_env_warned
-    try:
-        size = int(parse_size(val, binary=True))
-    except (InvalidSize, TypeError, ValueError):
-        size = 0
-    if size > 0:
-        return size
-    if not _mem_env_warned:
-        _mem_env_warned = True
-        logger.warning(
-            "MEMORY=%r is not a valid size — falling back to %.0f GiB",
-            val,
-            _FALLBACK_MEM_BYTES / 1024**3,
-        )
-    return _FALLBACK_MEM_BYTES
+    return parse_byte_size(val, _FALLBACK_MEM_BYTES, name="MEMORY")
 
 
 def _cgroup_memory_max() -> int | None:

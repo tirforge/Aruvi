@@ -57,15 +57,24 @@ try:
 except ImportError:  # pragma: no cover - dependency is in requirements.txt
     lmdb = None
 
+from .byte_sizes import parse_byte_size
+
 logger = logging.getLogger("disk_cache")
 
 CACHE_DIR = Path(os.environ.get("DISK_CACHE_DIR", "./data/vcache"))
 DISK_CACHE_TTL = int(os.environ.get("DISK_CACHE_TTL", "1800"))  # 30 minutes
-DISK_CACHE_MAX_BYTES = int(
-    os.environ.get("DISK_CACHE_MAX_BYTES", str(8 * 1024**3))
+# Byte limits accept human units ("8G", "2Gi", "1.5TB", "8589934592"). These
+# used to be plain int(), so DISK_CACHE_MAX_BYTES=8G — the form every other
+# size variable in this app accepts — crashed the backend at import time.
+DISK_CACHE_MAX_BYTES = parse_byte_size(
+    os.environ.get("DISK_CACHE_MAX_BYTES"),
+    8 * 1024**3,
+    name="DISK_CACHE_MAX_BYTES",
 )  # 8 GB total
-DISK_CACHE_PER_VIDEO_BYTES = int(
-    os.environ.get("DISK_CACHE_PER_VIDEO_BYTES", str(2 * 1024**3))
+DISK_CACHE_PER_VIDEO_BYTES = parse_byte_size(
+    os.environ.get("DISK_CACHE_PER_VIDEO_BYTES"),
+    2 * 1024**3,
+    name="DISK_CACHE_PER_VIDEO_BYTES",
 )  # 2 GB per video
 ENABLED = os.environ.get("DISK_CACHE_ENABLED", "1") == "1"
 
@@ -160,7 +169,11 @@ class DiskChunkCache:
         self._activity = None
         self._map_size = 0
         self._max_map_bytes = max(
-            int(os.environ.get("DISK_CACHE_MAP_BYTES", "0") or 0),
+            parse_byte_size(
+                os.environ.get("DISK_CACHE_MAP_BYTES"),
+                0,
+                name="DISK_CACHE_MAP_BYTES",
+            ),
             DISK_CACHE_MAX_BYTES * 2,
             _MIN_MAP_BYTES * 8,
         )
