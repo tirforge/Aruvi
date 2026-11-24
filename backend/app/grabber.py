@@ -10,7 +10,13 @@ import logging
 import os
 from dataclasses import dataclass, field
 
-from pyrogram import Client
+from pyrogram import Client, errors
+from pyrogram.types import (
+    ChatJoinResultDeclined,
+    ChatJoinResultGuardBotApprovalRequired,
+    ChatJoinResultRequestSent,
+    ChatJoinResultSuccess,
+)
 from cachebox import TTLCache
 
 from .database import async_session
@@ -731,6 +737,37 @@ def _label_file_check(label: str, file_name: str) -> tuple[bool, str]:
     return True, "; ".join(warnings)
 
 
+def _join_status(res) -> str:
+    """Map Kurigram's typed ChatJoinResult onto our status vocabulary.
+
+    The old version dispatched on ``type(res).__name__`` and looked for a
+    ``ChatJoinResultAlreadyMember`` class that does not exist, so a guard-bot
+    approval prompt or a declined join was reported as ``"joined"`` and the
+    grabber went on to search a chat it never joined.
+    """
+    if isinstance(res, ChatJoinResultSuccess):
+        return "joined"
+    if isinstance(res, ChatJoinResultRequestSent):
+        return "requested"
+    if isinstance(res, (ChatJoinResultGuardBotApprovalRequired, ChatJoinResultDeclined)):
+        _log.warning(
+            "grabber: join not completed — %s (guard-bot approval required)",
+            type(res).__name__,
+        )
+    else:
+        _log.warning("grabber: unexpected join result %s", type(res).__name__)
+    return "failed"
+
+
+def _join_error_status(e: Exception) -> str | None:
+    """Typed join failures: already a member, or a request already pending."""
+    if isinstance(e, errors.UserAlreadyParticipant):
+        return "already"
+    if isinstance(e, errors.InviteRequestSent):
+        return "requested"
+    return None
+
+
 async def _resolve_group(ivy: Client, ref: str) -> int:
     """Join via invite link if needed, return resolved chat_id."""
     ref = ref.strip().lstrip("@")
@@ -749,16 +786,35 @@ async def _resolve_group(ivy: Client, ref: str) -> int:
     elif "t.me/+" in ref:
         invite_hash = ref.split("t.me/+")[-1].split("?")[0].split("/")[0]
     if invite_hash:
-        res = await ivy.join_chat(f"https://t.me/+{invite_hash}")
-        chat_id = getattr(res, "id", None)
-        if chat_id is None:
-            # Private invite that requires admin approval (ChatJoinResultRequestSent)
+        invite_url = f"https://t.me/+{invite_hash}"
+        try:
+            res = await ivy.join_chat(invite_url)
+        except errors.InviteRequestSent:
+            # Private invite that requires admin approval.
             raise ValueError(
                 f"group invite +{invite_hash} requires admin approval (join request sent)"
             )
-        _log.info("grabber: joined group via invite link, chat_id=%s", chat_id)
-        _GROUP_CHAT_ID_CACHE[ref] = chat_id
-        return chat_id
+        except errors.UserAlreadyParticipant:
+            chat = await ivy.get_chat(invite_url)
+            _GROUP_CHAT_ID_CACHE[ref] = chat.id
+            return chat.id
+        # join_chat returns a typed ChatJoinResult, NOT a Chat: the id lives on
+        # result.chat. The old `getattr(res, "id", None)` was therefore always
+        # None, so every invite-link group was reported as "needs approval".
+        status = _join_status(res)
+        if status == "requested":
+            raise ValueError(
+                f"group invite +{invite_hash} requires admin approval (join request sent)"
+            )
+        joined_chat = getattr(res, "chat", None)
+        if status != "joined" or joined_chat is None:
+            raise ValueError(
+                f"group invite +{invite_hash} could not be joined "
+                f"(guard-bot approval required? {type(res).__name__})"
+            )
+        _GROUP_CHAT_ID_CACHE[ref] = joined_chat.id
+        _log.info("grabber: joined group via invite link, chat_id=%s", joined_chat.id)
+        return joined_chat.id
     chat = await ivy.get_chat(ref)
     try:
         await ivy.join_chat(ref)
@@ -780,28 +836,17 @@ async def _resolve_entity(ivy: Client, ref: str) -> str:
     if not ref:
         return ""
 
-    def _join_result(res) -> str:
-        name = type(res).__name__
-        if name == "ChatJoinResultRequestSent":
-            return "requested"
-        if name == "ChatJoinResultAlreadyMember":
-            return "already"
-        return "joined"
-
-    def _already(e: Exception) -> bool:
-        msg = str(e).lower()
-        return "already" in msg or "participant" in msg
-
     if ref.startswith("+") or ref.startswith("joinchat/"):
         ref = ref.lstrip("+").replace("joinchat/", "")
         try:
             res = await ivy.join_chat(f"https://t.me/+{ref}")
         except Exception as e:
-            if _already(e):
-                return "already"
+            status = _join_error_status(e)
+            if status:
+                return status
             _log.warning("grabber: join invite +%s failed: %s", ref, e)
             return "failed"
-        status = _join_result(res)
+        status = _join_status(res)
         if status == "requested":
             _log.warning(
                 "grabber: join request sent for +%s — awaiting admin approval", ref
@@ -813,11 +858,12 @@ async def _resolve_entity(ivy: Client, ref: str) -> str:
     try:
         res = await ivy.join_chat(ref)
     except Exception as e:
-        if _already(e):
-            return "already"
+        status = _join_error_status(e)
+        if status:
+            return status
         _log.warning("grabber: join @%s failed: %s", ref, e)
         return "failed"
-    status = _join_result(res)
+    status = _join_status(res)
     if status == "requested":
         _log.warning(
             "grabber: join request sent for @%s — awaiting admin approval", ref
