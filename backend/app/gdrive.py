@@ -163,6 +163,24 @@ def _creds_from_dict(d: dict) -> UserCredentials:
     )
 
 
+def _is_invalid_grant(exc: RefreshError) -> bool:
+    """True when the refresh token itself is dead (revoked, expired, reused).
+
+    google-auth raises a single ``RefreshError`` for every token-endpoint
+    failure, so the error *code* has to come from the structured response it
+    attaches: ``RefreshError(message, response_data)``. The message happens to
+    be "invalid_grant: ..." today, but a substring test on it also matches an
+    ``error_description`` that merely mentions the phrase and breaks if
+    google-auth rewords the prefix. The response dict is the API contract.
+    """
+    response = exc.args[1] if len(exc.args) > 1 else None
+    if isinstance(response, dict):
+        return response.get("error") == "invalid_grant"
+    # Old google-auth versions and some transports attach no response body;
+    # the message is then the only signal available.
+    return "invalid_grant" in str(exc)
+
+
 def _refresh_creds(token_dict: dict) -> UserCredentials:
     """Refresh credentials if expired.  Raises TokenExpiredError on invalid_grant
     (revoked/expired refresh token) or missing refresh token, and clears the
@@ -176,7 +194,7 @@ def _refresh_creds(token_dict: dict) -> UserCredentials:
         try:
             creds.refresh(GoogleAuthRequest())
         except RefreshError as e:
-            if "invalid_grant" in str(e):
+            if _is_invalid_grant(e):
                 token_dict["refresh_token"] = None
                 token_dict.pop("expiry", None)
                 raise TokenExpiredError(
