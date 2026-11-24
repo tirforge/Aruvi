@@ -3451,3 +3451,129 @@ class TestDiagRangeParsing:
             await self._probe(monkeypatch, range_header)
         assert exc.value.status_code == 416
         assert exc.value.headers["Content-Range"] == "bytes */1000"
+
+
+class TestJoinResults:
+    """Join outcome comes from Kurigram's typed result / error classes.
+
+    The old code compared ``type(res).__name__`` against a
+    ``ChatJoinResultAlreadyMember`` class that does not exist — so anything it
+    did not recognise, including a guard-bot approval prompt, counted as
+    "joined" — and sniffed "already"/"participant" substrings in error text.
+    ``_resolve_group`` also read ``res.id`` from a ``ChatJoinResult`` (the id
+    lives on ``res.chat``), so every invite-link group looked like it needed
+    admin approval.
+    """
+
+    def test_success_is_joined(self):
+        from types import SimpleNamespace
+
+        from pyrogram.types import ChatJoinResultSuccess
+
+        from app.grabber import _join_status
+
+        assert _join_status(ChatJoinResultSuccess(chat=SimpleNamespace(id=1))) == (
+            "joined"
+        )
+
+    def test_request_sent_is_requested(self):
+        from pyrogram.types import ChatJoinResultRequestSent
+
+        from app.grabber import _join_status
+
+        assert _join_status(ChatJoinResultRequestSent()) == "requested"
+
+    def test_guard_bot_and_declined_are_not_joined(self):
+        from pyrogram.types import (
+            ChatJoinResultDeclined,
+            ChatJoinResultGuardBotApprovalRequired,
+        )
+
+        from app.grabber import _join_status
+
+        guard = ChatJoinResultGuardBotApprovalRequired(
+            bot=None, url="https://t.me/x?startapp=1", query_id="42"
+        )
+        assert _join_status(guard) == "failed"
+        assert _join_status(ChatJoinResultDeclined()) == "failed"
+
+    def test_unknown_result_is_not_joined(self):
+        from app.grabber import _join_status
+
+        # Unknown objects must never be reported as a successful join.
+        assert _join_status(object()) == "failed"
+
+    def test_typed_join_errors(self):
+        from pyrogram import errors
+
+        from app.grabber import _join_error_status
+
+        assert _join_error_status(errors.UserAlreadyParticipant()) == "already"
+        assert _join_error_status(errors.InviteRequestSent()) == "requested"
+        assert _join_error_status(errors.InviteHashExpired()) is None
+        assert _join_error_status(RuntimeError("participant")) is None
+
+    @staticmethod
+    async def _resolve_group(monkeypatch, *, result=None, error=None, chat_id=-1001234):
+        from types import SimpleNamespace
+
+        from app import grabber
+
+        class FakeIvy:
+            async def join_chat(self, target):
+                if error is not None:
+                    raise error
+                return result
+
+            async def get_chat(self, target):
+                return SimpleNamespace(id=chat_id)
+
+        grabber._GROUP_CHAT_ID_CACHE.clear()
+        try:
+            return await grabber._resolve_group(FakeIvy(), "+AbCdEf")
+        finally:
+            grabber._GROUP_CHAT_ID_CACHE.clear()
+
+    @pytest.mark.asyncio
+    async def test_resolve_group_reads_id_from_join_result(self, monkeypatch):
+        from types import SimpleNamespace
+
+        from pyrogram.types import ChatJoinResultSuccess
+
+        # Regression: getattr(res, "id", None) was always None on a
+        # ChatJoinResult, so a successful invite join raised "needs approval".
+        joined = await self._resolve_group(
+            monkeypatch,
+            result=ChatJoinResultSuccess(chat=SimpleNamespace(id=-1009999)),
+        )
+        assert joined == -1009999
+
+    @pytest.mark.asyncio
+    async def test_resolve_group_reports_pending_approval(self, monkeypatch):
+        from pyrogram import errors
+        from pyrogram.types import ChatJoinResultRequestSent
+
+        with pytest.raises(ValueError, match="admin approval"):
+            await self._resolve_group(monkeypatch, result=ChatJoinResultRequestSent())
+
+        with pytest.raises(ValueError, match="admin approval"):
+            await self._resolve_group(monkeypatch, error=errors.InviteRequestSent())
+
+    @pytest.mark.asyncio
+    async def test_resolve_group_already_member(self, monkeypatch):
+        from pyrogram import errors
+
+        joined = await self._resolve_group(
+            monkeypatch, error=errors.UserAlreadyParticipant(), chat_id=-1007777
+        )
+        assert joined == -1007777
+
+    @pytest.mark.asyncio
+    async def test_resolve_group_guard_bot_is_not_success(self, monkeypatch):
+        from pyrogram.types import ChatJoinResultGuardBotApprovalRequired
+
+        guard = ChatJoinResultGuardBotApprovalRequired(
+            bot=None, url="https://t.me/x?startapp=1", query_id="7"
+        )
+        with pytest.raises(ValueError, match="guard-bot approval"):
+            await self._resolve_group(monkeypatch, result=guard)
