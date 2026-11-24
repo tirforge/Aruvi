@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Request, Response, Query
 from fastapi.responses import StreamingResponse
 from ..config import get_settings
 from ..utils import bearer_token_matches, spawn_background
+from ..http_headers import parse_byte_range
 from ..telegram import tg_client
 from ..streaming import (
     stream_file as stream_file_chunks,
@@ -141,29 +142,19 @@ async def _diag_media_response(
     ttfb_ms = round((time.perf_counter() - t0) * 1000, 1)
 
     range_header = request.headers.get("range")
-    from_bytes = 0
-    until_bytes = file_size - 1
-
-    has_range = False
-    if range_header:
-        import re
-
-        match = re.match(r"bytes=(\d+)-(\d*)", range_header)
-        if match:
-            from_bytes = int(match.group(1))
-            end_str = match.group(2)
-            until_bytes = int(end_str) if end_str else file_size - 1
-            if until_bytes >= file_size:
-                until_bytes = file_size - 1
-            # Zero-byte file or unsatisfiable start → 416 instead of a
-            # negative/empty chunk window downstream.
-            if file_size == 0 or from_bytes >= file_size or from_bytes > until_bytes:
-                raise HTTPException(
-                    status_code=416,
-                    detail="Range not satisfiable",
-                    headers={"Content-Range": f"bytes */{file_size}"},
-                )
-            has_range = True
+    parsed = parse_byte_range(range_header, file_size)
+    if parsed is None:
+        # Malformed, multipart or unsatisfiable: 416, exactly like the main
+        # streaming route. The old inline regex silently ignored anything it
+        # could not match (so a suffix range like ``bytes=-500`` returned the
+        # whole file with a 200) and served only the first of several ranges.
+        raise HTTPException(
+            status_code=416,
+            detail="Range not satisfiable",
+            headers={"Content-Range": f"bytes */{file_size}"},
+        )
+    from_bytes, until_bytes = parsed
+    has_range = bool(range_header)
 
     if not head:
         spawn_background(prefetch_first_batch_safe(tg_client, message, from_bytes))
