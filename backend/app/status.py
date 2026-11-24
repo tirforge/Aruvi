@@ -6,6 +6,7 @@ import threading
 from collections import deque
 
 from cachebox import TTLCache
+from humanfriendly import InvalidSize, parse_size
 
 from .streaming import (
     _cache_manager,
@@ -30,6 +31,11 @@ _OOM_CLEAR_COOLDOWN = 20  # seconds
 # expiry, so there is no timestamp tuple to compare by hand.
 _PROC_RSS_TTL = 10  # seconds
 _proc_rss_cache: TTLCache = TTLCache(maxsize=1, global_ttl=_PROC_RSS_TTL)
+
+# Default when MEMORY is unset or unparseable. 16 GiB is the container's
+# advertised limit, so the status page still reads sensibly if the env is wrong.
+_FALLBACK_MEM_BYTES = 16 * 1024**3
+_mem_env_warned = False
 
 
 def _read_int(path: str) -> int | None:
@@ -122,21 +128,42 @@ def get_cpu() -> float:
 
 
 def _parse_mem_env(val: str) -> int:
+    """Parse the ``MEMORY`` env var ("16Gi", "3G", "512M", "1048576") into bytes.
+
+    Parsing is delegated to humanfriendly's ``parse_size``. It is pure Python
+    (nothing to build on the ARM VPS) and is the same parser `coloredlogs` and
+    `verboselogs` have shipped for years.
+
+    ``binary=True`` keeps the units the previous code used: ``M``/``MB``/``MiB``
+    are all 1024**2, matching how cgroup limits are reported.
+
+    The hand-rolled suffix loop this replaces had three failure modes:
+
+    * it only knew G/M units, so a perfectly valid ``MEMORY=2TB`` silently fell
+      back to the 16 GiB default — the status page then reported 100 % memory
+      use forever;
+    * ``-5M`` parsed to a negative byte count, which turned ``/status`` into a
+      negative percentage;
+    * ``1.5 GiB`` (space between number and unit) raised and took the default.
+
+    Anything unparseable, or a non-positive size, falls back to 16 GiB with a
+    single warning rather than a warning per poll.
+    """
+    global _mem_env_warned
     try:
-        val = val.strip().upper()
-    except (AttributeError, ValueError):
-        return 16 * 1024**3
-    if not val:
-        return 16 * 1024**3
-    try:
-        for suffix in ["GIB", "GI", "GB", "G", "MIB", "MI", "MB", "M"]:
-            if val.endswith(suffix):
-                return int(
-                    float(val[: -len(suffix)]) * (1024**3 if suffix[0] == "G" else 1024**2)
-                )
-        return int(val)
-    except (ValueError, OverflowError):
-        return 16 * 1024**3
+        size = int(parse_size(val, binary=True))
+    except (InvalidSize, TypeError, ValueError):
+        size = 0
+    if size > 0:
+        return size
+    if not _mem_env_warned:
+        _mem_env_warned = True
+        logger.warning(
+            "MEMORY=%r is not a valid size — falling back to %.0f GiB",
+            val,
+            _FALLBACK_MEM_BYTES / 1024**3,
+        )
+    return _FALLBACK_MEM_BYTES
 
 
 def _cgroup_memory_max() -> int | None:
