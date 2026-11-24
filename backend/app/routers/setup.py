@@ -149,9 +149,22 @@ async def setup_sign_in(request: Request, body: SignInIn):
         SessionPasswordNeeded,
     )
 
+    # A previous call with the right code but no password stopped at
+    # SessionPasswordNeeded. Telegram has already consumed that code, so a
+    # second sign_in with it fails ("PHONE_CODE_INVALID") — 2FA accounts could
+    # never finish setup. Remember the state on the entry and go straight to
+    # check_password on the retry.
+    need_password = bool(entry.get("need_password"))
+    if need_password and not body.password:
+        raise HTTPException(401, "need_password")
+
     try:
-        await client.sign_in(entry["phone"], entry["hash"], body.code.strip())
+        if need_password:
+            await client.check_password(body.password)
+        else:
+            await client.sign_in(entry["phone"], entry["hash"], body.code.strip())
     except SessionPasswordNeeded:
+        entry["need_password"] = True
         if not body.password:
             raise HTTPException(401, "need_password")
         try:

@@ -340,6 +340,11 @@ async def _warmup_messages():
 
 async def _finish_startup():
     """Start helper bots in background, wait for ≥13 to connect, then warm up."""
+    # Defined for the log line below even when no helpers are configured: with a
+    # single bot the len(clients) > 1 branch never ran, so referencing it there
+    # raised UnboundLocalError and killed this task — silently skipping channel
+    # checks, the bot-0 retry and BOTH warm-ups on single-bot deployments.
+    connected = 0
     if len(clients) > 1:
         # Fire all helpers as background tasks (never block on all)
         for i, c in enumerate(clients[1:], 1):
@@ -421,10 +426,13 @@ async def _warm_media_sessions():
     session it needs on demand), and a flaky DC is bounded by per-op + total
     timeouts so boot is never held longer than _WARM_TOTAL_TIMEOUT.
     """
-    try:
-        from .streaming import _media_session_lock, _media_sessions_warmed
-        from pyrogram.file_id import FileId
+    # Imported BEFORE the try: the finally block below always runs, and when
+    # these names lived inside the try a failed streaming import raised
+    # NameError in the finally instead of reporting the real import error.
+    from .streaming import _media_session_lock, _media_sessions_warmed
+    from pyrogram.file_id import FileId
 
+    try:
         channel_id = settings.telegram_storage_channel_id
         if not channel_id:
             return

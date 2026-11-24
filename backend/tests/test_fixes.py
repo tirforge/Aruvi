@@ -4596,3 +4596,273 @@ class TestGDriveUploadBlockResume:
         # Block starts at 10, so stored=2 < start=10: impossible.
         with pytest.raises(RuntimeError, match="lost data"):
             await _upload_block(client, "https://u", b"a" * 10, 10, 19, 100)
+
+
+class TestDeepHuntFixes:
+    """Regression tests for the second deep-audit pass."""
+
+    # ---- single-bot startup must not die on an unbound local ----
+
+    @pytest.mark.asyncio
+    async def test_finish_startup_single_client_schedules_warmups(self, monkeypatch):
+        from app import telegram as tg
+
+        spawned = []
+
+        def fake_spawn(coro):
+            spawned.append(coro)
+            coro.close()
+            return None
+
+        class FakeClient:
+            is_connected = True
+            pool_index = 0
+
+        monkeypatch.setattr(tg, "clients", [FakeClient()])
+        monkeypatch.setattr(tg, "_spawn", fake_spawn)
+        monkeypatch.setattr(tg, "diag_log", lambda *a, **k: None)
+        # Skip the per-bot get_me/get_messages probe.
+        monkeypatch.setattr(tg.settings, "telegram_storage_channel_id", None)
+
+        # Used to raise UnboundLocalError ("connected") on single-bot setups,
+        # which silently skipped both warm-ups and the bot-0 retry.
+        await tg._finish_startup()
+
+        assert len(spawned) == 2  # _warmup_messages + _warm_media_sessions
+
+    # ---- disk cache eviction must never spin while holding the lock ----
+
+    def test_enforce_global_cap_stops_when_eviction_makes_no_progress(self):
+        import threading
+        from app import disk_cache as disk
+
+        cache = disk.DiskChunkCache.__new__(disk.DiskChunkCache)
+        cache._lock = threading.RLock()
+        cache._last_active = {(1, 2): 1.0}
+        cache._total_bytes = disk.DISK_CACHE_MAX_BYTES + 4 * 1024 * 1024
+        cache._video_bytes = {(1, 2): cache._total_bytes}
+        cache._chunk_sizes = {disk._chunk_key(1, 2, 0): 4 * 1024 * 1024}
+        # LMDB failures surface as "freed nothing" without touching the counter.
+        cache._evict_video = lambda *a: 0
+        cache._delete_chunks = lambda victims: 0
+
+        # The old loop re-read the same byte total forever while holding the
+        # RLock, deadlocking every get/put/sweep in the process.
+        assert cache._enforce_global_cap() == 0
+
+    # ---- precompressed static assets must not be encoded twice ----
+
+    @pytest.mark.asyncio
+    async def test_precompressed_body_is_not_recompressed(self):
+        from app.compression import SelectiveCompressionMiddleware
+
+        body = b"x" * 8192
+        sent = []
+
+        async def app(scope, receive, send):
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [
+                        (b"content-type", b"text/html"),
+                        (b"content-encoding", b"gzip"),
+                        (b"content-length", str(len(body)).encode()),
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": body})
+
+        async def send(message):
+            sent.append(message)
+
+        middleware = SelectiveCompressionMiddleware(app, minimum_size=1024)
+        await middleware(
+            {"type": "http", "headers": [(b"accept-encoding", b"gzip")]},
+            None,
+            send,
+        )
+
+        starts = [m for m in sent if m["type"] == "http.response.start"]
+        bodies = [m for m in sent if m["type"] == "http.response.body"]
+        assert len(starts) == 1 and len(bodies) == 1
+        encodings = [
+            v for k, v in starts[0]["headers"] if k.lower() == b"content-encoding"
+        ]
+        assert encodings == [b"gzip"]
+        assert bodies[0]["body"] == body
+
+    # ---- OpenSubtitles search must honour ?language ----
+
+    def test_os_lang_code_uses_requested_language(self):
+        from app.routers import subtitles
+
+        assert subtitles._os_lang_code("ta") == "ta"
+        assert subtitles._os_lang_code("eng") == "en"
+
+    @pytest.mark.asyncio
+    async def test_os_search_passes_requested_language(self, monkeypatch):
+        from types import SimpleNamespace
+        from app.routers import subtitles
+
+        captured = {}
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"data": []}
+
+        class FakeClient:
+            def __init__(self, *a, **k):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def get(self, url, headers=None, params=None):
+                captured["params"] = params
+                return FakeResponse()
+
+        monkeypatch.setattr(subtitles, "httpx", SimpleNamespace(AsyncClient=FakeClient))
+
+        assert await subtitles._os_search("Movie", None, language="ta") == []
+        assert captured["params"]["languages"] == "ta"
+
+    # ---- setup helper must complete a real two-step 2FA login ----
+
+    @pytest.mark.asyncio
+    async def test_setup_sign_in_completes_two_step_2fa(self, monkeypatch):
+        from fastapi import HTTPException
+        from pyrogram.errors import SessionPasswordNeeded
+        from app.routers import setup as setup_mod
+
+        calls = {"sign_in": 0, "check_password": []}
+
+        class FakeClient:
+            async def sign_in(self, *a):
+                calls["sign_in"] += 1
+                raise SessionPasswordNeeded()
+
+            async def check_password(self, pw):
+                calls["check_password"].append(pw)
+
+            async def export_session_string(self):
+                return "SESSION"
+
+            async def disconnect(self):
+                pass
+
+        helper = TestSetupLoginFlow()
+        setup_mod = helper._install(monkeypatch, FakeClient())
+
+        def req():
+            # Distinct client IP: slowapi's 6/minute budget is shared per IP,
+            # and the other setup tests already use 127.0.0.1.
+            from starlette.requests import Request
+
+            return Request(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/api/setup/sign-in",
+                    "headers": [(b"host", b"testserver")],
+                    "query_string": b"",
+                    "client": ("10.9.9.9", 4242),
+                    "server": ("testserver", 80),
+                    "scheme": "http",
+                }
+            )
+
+        try:
+            # 1st call: right code, no password -> the flag must be persisted.
+            with pytest.raises(HTTPException) as exc:
+                await setup_mod.setup_sign_in(req(), helper._body())
+            assert exc.value.detail == "need_password"
+            assert setup_mod._pending["tok"]["need_password"] is True
+
+            # 2nd call without a password: still asks, never reuses the code.
+            with pytest.raises(HTTPException) as exc:
+                await setup_mod.setup_sign_in(req(), helper._body())
+            assert exc.value.detail == "need_password"
+            assert calls["sign_in"] == 1
+
+            # 3rd call: skips sign_in (its code was consumed) and checks the pw.
+            result = await setup_mod.setup_sign_in(req(), helper._body(password="good"))
+            assert result["session_string"] == "SESSION"
+            assert calls["sign_in"] == 1
+            assert calls["check_password"] == ["good"]
+            assert "tok" not in setup_mod._pending
+        finally:
+            setup_mod._pending.clear()
+
+    # ---- a restarted prefetch task must keep its own state ----
+
+    @pytest.mark.asyncio
+    async def test_prefetch_finally_keeps_replacement_task_state(self, monkeypatch):
+        from app import streaming as sm
+
+        key = (321, 654)
+        other = object()
+        sm._prefetch_tasks[key] = other
+        sm._prefetch_hwm[key] = 0
+        sm._prefetch_cursor[key] = 99  # past the last chunk -> the loop breaks
+        sm._prefetch_last_activity[key] = 123.0
+        monkeypatch.setattr(sm, "_memory_pressure", lambda *a, **k: False)
+        monkeypatch.setattr(sm, "_forward_streams", {})
+
+        try:
+            await sm._ahead_prefetch_loop(key, 1024)
+            # A blind pop here used to wipe the replacement task's playhead,
+            # leaving it stuck on hwm < 0 forever.
+            assert sm._prefetch_tasks.get(key) is other
+            assert sm._prefetch_hwm.get(key) == 0
+            assert sm._prefetch_cursor.get(key) == 99
+            assert sm._prefetch_last_activity.get(key) == 123.0
+        finally:
+            sm._prefetch_tasks.pop(key, None)
+            sm._prefetch_hwm.pop(key, None)
+            sm._prefetch_cursor.pop(key, None)
+            sm._prefetch_last_activity.pop(key, None)
+
+    # ---- folder deletion must not touch other users' Telegram copies ----
+
+    def test_folder_files_query_is_user_scoped(self):
+        from app.routers import folders
+
+        sql = str(folders._folder_files_query(7, [1, 2]))
+        assert "files.user_id" in sql
+        assert "files.folder_id" in sql
+
+    # ---- auto-migration must never inline a Python callable default ----
+
+    def test_migration_default_ignores_callable_default(self):
+        from sqlalchemy import Boolean, Column, DateTime, Integer, String
+        from app.database import _migration_column_default
+
+        assert (
+            _migration_column_default(
+                Column("t", DateTime, nullable=False, default=lambda: 0)
+            )
+            == "CURRENT_TIMESTAMP"
+        )
+        assert (
+            _migration_column_default(Column("i", Integer, nullable=False, default=3))
+            == "3"
+        )
+        assert (
+            _migration_column_default(
+                Column("b", Boolean, nullable=False, default=False)
+            )
+            == "FALSE"
+        )
+        assert (
+            _migration_column_default(
+                Column("s", String(10), nullable=False, default="a'b")
+            )
+            == "'a''b'"
+        )

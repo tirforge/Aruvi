@@ -656,9 +656,13 @@ async def _ahead_prefetch_loop(key: tuple[int, int], file_size: int):
         # and trigger duplicate prefetch loops on the next playhead tick.
         if _prefetch_tasks.get(key) is this_task:
             _prefetch_tasks.pop(key, None)
-        _prefetch_hwm.pop(key, None)
-        _prefetch_cursor.pop(key, None)
-        _prefetch_last_activity.pop(key, None)
+            # The playhead bookkeeping belongs to the same incarnation: a new
+            # task started for this key would have its own hwm/cursor set by
+            # _report_playhead + start_ahead_prefetch, so popping them here
+            # would stall the replacement loop (hwm < 0 -> sleep forever).
+            _prefetch_hwm.pop(key, None)
+            _prefetch_cursor.pop(key, None)
+            _prefetch_last_activity.pop(key, None)
 
 
 def start_ahead_prefetch(chat_id: int, message_id: int, file_size: int):
@@ -1481,6 +1485,39 @@ async def parallel_stream_generator(
         finally:
             sem.release()
 
+    async def _refetch_chunk(chunk_offset, cl, msg, sem, *, c_idx=None, invalidate=False):
+        """Retry one chunk after a typed media error, returning ``(data, msg)``.
+
+        ``data is None`` means the retry failed and ``msg`` is whatever message
+        reference is still usable. The retry deliberately goes through
+        ``_fetch_one``: it applies the wall-clock timeout, the media-session
+        scope, the transmission-slot timeout and the RAM+disk write. The three
+        hand-rolled copies this replaces used a bare ``async with sem`` +
+        ``stream_media`` — a wedged media session could pin the worker and its
+        client permit forever, and the recovered chunk never reached the disk
+        cache (so a reconnect lost it again).
+        """
+        who = c_idx if c_idx is not None else getattr(cl, "pool_index", "?")
+        try:
+            if c_idx is not None:
+                async with get_client_reconnect_lock(c_idx):
+                    if invalidate:
+                        await _invalidate_media_sessions(cl, _msg_dc_id(msg))
+                    if not await reconnect_client(cl):
+                        logger.error(
+                            "Bot %d: reconnect failed for chunk %d", who, chunk_offset
+                        )
+                        return None, msg
+                    msg = await _fetch_message(cl, chat_id, message_id, force=True)
+                    return await _fetch_one(chunk_offset, cl, msg, sem), msg
+            msg = await _fetch_message(cl, chat_id, message_id, force=True)
+            return await _fetch_one(chunk_offset, cl, msg, sem), msg
+        except Exception as e:
+            logger.error(
+                "Bot %s failed chunk %d after retry: %s", who, chunk_offset, e
+            )
+            return None, msg
+
     async def worker(worker_id: int):
         pool = get_client_pool()
         try:
@@ -1638,100 +1675,50 @@ async def parallel_stream_generator(
                                 chunk_offset,
                             )
                             _mark_msg_poisoned(client, chat_id, message_id)
-                            try:
-                                local_msg = await _fetch_message(
-                                    client, chat_id, message_id, force=True
-                                )
-                                async with semaphore:
-                                    d = bytearray()
-                                    async for part in client.stream_media(
-                                        local_msg, limit=1, offset=chunk_offset
-                                    ):
-                                        d.extend(part)
-                                data = bytes(d)
-                                video_cache.put(chunk_offset, data)
+                            data, local_msg = await _refetch_chunk(
+                                chunk_offset, client, local_msg, semaphore
+                            )
+                            if data is not None:
                                 await _resolve_chunk_now(chunk_offset, data)
                                 continue
-                            except Exception as e2:
-                                logger.error(
-                                    "Bot %d failed chunk %d after re-fetch: %s",
-                                    c_idx,
-                                    chunk_offset,
-                                    e2,
-                                )
+                            logger.error(
+                                "Bot %d failed chunk %d after re-fetch",
+                                c_idx,
+                                chunk_offset,
+                            )
                         except AuthKeyUnregistered:
                             logger.warning(
                                 "Bot %d: auth key expired for chunk %d",
                                 c_idx,
                                 chunk_offset,
                             )
-                            async with get_client_reconnect_lock(c_idx):
-                                if await reconnect_client(client):
-                                    try:
-                                        local_msg = await _fetch_message(
-                                            client, chat_id, message_id, force=True
-                                        )
-                                        async with semaphore:
-                                            d = bytearray()
-                                            async for part in client.stream_media(
-                                                local_msg, limit=1, offset=chunk_offset
-                                            ):
-                                                d.extend(part)
-                                        data = bytes(d)
-                                        video_cache.put(chunk_offset, data)
-                                        await _resolve_chunk_now(chunk_offset, data)
-                                        continue
-                                    except Exception as e2:
-                                        logger.error(
-                                            "Bot %d failed chunk %d after reconnect: %s",
-                                            c_idx,
-                                            chunk_offset,
-                                            e2,
-                                        )
-                                else:
-                                    logger.error(
-                                        "Bot %d: reconnect failed for chunk %d",
-                                        c_idx,
-                                        chunk_offset,
-                                    )
+                            data, local_msg = await _refetch_chunk(
+                                chunk_offset,
+                                client,
+                                local_msg,
+                                semaphore,
+                                c_idx=c_idx,
+                            )
+                            if data is not None:
+                                await _resolve_chunk_now(chunk_offset, data)
+                                continue
                         except AuthBytesInvalid:
                             logger.warning(
                                 "Bot %d: auth bytes invalid for chunk %d, refreshing media session...",
                                 c_idx,
                                 chunk_offset,
                             )
-                            async with get_client_reconnect_lock(c_idx):
-                                await _invalidate_media_sessions(
-                                    client, _msg_dc_id(local_msg)
-                                )
-                                if await reconnect_client(client):
-                                    try:
-                                        local_msg = await _fetch_message(
-                                            client, chat_id, message_id, force=True
-                                        )
-                                        async with semaphore:
-                                            d = bytearray()
-                                            async for part in client.stream_media(
-                                                local_msg, limit=1, offset=chunk_offset
-                                            ):
-                                                d.extend(part)
-                                        data = bytes(d)
-                                        video_cache.put(chunk_offset, data)
-                                        await _resolve_chunk_now(chunk_offset, data)
-                                        continue
-                                    except Exception as e2:
-                                        logger.error(
-                                            "Bot %d failed chunk %d after refresh: %s",
-                                            c_idx,
-                                            chunk_offset,
-                                            e2,
-                                        )
-                                else:
-                                    logger.error(
-                                        "Bot %d: reconnect failed for chunk %d",
-                                        c_idx,
-                                        chunk_offset,
-                                    )
+                            data, local_msg = await _refetch_chunk(
+                                chunk_offset,
+                                client,
+                                local_msg,
+                                semaphore,
+                                c_idx=c_idx,
+                                invalidate=True,
+                            )
+                            if data is not None:
+                                await _resolve_chunk_now(chunk_offset, data)
+                                continue
                         except Exception as e:
                             logger.error(
                                 "Bot %d failed chunk %d: %s", c_idx, chunk_offset, e

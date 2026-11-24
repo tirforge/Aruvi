@@ -152,9 +152,15 @@ def _os_headers() -> dict:
     }
 
 
-def _os_lang_code() -> str:
-    """OpenSubtitles.com expects a bare code like 'en'."""
-    code = settings.subtitle_languages[0] if settings.subtitle_languages else "en"
+def _os_lang_code(code: str | None = None) -> str:
+    """OpenSubtitles.com expects a bare code like 'en'.
+
+    ``code`` lets callers search an explicitly requested language; without it
+    the first configured subtitle language is used (the old behaviour, which
+    ignored ``?language=`` and returned English results for every request).
+    """
+    if code is None:
+        code = settings.subtitle_languages[0] if settings.subtitle_languages else "en"
     try:
         lang = Language.fromietf(code)
     except (LanguageReverseError, ValueError):
@@ -170,13 +176,15 @@ async def _os_search(
     year: int | None,
     season: int | None = None,
     episode: int | None = None,
+    language: str | None = None,
 ) -> list[dict]:
     """Query api.opensubtitles.com /subtitles (single page). Returns serialized dicts."""
     if not title:
         return []
+    lang_code = _os_lang_code(language)
     params: dict = {
         "query": title,
-        "languages": _os_lang_code(),
+        "languages": lang_code,
         "page": 1,
     }
     # OpenSubtitles returns 0 hits when year + season/episode are combined,
@@ -214,8 +222,8 @@ async def _os_search(
                 "id": str(sub_id),
                 "download_id": file_id,
                 "name": release,
-                "language": _os_lang_code(),
-                "language_name": _os_lang_code(),
+                "language": lang_code,
+                "language_name": lang_code,
                 "score": score,
                 "format": "srt",
                 "matches": ["title"] + (["year"] if year else []),
@@ -341,6 +349,7 @@ async def search_subtitles(
                 info.get("year") or None,
                 season=info.get("season") or None if is_ep else None,
                 episode=info.get("episode") or None if is_ep else None,
+                language=language,
             )
         )
 
