@@ -331,7 +331,7 @@ class TestDownloadTokenValidation:
 class TestPatchListenerQueue:
     """Test multi-listener FIFO queue and command routing."""
 
-    def test_fifo_delivery(self):
+    def test_fifo_delivery(self, monkeypatch):
         import collections
         from types import SimpleNamespace
         import app.patch as patch
@@ -352,7 +352,10 @@ class TestPatchListenerQueue:
             def stop_propagation(self):
                 self._stop = True
 
-        patch.types.Message = Msg
+        # monkeypatch, not a bare assignment: ``patch.types`` IS
+        # ``pyrogram.types``, so assigning leaked this fake Message class into
+        # every later test in the session.
+        monkeypatch.setattr(patch.types, "Message", Msg)
 
         async def main():
             from app.patch import PatchedClient, resolve_listener
@@ -391,7 +394,7 @@ class TestPatchListenerQueue:
 
         asyncio.run(main())
 
-    def test_command_not_swallowed(self):
+    def test_command_not_swallowed(self, monkeypatch):
         import collections
         from types import SimpleNamespace
         import app.patch as patch
@@ -412,7 +415,7 @@ class TestPatchListenerQueue:
             def stop_propagation(self):
                 self._stop = True
 
-        patch.types.Message = Msg
+        monkeypatch.setattr(patch.types, "Message", Msg)
 
         async def main():
             from app.patch import PatchedClient, resolve_listener
@@ -4373,3 +4376,223 @@ class TestSettingsLists:
         )
         # The old code re-read os.environ here; Settings already covers it.
         assert grabber._collect_sessions() == ["session-a"]
+
+
+class TestAuditFixes:
+    """Regression tests for the streaming/auth/bot audit pass."""
+
+    def test_cache_manager_remove_returns_freed_bytes(self):
+        """The TTL sweeper logs the value; it used to be ``None``."""
+        from app.streaming import CacheManager
+
+        mgr = CacheManager(per_video_max=1024 * 1024)
+        cache = mgr.get_cache(1, 2)
+        cache.put(0, b"x" * 100)
+        cache.put(1, b"y" * 200)
+
+        assert mgr.remove(1, 2) == 300
+        # Second removal is a no-op, not an error.
+        assert mgr.remove(1, 2) == 0
+
+    @pytest.mark.asyncio
+    async def test_stream_file_closes_inner_generator_on_early_break(
+        self, monkeypatch
+    ):
+        """Breaking out of stream_file must close parallel_stream_generator.
+
+        ``async for`` does not close its iterator on ``break``, so without
+        ``aclosing`` the worker tasks and _forward_streams entry outlived the
+        HTTP response.
+        """
+        from app import streaming as streaming_mod
+
+        state = {"closed": False, "chunks": 0}
+
+        async def fake_parallel(message, from_bytes, total_bytes_needed, request=None):
+            try:
+                for _ in range(10):
+                    state["chunks"] += 1
+                    yield b"x" * (1024 * 1024)
+            finally:
+                state["closed"] = True
+
+        monkeypatch.setattr(
+            streaming_mod, "parallel_stream_generator", fake_parallel
+        )
+        # Fresh semaphore: the module-level one may be bound to another loop.
+        monkeypatch.setattr(
+            streaming_mod, "_stream_semaphore", asyncio.Semaphore(1)
+        )
+
+        gen = streaming_mod.stream_file(None, object(), 0, 10 * 1024 * 1024 - 1)
+        first = await gen.__anext__()
+        assert len(first) == 1024 * 1024
+        assert state["closed"] is False
+
+        await gen.aclose()
+        assert state["closed"] is True
+        assert state["chunks"] == 1
+
+    @pytest.mark.asyncio
+    async def test_flow_reply_filter_rejects_other_users(self):
+        """Only the user who pressed the button may answer a text flow."""
+        from pyrogram import types
+        from app.bot import _flow_reply_filter
+
+        def make_message(user_id: int, outgoing: bool = False):
+            return types.Message(
+                id=1,
+                chat=types.Chat(id=user_id, type="private"),
+                from_user=types.User(
+                    id=user_id, is_self=False, first_name="x"
+                ),
+                text="hello",
+                outgoing=outgoing,
+            )
+
+        flt = _flow_reply_filter(42)
+        assert await flt(None, make_message(42)) is True
+        assert await flt(None, make_message(7)) is False
+        # The bot's own message must never resolve the flow.
+        assert await flt(None, make_message(42, outgoing=True)) is False
+
+
+class TestGDriveUploadBlockResume:
+    """A 308 means "session alive", not "block stored".
+
+    The old code returned on any 308 and the caller advanced its offset by the
+    full block, so a short write made every later Content-Range start past
+    bytes Drive never received.
+    """
+
+    @staticmethod
+    def _response(status: int, range_header: str | None = None) -> "httpx.Response":
+        import httpx
+
+        headers = {"Range": range_header} if range_header is not None else {}
+        return httpx.Response(
+            status,
+            headers=headers,
+            request=httpx.Request("PUT", "https://upload.example/session"),
+        )
+
+    @staticmethod
+    def _client(responses):
+        class FakeClient:
+            def __init__(self):
+                self._responses = list(responses)
+                self.calls = []
+
+            async def put(self, url, headers=None, content=None):
+                self.calls.append((dict(headers or {}), content))
+                item = self._responses.pop(0)
+                if isinstance(item, Exception):
+                    raise item
+                return item
+
+        return FakeClient()
+
+    @pytest.fixture(autouse=True)
+    def _no_sleep(self, monkeypatch):
+        import app.gdrive as gdrive_mod
+
+        async def _sleep(_delay):
+            return None
+
+        monkeypatch.setattr(gdrive_mod.asyncio, "sleep", _sleep)
+
+    @pytest.mark.asyncio
+    async def test_partial_308_resumes_from_stored_offset(self):
+        from app.gdrive import _upload_block
+
+        block = b"abcdefghij"  # 10 bytes, block covers 0-9 of 100
+        client = self._client(
+            [
+                self._response(308, "bytes=0-3"),  # 4 bytes stored
+                self._response(200),
+            ]
+        )
+        resp = await _upload_block(client, "https://u", block, 0, 9, 100)
+
+        assert resp.status_code == 200
+        assert len(client.calls) == 2
+        first_headers, first_body = client.calls[0]
+        assert first_headers["Content-Range"] == "bytes 0-9/100"
+        assert first_body == block
+        second_headers, second_body = client.calls[1]
+        assert second_headers["Content-Range"] == "bytes 4-9/100"
+        assert second_headers["Content-Length"] == "6"
+        assert second_body == block[4:]
+
+    @pytest.mark.asyncio
+    async def test_full_block_308_returns_without_resending(self):
+        from app.gdrive import _upload_block
+
+        client = self._client([self._response(308, "bytes=0-9")])
+        resp = await _upload_block(client, "https://u", b"a" * 10, 0, 9, 100)
+
+        assert resp.status_code == 308
+        assert len(client.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_308_without_range_gives_up_after_retries(self):
+        from app.gdrive import _upload_block
+
+        client = self._client(
+            [
+                self._response(308),
+                self._response(308),
+                self._response(308),
+                self._response(308),
+            ]
+        )
+        with pytest.raises(RuntimeError, match="no progress"):
+            await _upload_block(client, "https://u", b"a" * 10, 0, 9, 100)
+        assert len(client.calls) == 3
+
+    @pytest.mark.asyncio
+    async def test_unparseable_range_is_fatal(self):
+        from app.gdrive import _upload_block
+
+        client = self._client([self._response(308, "garbage")])
+        with pytest.raises(RuntimeError, match="unparseable"):
+            await _upload_block(client, "https://u", b"a" * 10, 0, 9, 100)
+
+    @pytest.mark.asyncio
+    async def test_401_raises_token_expired(self):
+        from app.gdrive import TokenExpiredError, _upload_block
+
+        client = self._client([self._response(401)])
+        with pytest.raises(TokenExpiredError):
+            await _upload_block(client, "https://u", b"a" * 10, 0, 9, 100)
+
+    @pytest.mark.asyncio
+    async def test_client_error_is_not_retried(self):
+        from app.gdrive import _upload_block
+
+        client = self._client([self._response(400)])
+        with pytest.raises(RuntimeError, match="HTTP 400"):
+            await _upload_block(client, "https://u", b"a" * 10, 0, 9, 100)
+        assert len(client.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_network_error_is_retried_then_succeeds(self):
+        import httpx
+        from app.gdrive import _upload_block
+
+        client = self._client(
+            [httpx.ConnectError("boom"), self._response(200)]
+        )
+        resp = await _upload_block(client, "https://u", b"a" * 10, 0, 9, 100)
+        assert resp.status_code == 200
+        assert len(client.calls) == 2
+
+    @pytest.mark.asyncio
+    async def test_session_losing_bytes_is_fatal(self):
+        """A 308 claiming fewer bytes than already confirmed must not resume."""
+        from app.gdrive import _upload_block
+
+        client = self._client([self._response(308, "bytes=0-1")])
+        # Block starts at 10, so stored=2 < start=10: impossible.
+        with pytest.raises(RuntimeError, match="lost data"):
+            await _upload_block(client, "https://u", b"a" * 10, 10, 19, 100)

@@ -25,6 +25,7 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
 from .config import get_settings
+from .http_headers import parse_byte_range
 from .streaming import _byte_accurate_file_stream, get_client_semaphore
 from .telegram import clients
 from .telegram_errors import is_stale_session
@@ -275,6 +276,22 @@ def _raw_write(fd: int, offset: int, data: bytes) -> None:
         pass
 
 
+def _fsync_and_close(fd: int) -> None:
+    """Durably flush then close, on a worker thread.
+
+    ``os.fsync`` on a multi-GB temp file can block for seconds; doing it on the
+    event loop stalls every active stream.
+    """
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
 async def upload_streaming(
     token_dict: dict,
     msg: "Message",
@@ -408,7 +425,11 @@ async def upload_streaming(
                         async with lock:
                             if dlerr is None:
                                 dlerr = e
-                        break
+                        # Re-raise so gather() aborts and _abort_siblings cancels
+                        # the remaining slots. Storing the error and returning
+                        # normally let every other slot keep downloading a
+                        # multi-GB file that was going to be discarded.
+                        raise
 
         tasks = []
         for i, slot_start in enumerate(slot_starts):
@@ -443,11 +464,9 @@ async def upload_streaming(
             raise
         finally:
             if fd is not None:
-                try:
-                    os.fsync(fd)  # single durable flush after all slots
-                except OSError:
-                    pass
-                os.close(fd)
+                # Off-loop, and shielded: a cancelled upload must not abandon
+                # the descriptor or skip the durable flush.
+                await asyncio.shield(asyncio.to_thread(_fsync_and_close, fd))
 
         if dlerr:
             raise dlerr
@@ -538,6 +557,23 @@ async def upload_streaming(
         return f"https://drive.google.com/file/d/{file_id}/view"
 
 
+def _stored_bytes(resp: httpx.Response, total: int) -> int | None:
+    """Bytes of the file Drive has committed, per a 308 ``Range`` header.
+
+    Google answers a resumable-upload ``308 Resume Incomplete`` with
+    ``Range: bytes=0-N``, meaning ``N + 1`` bytes are durably stored; a 308
+    without the header means zero. Returns ``None`` if the header is present
+    but unparseable.
+    """
+    header = resp.headers.get("Range")
+    if not header:
+        return 0
+    span = parse_byte_range(header, total)
+    if span is None:
+        return None
+    return span[1] + 1
+
+
 async def _upload_block(
     client: httpx.AsyncClient,
     upload_url: str,
@@ -546,29 +582,75 @@ async def _upload_block(
     end: int,
     total: int,
 ) -> httpx.Response:
-    """Upload a single block with retries.
-    Raises TokenExpiredError on HTTP 401 (token revoked mid-upload)."""
+    """Upload one block, resuming inside it after a partial 308.
+
+    A 308 only means "session still alive"; the ``Range`` header says how much
+    Drive actually stored. The old code returned on any 308 and the caller
+    advanced its offset by the whole block, so a short write made every later
+    ``Content-Range`` start past bytes Drive never received — the upload
+    "succeeded" and produced a corrupt file. Now the block is re-sent from the
+    first missing byte and only returns once the whole block is stored.
+
+    Raises TokenExpiredError on HTTP 401 (token revoked mid-upload).
+    """
     last_error = None
-    for attempt in range(3):
+    offset = 0  # bytes of *this block* Drive has confirmed
+    failures = 0
+    for _ in range(10):  # hard cap: progress resets the failure counter
+        if failures >= 3:
+            break
+        chunk_start = start + offset
+        payload = block[offset:]
         try:
             resp = await client.put(
                 upload_url,
                 headers={
-                    "Content-Range": f"bytes {start}-{end}/{total}",
-                    "Content-Length": str(len(block)),
+                    "Content-Range": f"bytes {chunk_start}-{end}/{total}",
+                    "Content-Length": str(len(payload)),
                 },
-                content=block,
+                content=payload,
             )
-            if resp.status_code in (200, 201, 308):
-                return resp
-            if resp.status_code == 401:
-                raise TokenExpiredError(
-                    "Google Drive authorization expired during upload. Send /drive to reconnect."
-                )
-            last_error = f"HTTP {resp.status_code}: {resp.text[:200]}"
-            if resp.status_code < 500 and resp.status_code != 429:
-                break
         except (httpx.TimeoutException, httpx.NetworkError) as e:
             last_error = str(e)
-        await asyncio.sleep(1 * (attempt + 1))
+            failures += 1
+            await asyncio.sleep(1 * failures)
+            continue
+
+        if resp.status_code in (200, 201):
+            return resp
+        if resp.status_code == 401:
+            raise TokenExpiredError(
+                "Google Drive authorization expired during upload. Send /drive to reconnect."
+            )
+        if resp.status_code == 308:
+            stored = _stored_bytes(resp, total)
+            if stored is None:
+                raise RuntimeError(
+                    "Resumable upload returned 308 with an unparseable "
+                    f"Range header: {resp.headers.get('Range')!r}"
+                )
+            if stored > end:
+                return resp  # whole block acknowledged
+            if stored < chunk_start:
+                # Drive cannot drop already-confirmed bytes; treat as fatal
+                # rather than resume from a wrong offset.
+                raise RuntimeError(
+                    f"Resumable upload lost data: session has {stored} bytes, "
+                    f"expected at least {chunk_start}"
+                )
+            if stored > chunk_start:
+                offset = stored - start
+                failures = 0  # real progress — do not burn the retry budget
+                last_error = f"partial 308: {offset}/{len(block)} bytes stored"
+                continue
+            last_error = "308 with no progress"
+            failures += 1
+            await asyncio.sleep(1 * failures)
+            continue
+
+        last_error = f"HTTP {resp.status_code}: {resp.text[:200]}"
+        if resp.status_code < 500 and resp.status_code != 429:
+            break
+        failures += 1
+        await asyncio.sleep(1 * failures)
     raise RuntimeError(f"Upload block failed after 3 retries: {last_error}")

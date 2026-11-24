@@ -73,6 +73,17 @@ def format_duration(seconds: int) -> str:
     return f"{minutes}m {secs}s"
 
 
+def _flow_reply_filter(user_id: int):
+    """Filter for a callback-initiated text flow.
+
+    Only the user who pressed the button may answer, and only with an incoming
+    text message (the bot's own replies must not resolve the flow). Matching on
+    ``chat_id`` alone is not enough: in a group it would accept a reply from any
+    member, letting them rename/move the initiator's files.
+    """
+    return filters.incoming & filters.text & filters.user(user_id)
+
+
 from .utils import sanitize_filename, md_safe  # noqa: F401  # re-export for backward compat
 
 
@@ -981,8 +992,7 @@ async def handle_callback(client, callback: CallbackQuery):
             # Wait for user's reply (60 second timeout)
             reply = await client.wait_for_message(
                 chat_id=callback.message.chat.id,
-                filters=filters.incoming
-                & filters.text,  # bot's OWN replies must never resolve the flow
+                filters=_flow_reply_filter(callback.from_user.id),
                 timeout=60,
             )
 
@@ -1270,8 +1280,7 @@ async def handle_callback(client, callback: CallbackQuery):
         try:
             reply = await client.wait_for_message(
                 chat_id=callback.message.chat.id,
-                filters=filters.incoming
-                & filters.text,  # bot's OWN replies must never resolve the flow
+                filters=_flow_reply_filter(callback.from_user.id),
                 timeout=60,
             )
 
@@ -1431,8 +1440,7 @@ async def handle_callback(client, callback: CallbackQuery):
         try:
             reply = await client.wait_for_message(
                 chat_id=callback.message.chat.id,
-                filters=filters.incoming
-                & filters.text,  # bot's OWN replies must never resolve the flow
+                filters=_flow_reply_filter(callback.from_user.id),
                 timeout=60,
             )
 
@@ -1774,8 +1782,7 @@ async def handle_callback(client, callback: CallbackQuery):
         try:
             reply = await client.wait_for_message(
                 chat_id=callback.message.chat.id,
-                filters=filters.incoming
-                & filters.text,  # bot's OWN replies must never resolve the flow
+                filters=_flow_reply_filter(callback.from_user.id),
                 timeout=60,
             )
 
