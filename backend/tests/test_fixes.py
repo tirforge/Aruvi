@@ -4232,3 +4232,112 @@ class TestTelegramLinks:
         # A second call, in another link form, is served from the cache.
         assert await grabber._resolve_group(client, "t.me/+AbCdEf") == -100123
         assert client.joined == ["https://t.me/+AbCdEf"]
+
+
+class TestSettingsLists:
+    """Comma-separated env vars are typed pydantic-settings fields.
+
+    They used to be ``*_str`` fields plus duplicated ``.split(",")``
+    properties; ``AUTH_USERS``/``ADMIN_IDS`` swallowed a bad entry with
+    ``except ValueError: return []``, which silently locked every admin out.
+    """
+
+    @staticmethod
+    def _settings(monkeypatch, **env):
+        from app.config import Settings
+
+        for key, value in env.items():
+            monkeypatch.setenv(key, value)
+        return Settings(_env_file=None)
+
+    def test_int_lists(self, monkeypatch):
+        s = self._settings(monkeypatch, AUTH_USERS="1, 2,3", ADMIN_IDS="9, 10")
+        assert s.auth_users == [1, 2, 3]
+        assert s.admin_ids == {9, 10}
+
+    def test_empty_values_mean_empty_lists(self, monkeypatch):
+        s = self._settings(
+            monkeypatch,
+            AUTH_USERS="",
+            ADMIN_IDS="   ",
+            TELEGRAM_HELPER_BOT_TOKENS=" , ",
+            TELEGRAM_BOT_SESSION_STRINGS="",
+            GRAB_SESSION_STRINGS="",
+            SUBTITLE_LANGUAGES="",
+        )
+        assert s.auth_users == []
+        assert s.admin_ids == set()
+        assert s.telegram_helper_bot_tokens == []
+        assert s.telegram_bot_session_strings == []
+        assert s.grab_session_strings == []
+        assert s.subtitle_languages == []
+
+    def test_bad_int_in_auth_users_fails_fast(self, monkeypatch):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            self._settings(monkeypatch, ADMIN_IDS="123, not-an-id")
+        with pytest.raises(ValidationError):
+            self._settings(monkeypatch, AUTH_USERS="123, @admin")
+
+    def test_bot_tokens_and_sessions(self, monkeypatch):
+        s = self._settings(
+            monkeypatch,
+            TELEGRAM_HELPER_BOT_TOKENS="helper1, helper2,",
+            TELEGRAM_BOT_SESSION_STRINGS="session-a, session-b",
+        )
+        assert s.telegram_helper_bot_tokens == ["helper1", "helper2"]
+        assert s.telegram_bot_session_strings == ["session-a", "session-b"]
+        assert s.all_bot_tokens == ["123456:TESTTOKEN", "helper1", "helper2"]
+
+    def test_subtitles(self, monkeypatch):
+        s = self._settings(
+            monkeypatch,
+            SUBTITLE_LANGUAGES="en, ta, ",
+            SUBTITLE_PROVIDERS="podnapisi, tvsubtitles",
+        )
+        assert s.subtitle_languages == ["en", "ta"]
+        assert s.subtitle_providers == ["podnapisi", "tvsubtitles"]
+
+    def test_grab_groups_and_positional_bots(self, monkeypatch):
+        s = self._settings(
+            monkeypatch,
+            GRAB_GROUP_USERNAMES="group1, group2",
+            GRAB_BOT_USERNAMES="bot1,,bot3",
+            GRAB_BOT_USERNAME="fallbackbot",
+        )
+        assert s.grab_groups == ["group1", "group2"]
+        # Empty slot = auto-detect that group's bot; extras are trimmed.
+        assert s.grab_group_bots == ["bot1", ""]
+
+        short = self._settings(monkeypatch, GRAB_BOT_USERNAMES="bot1")
+        assert short.grab_group_bots == ["bot1", "fallbackbot"]
+
+        unset = self._settings(monkeypatch, GRAB_BOT_USERNAMES="")
+        assert unset.grab_group_bots == ["fallbackbot", "fallbackbot"]
+
+    def test_grab_groups_fall_back_to_single_setting(self, monkeypatch):
+        s = self._settings(
+            monkeypatch,
+            GRAB_GROUP_USERNAMES="",
+            GRAB_GROUP_USERNAME="onlygroup",
+            GRAB_BOT_USERNAMES="onlybot",
+        )
+        assert s.grab_groups == ["onlygroup"]
+        assert s.grab_group_bots == ["onlybot"]
+
+    def test_collect_sessions_uses_settings_only(self, monkeypatch):
+        from types import SimpleNamespace
+        from app import grabber
+
+        monkeypatch.setattr(
+            grabber,
+            "get_settings",
+            lambda: SimpleNamespace(
+                grab_session_strings=[],
+                grab_session_string="",
+                telegram_bot_session_strings=["session-a"],
+            ),
+        )
+        # The old code re-read os.environ here; Settings already covers it.
+        assert grabber._collect_sessions() == ["session-a"]

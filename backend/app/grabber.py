@@ -7,7 +7,6 @@ Phase 2: grab selected option -> forward, DB record, stream URL
 import asyncio
 import re
 import logging
-import os
 from dataclasses import dataclass, field
 from urllib.parse import SplitResult, parse_qs, urlsplit
 
@@ -242,15 +241,11 @@ def _collect_sessions() -> list[str]:
         # 2. GRAB_SESSION_STRING (single, legacy)
         if not sessions and s.grab_session_string:
             sessions.append(s.grab_session_string)
-        # 3. TELEGRAM_BOT_SESSION_STRINGS
+        # 3. TELEGRAM_BOT_SESSION_STRINGS (Settings also reads the env var)
         if not sessions and s.telegram_bot_session_strings:
             sessions.extend(s.telegram_bot_session_strings)
     except Exception:
         pass
-    # 4. Env var fallback
-    if not sessions:
-        env = os.environ.get("TELEGRAM_BOT_SESSION_STRINGS", "")
-        sessions = [ss.strip() for ss in env.split(",") if ss.strip()]
     if sessions:
         _log.info("grabber: collected %d session string(s)", len(sessions))
     return sessions
