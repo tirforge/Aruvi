@@ -9,6 +9,7 @@ import re
 import logging
 import os
 from dataclasses import dataclass, field
+from urllib.parse import SplitResult, parse_qs, urlsplit
 
 from pyrogram import Client, errors
 from pyrogram.types import (
@@ -31,10 +32,39 @@ _log = logging.getLogger(__name__)
 import time  # noqa: E402
 
 _SIZE_RE = re.compile(r"(\d+\.?\d*)\s*(GB|MB)", re.IGNORECASE)
-_DEEP_LINK_RE = re.compile(r"[?&]start=([^&]+)")
-_DEEP_LINK_BOT_RE = re.compile(
-    r"https?://t\.me/([A-Za-z0-9_]{3,64})\?[^&\s]*start=", re.IGNORECASE
-)
+
+# Telegram's link hosts; schemes and "www." are handled by urlsplit.
+_TME_HOSTS = frozenset({"t.me", "telegram.me", "telegram.dog"})
+
+
+def _as_tme_url(value: str) -> SplitResult | None:
+    """Parse *value* as a Telegram link, or return ``None``.
+
+    Accepts scheme-less links (``t.me/...``), http(s) and the ``telegram.me`` /
+    ``telegram.dog`` aliases. ``urlsplit`` handles upper-case hosts, query
+    strings and fragments; anything on another host (``tg://...``, a YouTube
+    button, plain text) is rejected instead of being cut down to a bogus
+    entity like the old ``split("/")[0]`` did.
+    """
+    if not value:
+        return None
+    candidate = value.strip()
+    if "://" not in candidate:
+        candidate = "https://" + candidate.lstrip("/")
+    try:
+        parts = urlsplit(candidate)
+    except ValueError:
+        return None
+    host = (parts.hostname or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    if host not in _TME_HOSTS:
+        return None
+    return parts
+
+
+def _tme_segments(parts: SplitResult) -> list[str]:
+    return [segment for segment in parts.path.split("/") if segment]
 
 
 class _GrabError(Exception):
@@ -775,16 +805,20 @@ async def _resolve_group(ivy: Client, ref: str) -> int:
         raise ValueError("empty group reference")
     if ref.lstrip("-").isdigit():
         return int(ref)
+    # Normalize URLs (t.me/name, telegram.me/name, t.me/+hash, ...) before the
+    # cache lookup so the same group maps to one entry no matter how it was
+    # written.
+    normalized = _tme_entity_from_url(ref)
+    if normalized:
+        ref = normalized
     cached = _GROUP_CHAT_ID_CACHE.get(ref)
     if cached is not None:
         return cached
     invite_hash = None
     if ref.startswith("+"):
-        invite_hash = ref.lstrip("+")
+        invite_hash = ref[1:]
     elif ref.startswith("joinchat/"):
-        invite_hash = ref.replace("joinchat/", "")
-    elif "t.me/+" in ref:
-        invite_hash = ref.split("t.me/+")[-1].split("?")[0].split("/")[0]
+        invite_hash = ref[len("joinchat/") :]
     if invite_hash:
         invite_url = f"https://t.me/+{invite_hash}"
         try:
@@ -874,24 +908,51 @@ async def _resolve_entity(ivy: Client, ref: str) -> str:
 
 
 _JOIN_KEYWORDS = ["join", "subscribe", "channel", "force", "follow"]
-_NON_JOINABLE_TME = {"share", "telegram", "addtheme", "proxy", "bg", "s"}
+# First path segment of t.me links that is not a joinable entity:
+# /s/<name> = public preview, /c/<id>/<msg> = private post link, etc.
+_NON_JOINABLE_TME = {"share", "telegram", "addtheme", "proxy", "bg", "s", "c"}
 
 
 def _tme_entity_from_url(url: str) -> str:
-    """Normalize a t.me URL to a joinable entity ref (+hash | joinchat/hash | username)."""
-    if not url:
+    """Normalize a Telegram link to a joinable entity ref (+hash | joinchat/hash | username)."""
+    parts = _as_tme_url(url)
+    if parts is None:
         return ""
-    if url.startswith("t.me/"):
-        url = "https://" + url
-    u = url.replace("https://t.me/", "").replace("http://t.me/", "").split("?")[0]
-    if u.startswith("joinchat/"):
-        return "joinchat/" + u[len("joinchat/") :]
-    u = u.split("/")[0]
-    if u.startswith("+"):
-        return "+" + u[1:]
-    if u in _NON_JOINABLE_TME:
+    segments = _tme_segments(parts)
+    if not segments:
         return ""
-    return u
+    first = segments[0]
+    if first == "joinchat":
+        return "joinchat/" + segments[1] if len(segments) > 1 else ""
+    if first.startswith("+"):
+        return first
+    if first.lower() in _NON_JOINABLE_TME:
+        return ""
+    return first
+
+
+def _deep_link_from(value: str) -> tuple[str, str] | None:
+    """Return ``(start_param, bot_username)`` for a Telegram deep link.
+
+    ``start_param`` is percent-decoded: URLs carry the payload encoded, and the
+    old regex forwarded ``%XX`` to ``/start`` verbatim. Non-Telegram strings are
+    still searched for a bare ``?start=``/``&start=`` query, so callback-answer
+    text keeps working.
+    """
+    parts = _as_tme_url(value)
+    if parts is not None:
+        query = parts.query
+        segments = _tme_segments(parts)
+        bot = segments[0] if segments else ""
+    else:
+        query = value.split("?", 1)[1] if "?" in value else value
+        bot = ""
+    params = parse_qs(query, keep_blank_values=False).get("start")
+    if not params:
+        return None
+    if bot.lower() in ("share", "telegram"):
+        bot = ""
+    return params[0], bot
 
 
 def _join_targets_from_message(msg) -> set:
@@ -903,10 +964,7 @@ def _join_targets_from_message(msg) -> set:
     if msg.reply_markup:
         for row in msg.reply_markup.inline_keyboard:
             for btn in row:
-                url = getattr(btn, "url", None) or ""
-                if url.startswith("t.me"):
-                    url = "https://" + url
-                ref = _tme_entity_from_url(url)
+                ref = _tme_entity_from_url(getattr(btn, "url", None) or "")
                 if ref:
                     targets.add(ref)
     return targets
@@ -920,10 +978,7 @@ def _is_join_required(msg) -> bool:
     if msg.reply_markup:
         for row in msg.reply_markup.inline_keyboard:
             for btn in row:
-                url = getattr(btn, "url", None) or ""
-                if url.startswith("t.me"):
-                    url = "https://" + url
-                if _tme_entity_from_url(url):
+                if _tme_entity_from_url(getattr(btn, "url", None) or ""):
                     return True
     return False
 
@@ -1646,13 +1701,10 @@ async def grab_selected(
 
         def _extract_deep_link(url: str) -> bool:
             nonlocal param, file_bot_username
-            m = _DEEP_LINK_RE.search(url)
-            if not m:
+            link = _deep_link_from(url)
+            if link is None:
                 return False
-            param = m.group(1)
-            mb = _DEEP_LINK_BOT_RE.search(url)
-            if mb and mb.group(1).lower() not in ("share", "telegram"):
-                file_bot_username = mb.group(1)
+            param, file_bot_username = link
             return True
 
         if isinstance(clicked, str) and "start=" in clicked:
