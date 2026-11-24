@@ -17,6 +17,7 @@ from .models import User, File
 from .config import get_settings
 from .utils import spawn_background
 from .media_types import classify_file_type
+from .telegram_errors import flood_wait_seconds, is_slowmode
 
 _log = logging.getLogger(__name__)
 
@@ -262,8 +263,8 @@ async def _send_with_retry(client, chat_id, text, max_retries=5, deadline=None):
         try:
             return await client.send_message(chat_id, text)
         except Exception as e:
-            wait_s = _flood_seconds(e)
-            if "SLOWMODE" in str(e) and wait_s:
+            wait_s = flood_wait_seconds(e)
+            if is_slowmode(e) and wait_s:
                 if attempt >= max_retries - 1:
                     raise _SlowError(
                         f"send still slowmode-limited after {max_retries} attempts ({wait_s}s)"
@@ -374,23 +375,8 @@ async def _bot_click_lock(bot_id: int) -> asyncio.Lock:
 
 
 def _flood_seconds(e) -> int | None:
-    """Extract the required wait from a flood/slowmode error, if any.
-
-    Handles the real error shapes: "A wait of 10 seconds is required",
-    "FLOOD_WAIT_10", "SLOWMODE_WAIT_10", "wait_10".
-    """
-    msg = str(e)
-    m = re.search(r"\bwait(?: of)? (\d+) (?:seconds?|s)\b", msg, re.IGNORECASE)
-    if not m:
-        m = re.search(r"(?:FLOOD|SLOWMODE)_WAIT_(\d+)", msg, re.IGNORECASE)
-    if not m:
-        m = re.search(r"\bwait[_\s]*(\d+)\b", msg, re.IGNORECASE)
-    if not m:
-        return None
-    try:
-        return int(m.group(1))
-    except ValueError:
-        return None
+    """Required wait from a flood/slowmode error (typed exceptions first)."""
+    return flood_wait_seconds(e)
 
 
 async def _pace_click(bot_id: int) -> None:

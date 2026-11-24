@@ -27,6 +27,7 @@ from googleapiclient.discovery import build
 from .config import get_settings
 from .streaming import _byte_accurate_file_stream, get_client_semaphore
 from .telegram import clients
+from .telegram_errors import is_stale_session
 
 if TYPE_CHECKING:
     from pyrogram.types import Message
@@ -384,10 +385,7 @@ async def upload_streaming(
                                         last_ts = now
                         break  # success
                     except Exception as e:
-                        if attempt == 0 and (
-                            "AUTH_KEY_UNREGISTERED" in str(e)
-                            or "LIMIT_INVALID" in str(e)
-                        ):
+                        if attempt == 0 and is_stale_session(e):
                             continue  # retry once with fresh session
                         async with lock:
                             if dlerr is None:

@@ -16,6 +16,7 @@ from sqlalchemy import select
 from ..database import get_db
 from ..models import File, User
 from ..http_headers import parse_byte_range as parse_range_header
+from ..telegram_errors import is_auth_bytes_invalid
 from ..auth import (
     get_current_user,
     get_current_user_opt,
@@ -431,7 +432,7 @@ async def _download_thumb(msg, thumb_obj):
     try:
         return await tg_client.download_media(thumb_obj.file_id, in_memory=True)
     except Exception as e:
-        if "AUTH_BYTES_INVALID" not in str(e):
+        if not is_auth_bytes_invalid(e):
             raise
         # stale file reference — re-fetch bypassing cache
         refreshed = await tg_client.get_messages(msg.chat.id, msg.id)
