@@ -5,8 +5,8 @@ JWT authentication utilities.
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 import secrets
-import time
 
+from cachebox import TTLCache
 from jose import jwt, JWTError
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -22,8 +22,17 @@ def _utcnow():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-# telegram_id → monotonic time of last last_active DB write (throttle)
-_last_active_touch: dict[int, float] = {}
+# telegram_id → "last_active was written recently" marker (throttle).
+#
+# A plain dict here leaked: every telegram_id that ever authenticated stayed in
+# it forever, so memory grew with the user table and never shrank. cachebox
+# expires each entry after the throttle window and caps the map, so the entry
+# exists exactly while it is still suppressing writes. Evicting an entry only
+# costs one extra UPDATE on the next request.
+_LAST_ACTIVE_TOUCH_TTL = 300  # 5 minutes
+_last_active_touch: TTLCache = TTLCache(
+    maxsize=10_000, global_ttl=_LAST_ACTIVE_TOUCH_TTL
+)
 
 settings = get_settings()
 security = HTTPBearer(auto_error=False)
@@ -202,11 +211,10 @@ async def get_current_user(
 
     # Track activity for the admin "active today" stat. Throttled to one
     # write per user per 5 minutes — a per-request write would hammer the
-    # users table on every stream chunk/authenticated call.
-    now = time.monotonic()
-    last = _last_active_touch.get(user.id, 0.0)
-    if now - last > 300:
-        _last_active_touch[user.id] = now
+    # users table on every stream chunk/authenticated call. The marker is
+    # inserted *before* the write, so a failing DB write still throttles.
+    if _last_active_touch.get(user.id) is None:
+        _last_active_touch.insert(user.id, True)
         try:
             await db.execute(
                 update(User).where(User.id == user.id).values(last_active=_utcnow())
