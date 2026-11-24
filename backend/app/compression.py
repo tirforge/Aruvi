@@ -52,6 +52,13 @@ def _content_type(start_message) -> str:
     return ""
 
 
+def _has_content_encoding(start_message) -> bool:
+    """True when the app already encoded the body (precompressed static)."""
+    return any(
+        k.lower() == b"content-encoding" for k, _v in start_message.get("headers", [])
+    )
+
+
 def _pick_encoding(accept: bytes) -> bytes | None:
     """Choose br/gzip via Werkzeug's q-value + wildcard aware parser."""
     codings = ("br", "gzip") if brotli is not None else ("gzip",)
@@ -93,9 +100,16 @@ class SelectiveCompressionMiddleware:
         async def send_wrapper(message):
             if message["type"] == "http.response.start":
                 state["start"] = message
+                # Never re-encode a body the app already encoded: main.serve_spa
+                # serves <asset>.br/.gz siblings with `Content-Encoding: br|gzip`
+                # at status 200 and a compressible media type, so without this
+                # guard small precompressed files were compressed a second time
+                # and carried two `content-encoding` headers (browsers then fail
+                # with ERR_CONTENT_DECODING_FAILED).
                 state["compress"] = (
                     message["status"] == 200
                     and _content_type(message) in COMPRESSIBLE_TYPES
+                    and not _has_content_encoding(message)
                 )
                 return
 

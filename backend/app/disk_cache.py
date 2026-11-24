@@ -462,6 +462,13 @@ class DiskChunkCache:
         freed = 0
         with self._lock:
             while self._total_bytes > DISK_CACHE_MAX_BYTES:
+                # Every eviction step must strictly reduce _total_bytes. LMDB
+                # errors make _evict_video/_delete_chunks return 0 *without*
+                # changing the counter, so looping on the byte total alone
+                # would spin forever while holding the cache lock — blocking
+                # every get/put/sweep in the process. Break when a step makes
+                # no progress instead.
+                before = self._total_bytes
                 candidates = [vk for vk, n in self._video_bytes.items() if n > 0]
                 if not candidates:
                     break
@@ -469,26 +476,34 @@ class DiskChunkCache:
                 oldest = candidates[0]
                 if len(candidates) > 1:
                     freed += self._evict_video(*oldest)
-                    continue
-                # A single video larger than the whole cache: drop its oldest
-                # chunks, never the newest one that was just written.
-                prefix = _chunk_prefix(*oldest)
-                over = self._total_bytes - DISK_CACHE_MAX_BYTES
-                cached = sorted(
-                    (int(ck[len(prefix) :]), ck)
-                    for ck in self._chunk_sizes
-                    if ck.startswith(prefix)
-                )
-                victims: list[tuple[str, int]] = []
-                for _, ck in cached:
-                    if over <= 0:
+                else:
+                    # A single video larger than the whole cache: drop its oldest
+                    # chunks, never the newest one that was just written.
+                    prefix = _chunk_prefix(*oldest)
+                    over = self._total_bytes - DISK_CACHE_MAX_BYTES
+                    cached = sorted(
+                        (int(ck[len(prefix) :]), ck)
+                        for ck in self._chunk_sizes
+                        if ck.startswith(prefix)
+                    )
+                    victims: list[tuple[str, int]] = []
+                    for _, ck in cached:
+                        if over <= 0:
+                            break
+                        size = self._chunk_sizes.get(ck, 0)
+                        victims.append((ck, size))
+                        over -= size
+                    if not victims:
                         break
-                    size = self._chunk_sizes.get(ck, 0)
-                    victims.append((ck, size))
-                    over -= size
-                if not victims:
+                    freed += self._delete_chunks(victims)
+                if self._total_bytes >= before:
+                    logger.warning(
+                        "Disk cache: eviction made no progress (%d > %d bytes) — "
+                        "stopping until the next sweep",
+                        self._total_bytes,
+                        DISK_CACHE_MAX_BYTES,
+                    )
                     break
-                freed += self._delete_chunks(victims)
         return freed
 
     def _evict_video(self, chat_id: int, message_id: int) -> int:

@@ -274,6 +274,20 @@ async def update_folder(
     )
 
 
+def _folder_files_query(user_id: int, folder_ids: list[int]):
+    """Files inside ``folder_ids`` that belong to ``user_id``.
+
+    The DELETE below has always been user-scoped; the SELECT that feeds the
+    Telegram message-id cleanup was not, so corrupted cross-user linkage could
+    delete another user's channel copies.
+    """
+    return (
+        select(File)
+        .where(File.folder_id.in_(folder_ids), File.user_id == user_id)
+        .options(defer(File.thumbnail_data))
+    )
+
+
 @router.delete("/{folder_id}")
 async def delete_folder(
     folder_id: int,
@@ -347,11 +361,7 @@ async def delete_folder(
             )
     else:
         if all_folder_ids:
-            file_query = (
-                select(File)
-                .where(File.folder_id.in_(all_folder_ids))
-                .options(defer(File.thumbnail_data))
-            )
+            file_query = _folder_files_query(current_user.id, all_folder_ids)
             file_result = await db.execute(file_query)
             files_to_delete = file_result.scalars().all()
 

@@ -122,6 +122,42 @@ def _apply_rls_lockdown(sync_conn):
             )
 
 
+def _migration_column_default(col) -> str:
+    """SQL literal for a NOT NULL column being added by the auto-migrator.
+
+    Prefers the model's server default, then its Python default. A Python
+    callable (``default=_utcnow``) cannot be inlined into DDL — the old code
+    interpolated it as ``DEFAULT <function utcnow at 0x...>``, which both
+    SQLite and Postgres reject, crashing the whole boot during migration — so
+    it falls through to a type-based literal.
+    """
+    if col.server_default is not None:
+        arg = getattr(col.server_default, "arg", None)
+        if arg is not None:
+            return str(arg)
+    if col.default is not None:
+        arg = col.default.arg
+        if isinstance(arg, bool):
+            return "TRUE" if arg else "FALSE"
+        if isinstance(arg, (int, float)):
+            return str(arg)
+        if isinstance(arg, str):
+            return "'" + arg.replace("'", "''") + "'"
+
+    type_name = col.type.__class__.__name__.upper()
+    if "INT" in type_name:
+        return "0"
+    if "BOOL" in type_name:
+        return "FALSE"
+    if "DATETIME" in type_name or "TIMESTAMP" in type_name:
+        return "CURRENT_TIMESTAMP"
+    if "TEXT" in type_name or "VARCHAR" in type_name or "STRING" in type_name:
+        return "''"
+    if "FLOAT" in type_name or "NUMERIC" in type_name or "DECIMAL" in type_name:
+        return "0"
+    return "NULL"
+
+
 async def init_db():
     """Create all tables and auto-migrate missing columns."""
     async with engine.begin() as conn:
@@ -142,38 +178,9 @@ async def init_db():
                         ]
                         if not col.nullable:
                             sql_parts.append("NOT NULL")
-                            # Use server_default or Python default for existing rows
-                            default = None
-                            if col.server_default is not None:
-                                default = col.server_default.arg
-                            if default is None and col.default is not None:
-                                default = col.default.arg
-                            if default is None:
-                                # Type-based fallback to prevent migration crash
-                                type_name = col.type.__class__.__name__.upper()
-                                if "INT" in type_name:
-                                    default = "0"
-                                elif "BOOL" in type_name:
-                                    default = "FALSE"
-                                elif (
-                                    "DATETIME" in type_name or "TIMESTAMP" in type_name
-                                ):
-                                    default = "CURRENT_TIMESTAMP"
-                                elif (
-                                    "TEXT" in type_name
-                                    or "VARCHAR" in type_name
-                                    or "STRING" in type_name
-                                ):
-                                    default = "''"
-                                elif (
-                                    "FLOAT" in type_name
-                                    or "NUMERIC" in type_name
-                                    or "DECIMAL" in type_name
-                                ):
-                                    default = "0"
-                                else:
-                                    default = "NULL"
-                            sql_parts.append(f"DEFAULT {default}")
+                            sql_parts.append(
+                                f"DEFAULT {_migration_column_default(col)}"
+                            )
                         sql = " ".join(sql_parts)
                         sync_conn.exec_driver_sql(sql)
                         logger.info(
