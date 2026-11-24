@@ -2807,6 +2807,38 @@ class TestFastCompression:
         assert b"content-encoding" not in dict(start["headers"])
         assert end["body"] == body
 
+    @pytest.mark.parametrize(
+        "header, expected",
+        [
+            (b"application/json", "application/json"),
+            (b"text/html; charset=UTF-8", "text/html"),
+            (b'Application/JSON; boundary="a;b"', "application/json"),
+            (b"  text/plain  ", "text/plain"),
+            (b"", ""),
+        ],
+    )
+    def test_content_type_uses_werkzeug(self, header, expected):
+        from app.compression import _content_type
+
+        assert _content_type({"headers": [(b"Content-Type", header)]}) == expected
+
+    def test_content_type_without_header(self):
+        from app.compression import _content_type
+
+        assert _content_type({"headers": []}) == ""
+
+    def test_parameterised_json_is_still_compressed(self):
+        from app.compression import SelectiveCompressionMiddleware
+
+        body = b'{"files": "' + b"x" * 5000 + b'"}'
+        start, _ = self._run(
+            SelectiveCompressionMiddleware,
+            content_type='application/json; charset="utf-8; v=1"',
+            body=body,
+            accept_encoding=b"br",
+        )
+        assert dict(start["headers"])[b"content-encoding"] == b"br"
+
 
 class TestNativeCryptoBackend:
     """MTProto must run on the native (Rust/C) AES backend.

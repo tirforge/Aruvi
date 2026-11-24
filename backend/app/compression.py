@@ -20,6 +20,8 @@ try:
 except ImportError:  # pragma: no cover - dependency is in requirements.txt
     brotli = None
 
+from werkzeug.http import parse_options_header
+
 from .http_headers import pick_content_encoding
 
 # Only these get compressed — never media, never octet-stream.
@@ -43,7 +45,10 @@ _GZIP_LEVEL = 6
 def _content_type(start_message) -> str:
     for k, v in start_message.get("headers", []):
         if k.lower() == b"content-type":
-            return v.decode("latin-1").split(";")[0].strip().lower()
+            # Werkzeug owns parameter parsing (quoted values, RFC 2231), so a
+            # parameter containing ";" cannot leak into the media type.
+            value, _options = parse_options_header(v.decode("latin-1"))
+            return value.strip().lower()
     return ""
 
 
