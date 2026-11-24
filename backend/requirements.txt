@@ -76,6 +76,13 @@ google-auth-httplib2>=0.4.4
 # Subtitles
 subliminal>=2.7.1
 
+# Subtitle/text decoding (Mozilla's pure-Python detector; no compiled
+# extension, so it installs anywhere). Provider files are not always UTF-8 -
+# Windows-1252/1251 uploads previously decoded to U+FFFD mojibake.
+# Capped below 6: chardet 7.x regressed Windows-1251 detection to MacCyrillic
+# (confidence 0.34) on short Cyrillic text, while 5.2.0 detects it at 0.99.
+chardet>=5.2.0,<6
+
 
 
 

@@ -2639,3 +2639,79 @@ class TestOrjsonResponses:
         # orjson emits compact UTF-8; the stdlib encoder separates items with
         # ", " (health has two keys, so the difference is visible).
         assert b'", "' not in resp.content
+
+
+class TestSubtitleTextDecoding:
+    """Provider subtitle bytes are not guaranteed to be UTF-8.
+
+    Decoding them with errors="replace" turned every accent in a Windows-1252
+    file into U+FFFD, so the detector path must stay wired in.
+    """
+
+    def test_empty_input(self):
+        from app.text_decode import decode_text
+
+        assert decode_text(b"") == ""
+
+    def test_utf8_passthrough(self):
+        from app.text_decode import decode_text
+
+        text = "1\n00:00:01,000 --> 00:00:02,000\ncafé déjà vu\n"
+        assert decode_text(text.encode("utf-8")) == text
+
+    def test_utf8_bom_is_stripped(self):
+        from app.text_decode import decode_text
+
+        assert decode_text(b"\xef\xbb\xbfWEBVTT\n\nhi") == "WEBVTT\n\nhi"
+
+    def test_windows1252_file_is_not_mojibake(self):
+        from app.text_decode import decode_text
+
+        # Varied prose, as in a real subtitle file: detectors need signal.
+        text = (
+            "1\n00:00:01,000 --> 00:00:04,000\n"
+            "Bonjour, comment allez-vous ? Je ne savais pas que vous étiez là.\n\n"
+            "2\n00:00:05,000 --> 00:00:08,500\n"
+            "Écoutez, il faut qu'on parle de ce qui s'est passé hier soir.\n\n"
+            "3\n00:00:09,000 --> 00:00:12,000\n"
+            "« Ce n'est pas une bonne idée », répondit-elle en soupirant.\n\n"
+            "4\n00:00:13,000 --> 00:00:16,000\n"
+            "Le café était froid, mais la conversation était passionnante.\n\n"
+            "5\n00:00:17,000 --> 00:00:20,000\n"
+            "Nous devrions peut-être rentrer avant la nuit — il fait déjà sombre.\n"
+        )
+        decoded = decode_text(text.encode("cp1252"))
+        assert "\ufffd" not in decoded
+        assert decoded == text
+        assert "“" not in decoded  # the file uses « », not curly quotes
+
+    def test_windows1251_cyrillic_file(self):
+        from app.text_decode import decode_text
+
+        text = (
+            "1\n00:00:01,000 --> 00:00:04,000\n"
+            "Привет, как дела? Я не знал, что ты здесь.\n\n"
+            "2\n00:00:05,000 --> 00:00:08,000\n"
+            "Слушай, нам нужно поговорить о вчерашнем вечере.\n"
+        )
+        assert decode_text(text.encode("cp1251")) == text
+
+    def test_short_latin1_line_does_not_raise(self):
+        from app.text_decode import decode_text
+
+        assert decode_text("naïve résumé".encode("latin-1")) == "naïve résumé"
+
+    def test_undecodable_bytes_never_raise(self):
+        from app.text_decode import decode_text
+
+        text = decode_text(bytes(range(128, 256)))
+        assert isinstance(text, str) and text
+
+    def test_subtitles_router_uses_the_detector(self):
+        from pathlib import Path
+
+        source = (
+            Path(__file__).resolve().parents[1] / "app" / "routers" / "subtitles.py"
+        ).read_text(encoding="utf-8")
+        assert "decode_text(content)" in source
+        assert 'errors="replace"' not in source
