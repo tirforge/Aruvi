@@ -4,7 +4,7 @@
 kurigram[fast]>=2.2.26
 
 # Web Framework
-fastapi>=0.109.0
+fastapi>=0.143.0
 uvicorn[standard]>=0.53.0
 
 # Fast gzip / brotli. brotli is the reference C library (portable: x86_64,
