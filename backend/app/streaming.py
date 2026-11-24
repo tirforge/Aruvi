@@ -16,6 +16,8 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import AsyncGenerator
 from contextlib import asynccontextmanager
 
+from cachebox import TTLCache
+
 try:
     from cachebox import LRUCache
 except ImportError:  # pragma: no cover - dependency is in requirements.txt
@@ -991,49 +993,55 @@ async def _byte_accurate_file_stream(
 
 # ── Prefetch ───────────────────────────────────────────────────────────────────
 
-# Message cache: fetching the same (chat, message) via RPC repeatedly — once in
-# the route, once per worker, once per prefetch batch — triggers Telegram
-# FLOOD_WAIT on getMessages under load (e.g. concurrent seeks). File references
-# are per-client and valid for ~1h, so a short per-client TTL cache is safe.
-_msg_cache: dict[tuple[int, int, int], tuple[float, object]] = {}
+# Everything cached for one (bot, chat, message): the Message itself plus the
+# force-refresh bookkeeping. cachebox owns the whole record, so the lock,
+# throttle stamp and poison flag can never outlive or lag behind the message
+# they belong to — the previous version kept four containers that had to be
+# pruned in lockstep by hand, and a key that fell out of one but not the others
+# either leaked or served a dead file reference.
+#
+# Entries expire after _MSG_CACHE_TTL (matching the old per-entry age check) and
+# the cap bounds memory: ~4k Message objects, tens of MB worst case. No sweep
+# loop — cachebox expires lazily on access and evicts the oldest on insert.
+#
+# Fetching the same (chat, message) repeatedly — once in the route, once per
+# worker, once per prefetch batch — triggers Telegram FLOOD_WAIT on getMessages
+# under load (e.g. concurrent seeks). File references are per-client and valid
+# for ~1h, so a short per-client cache is safe.
 _MSG_CACHE_TTL = 60.0
-
-# Force-refresh guards. FILE_REFERENCE_EXPIRED can hit several batches of the
-# same stream at once; without serialization each would issue its own
-# get_messages RPC and re-fetch the batch — a flood-wait / refresh storm.
-# A per-key lock coalesces concurrent force refetches, and the min-interval
-# throttle stops repeat force refetches of the same (bot, chat, message) from
-# hammering Telegram (a fresh reference is valid ~1h, so one per window is enough).
-_msg_refresh_locks: dict[tuple[int, int, int], asyncio.Lock] = {}
-_msg_last_force: dict[tuple[int, int, int], float] = {}
-_msg_poisoned: set[tuple[int, int, int]] = set()
-_MSG_REFRESH_MIN_INTERVAL = 15.0
-
-# The four containers below grow one key per (bot, chat, message) ever streamed;
-# without a cap they leak (telegram.py evicts its own _msg_cache; this one did
-# not). Bound them by count, evicting the oldest entries and dropping the
-# matching lock/last-force keys so all three stay in sync. Worst case ~4k
-# Message objects (tens of MB) — far better than unbounded growth.
 _MSG_CACHE_MAX = 4096
+_MSG_REFRESH_MIN_INTERVAL = 15.0
+# FILE_REFERENCE_EXPIRED can hit several batches of the same stream at once;
+# without serialization each would issue its own get_messages RPC and re-fetch
+# the batch — a flood-wait / refresh storm. The per-entry lock coalesces
+# concurrent force refetches; the min-interval throttle stops repeat force
+# refetches of the same (bot, chat, message) from hammering Telegram (a fresh
+# reference is valid ~1h, so one per window is enough).
+_msg_cache: TTLCache = TTLCache(maxsize=_MSG_CACHE_MAX, global_ttl=_MSG_CACHE_TTL)
 
 
-def _prune_msg_state():
-    if len(_msg_cache) <= _MSG_CACHE_MAX:
-        return
-    by_age = sorted(_msg_cache.items(), key=lambda x: x[1][0])
-    to_remove = len(_msg_cache) - int(_MSG_CACHE_MAX * 0.8)
-    for key, _ in by_age[:to_remove]:
-        _msg_cache.pop(key, None)
-        _msg_refresh_locks.pop(key, None)
-        _msg_last_force.pop(key, None)
-        _msg_poisoned.discard(key)
+class _MsgEntry:
+    """Cached Message and its refresh state for one (bot, chat, message)."""
+
+    __slots__ = ("msg", "fetched", "lock", "last_force", "poisoned")
+
+    def __init__(self) -> None:
+        self.msg = None
+        # Distinguishes "never fetched" from "fetched, Telegram returned None"
+        # — a missing message is cached for the TTL exactly like the old code
+        # did, instead of being re-requested on every chunk batch.
+        self.fetched = False
+        self.lock = asyncio.Lock()
+        self.last_force = 0.0
+        self.poisoned = False
 
 
-def _get_msg_refresh_lock(key: tuple[int, int, int]) -> asyncio.Lock:
-    lock = _msg_refresh_locks.get(key)
-    if lock is None:
-        lock = _msg_refresh_locks[key] = asyncio.Lock()
-    return lock
+def _msg_entry(key: tuple[int, int, int]) -> "_MsgEntry":
+    """Cache entry for *key*, creating it (with its lock) when absent/expired."""
+    entry = _msg_cache.get(key)
+    if entry is None:
+        entry = _msg_cache.setdefault(key, _MsgEntry())
+    return entry
 
 
 def _mark_msg_poisoned(client, chat_id: int, message_id: int) -> None:
@@ -1041,7 +1049,7 @@ def _mark_msg_poisoned(client, chat_id: int, message_id: int) -> None:
     A subsequent throttled force-refetch will then actually hit Telegram for a
     fresh reference instead of returning the dead cached Message."""
     key = (getattr(client, "pool_index", 0), chat_id, message_id)
-    _msg_poisoned.add(key)
+    _msg_entry(key).poisoned = True
 
 
 async def _fetch_message(client, chat_id: int, message_id: int, force: bool = False):
@@ -1050,29 +1058,25 @@ async def _fetch_message(client, chat_id: int, message_id: int, force: bool = Fa
     Concurrent force refetches of the same (bot, chat, message) are coalesced
     behind a per-key lock and throttled to one per _MSG_REFRESH_MIN_INTERVAL."""
     key = (getattr(client, "pool_index", 0), chat_id, message_id)
-    now = time.monotonic()
+    entry = _msg_entry(key)
     if force:
-        async with _get_msg_refresh_lock(key):
-            if now - _msg_last_force.get(key, 0) < _MSG_REFRESH_MIN_INTERVAL:
-                entry = _msg_cache.get(key)
-                # If the cached Message is the dead one that produced the
-                # FILE_REFERENCE error, a throttled return would hand workers
-                # the same broken reference forever. Refresh for real instead.
-                if entry and key not in _msg_poisoned:
-                    return entry[1]
-            _msg_last_force[key] = now
-            _msg_poisoned.discard(key)
-            msg = await client.get_messages(chat_id, message_id)
-            _msg_cache[key] = (time.monotonic(), msg)
-            _prune_msg_state()
-            return msg
-    entry = _msg_cache.get(key)
-    if entry and now - entry[0] < _MSG_CACHE_TTL:
-        return entry[1]
-    msg = await client.get_messages(chat_id, message_id)
-    _msg_cache[key] = (time.monotonic(), msg)
-    _prune_msg_state()
-    return msg
+        async with entry.lock:
+            now = time.monotonic()
+            if now - entry.last_force < _MSG_REFRESH_MIN_INTERVAL:
+                # Throttled: reuse the cached Message unless it is the dead one
+                # that produced the FILE_REFERENCE error.
+                if entry.fetched and not entry.poisoned:
+                    return entry.msg
+            entry.last_force = now
+            entry.poisoned = False
+            entry.msg = await client.get_messages(chat_id, message_id)
+            entry.fetched = True
+            return entry.msg
+    if entry.fetched:
+        return entry.msg
+    entry.msg = await client.get_messages(chat_id, message_id)
+    entry.fetched = True
+    return entry.msg
 
 
 async def prefetch_first_batch(client, message, from_bytes: int = 0):
