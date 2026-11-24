@@ -30,6 +30,7 @@ from .status import get_status, attach_ring_handler, clear_logs, maybe_oom_clear
 from .streaming import _evict_idle_ram_caches
 from .utils import bearer_token_matches
 from .compression import SelectiveCompressionMiddleware
+from .json_response import OrjsonResponse
 from .static_allowlist import build_static_allowlist
 
 from .routers import (
@@ -160,6 +161,10 @@ app = FastAPI(
     description="Stream files from Telegram to Android TV and Web",
     version="1.0.0",
     lifespan=lifespan,
+    # orjson (Rust) encodes every API payload: ~6x faster than json.dumps on a
+    # 400-file /api/files response (scripts/bench_json.py) and ~8% smaller,
+    # with wheels for x86_64 + aarch64.
+    default_response_class=OrjsonResponse,
 )
 
 # Add rate limiter to app state

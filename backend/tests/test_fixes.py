@@ -2604,3 +2604,38 @@ class TestNativeCryptoBackend:
             crypto_backend.log_backend(logging.getLogger("crypto-test"), seen.append)
         assert crypto_backend.is_native()
         assert seen == ["MTProto crypto backend: kuricrypt (native)"]
+
+
+class TestOrjsonResponses:
+    """API payloads are encoded by orjson (Rust), not stdlib ``json``.
+
+    FastAPI silently uses ``json.dumps`` unless the app sets
+    ``default_response_class``; on a 400-file /api/files payload that is
+    ~6x slower (scripts/bench_json.py), so the wiring must be asserted.
+    """
+
+    def test_default_response_class_is_orjson(self):
+        from app.json_response import OrjsonResponse
+        from app.main import app
+
+        assert app.router.default_response_class is OrjsonResponse
+
+    def test_render_is_compact_utf8(self):
+        from app.json_response import OrjsonResponse
+
+        body = OrjsonResponse({"a": 1, "b": "é"}).body
+        assert body == '{"a":1,"b":"é"}'.encode("utf-8")
+
+    def test_health_is_served_as_orjson(self):
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        with TestClient(app) as client:
+            resp = client.get("/health")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("application/json")
+        assert resp.json()["status"] == "healthy"
+        # orjson emits compact UTF-8; the stdlib encoder separates items with
+        # ", " (health has two keys, so the difference is visible).
+        assert b'", "' not in resp.content
