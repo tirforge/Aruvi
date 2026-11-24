@@ -1579,9 +1579,16 @@ class TestParseMemEnv:
             ("1.5G", int(1.5 * 1024**3)),
             (" 2 gib ", 2 * 1024**3),
             ("1024", 1024),
+            ("2TB", 2 * 1024**4),  # old suffix loop only knew G/M → 16 GiB
+            ("1.5 GiB", int(1.5 * 1024**3)),  # space between number and unit
             ("", 16 * 1024**3),
             ("garbage", 16 * 1024**3),
             ("10XB", 16 * 1024**3),
+            # Never a negative or zero total: get_ram() divides by it.
+            ("-5M", 16 * 1024**3),
+            ("0", 16 * 1024**3),
+            ("0G", 16 * 1024**3),
+            ("1,4GB", 16 * 1024**3),
             (None, 16 * 1024**3),
         ],
     )
@@ -1589,6 +1596,40 @@ class TestParseMemEnv:
         from app.status import _parse_mem_env
 
         assert _parse_mem_env(raw) == expected
+
+
+class TestMemEnvParsingDelegation:
+    """MEMORY is parsed by humanfriendly, and a bad value warns exactly once."""
+
+    def test_invalid_env_warns_once(self, monkeypatch):
+        from app import status
+
+        calls = []
+        monkeypatch.setattr(status, "_mem_env_warned", False)
+        monkeypatch.setattr(
+            status.logger, "warning", lambda *a, **k: calls.append(a)
+        )
+        try:
+            assert status._parse_mem_env("nonsense") == status._FALLBACK_MEM_BYTES
+            assert status._parse_mem_env("nonsense") == status._FALLBACK_MEM_BYTES
+            assert len(calls) == 1
+        finally:
+            monkeypatch.setattr(status, "_mem_env_warned", False)
+
+    def test_get_ram_survives_zero_memory_env(self, monkeypatch):
+        from app import status
+
+        monkeypatch.setattr(status, "_discover_cgroup_memory", lambda: (None, None))
+        monkeypatch.setattr(status, "_sum_proc_rss", lambda: 0)
+        monkeypatch.setattr(status, "_mem_env_warned", False)
+        monkeypatch.setenv("MEMORY", "0")
+        try:
+            ram = status.get_ram()
+        finally:
+            monkeypatch.setattr(status, "_mem_env_warned", False)
+        # MEMORY=0 used to reach 100.0 * used / total -> ZeroDivisionError.
+        assert ram["total_gb"] == 16.0
+        assert ram["percent"] == 0.0
 
 
 _NO_SYMLINKS = sys.platform == "win32"  # needs Developer Mode / admin rights
