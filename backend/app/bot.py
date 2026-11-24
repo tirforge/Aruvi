@@ -73,6 +73,26 @@ def format_duration(seconds: int) -> str:
     return f"{minutes}m {secs}s"
 
 
+def _folder_name(value: str | None) -> str:
+    """Normalize a user-supplied folder name to the column limit (255).
+
+    ``/newfolder`` and both callback flows already truncated; the rename flow
+    did not, so a long pasted name raised StringDataRightTruncation on
+    Postgres and the rename silently failed.
+    """
+    return (value or "").strip()[:255]
+
+
+def _folder_file_filter(folder):
+    """WHERE clauses for "files inside *folder*, owned by its owner".
+
+    The bot moved files with a folder-only filter while every API path also
+    filters on ``user_id``; a corrupted cross-user ``folder_id`` would move
+    (or count) another user's files.
+    """
+    return (File.folder_id == folder.id, File.user_id == folder.user_id)
+
+
 def _flow_reply_filter(user_id: int):
     """Filter for a callback-initiated text flow.
 
@@ -464,7 +484,7 @@ async def newfolder_command(client, message: Message):
         await message.reply("Usage: /newfolder <folder_name>")
         return
 
-    folder_name = " ".join(message.command[1:]).strip()[:255]
+    folder_name = _folder_name(" ".join(message.command[1:]))
 
     async with async_session() as db:
         # Get user
@@ -1000,7 +1020,7 @@ async def handle_callback(client, callback: CallbackQuery):
                 await reply.reply("❌ Folder creation cancelled.")
                 return
 
-            folder_name = (reply.text or "").strip()[:255]
+            folder_name = _folder_name(reply.text)
 
             if not folder_name:
                 await reply.reply("❌ Invalid folder name.")
@@ -1448,7 +1468,7 @@ async def handle_callback(client, callback: CallbackQuery):
                 await reply.reply("❌ Rename cancelled.")
                 return
 
-            new_name = reply.text.strip() if reply.text else None
+            new_name = _folder_name(reply.text)
 
             if not new_name:
                 await reply.reply("❌ Invalid name.")
@@ -1505,7 +1525,7 @@ async def handle_callback(client, callback: CallbackQuery):
 
             # Check if folder has files
             files_count = await db.execute(
-                select(func.count()).where(File.folder_id == folder_id)
+                select(func.count()).where(*_folder_file_filter(folder))
             )
             count = files_count.scalar() or 0
 
@@ -1554,11 +1574,14 @@ async def handle_callback(client, callback: CallbackQuery):
 
             folder_name = folder.name
 
-            # Move files to root first
+            # Move files to root first (scoped to the folder's owner — the
+            # Telegram bot has no auth layer of its own here).
             from sqlalchemy import update
 
             await db.execute(
-                update(File).where(File.folder_id == folder_id).values(folder_id=None)
+                update(File)
+                .where(*_folder_file_filter(folder))
+                .values(folder_id=None)
             )
 
             # Delete folder
@@ -1790,7 +1813,7 @@ async def handle_callback(client, callback: CallbackQuery):
                 await reply.reply("❌ Cancelled.")
                 return
 
-            folder_name = (reply.text or "").strip()[:255]
+            folder_name = _folder_name(reply.text)
             if not folder_name:
                 await reply.reply("❌ Invalid folder name.")
                 return
@@ -2177,7 +2200,7 @@ async def deletefolder_command(client, message: Message):
         await message.reply("Usage: /deletefolder <folder_name>")
         return
 
-    folder_name = " ".join(message.command[1:]).strip()[:255]
+    folder_name = _folder_name(" ".join(message.command[1:]))
 
     async with async_session() as db:
         # Get user
@@ -2190,11 +2213,25 @@ async def deletefolder_command(client, message: Message):
             await message.reply("Please use /start first.")
             return
 
-        # Find folder
+        # Find folder. The web UI allows nested folders (and therefore the same
+        # name at different levels); ``scalar_one_or_none`` used to raise
+        # MultipleResultsFound on those, leaving the command unanswered.
         result = await db.execute(
-            select(Folder).where(Folder.user_id == user.id, Folder.name == folder_name)
+            select(Folder)
+            .where(Folder.user_id == user.id, Folder.name == folder_name)
+            .order_by(Folder.id)
+            .limit(2)
         )
-        folder = result.scalar_one_or_none()
+        matches = result.scalars().all()
+
+    if len(matches) > 1:
+        await message.reply(
+            f"❌ Multiple folders are named **{folder_name}**.\n"
+            "Open /folders and delete the right one from there."
+        )
+        return
+
+    folder = matches[0] if matches else None
 
     if not folder:
         await message.reply(f"❌ Folder **{folder_name}** not found.")
