@@ -33,6 +33,7 @@ from .config import get_settings
 from .auth import create_access_token, create_download_token
 from .media_types import classify_file_type
 from . import gdrive as gdrive_mod
+from . import login_events
 
 settings = get_settings()
 
@@ -224,6 +225,10 @@ async def start_command(client, message: Message):
             )
             if result.rowcount == 1:
                 await db.commit()
+                # Wake the device's long-poll immediately — it is waiting on
+                # this code and the database is ~400 ms away, so making it
+                # re-poll would add seconds to the login.
+                login_events.signal(code_input)
                 await message.reply(
                     "✅ **Success!**\n"
                     "You have successfully logged in on your device.\n"
@@ -601,6 +606,8 @@ async def login_command(client, message: Message):
             )
             if result.rowcount == 1:
                 await db.commit()
+                # Wake the device's long-poll immediately (see login_events).
+                login_events.signal(code_input)
                 await message.reply(
                     "✅ **Success!**\n"
                     "You have successfully logged in on your TV.\n"

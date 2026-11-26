@@ -13,6 +13,7 @@ from sqlalchemy import select, delete, update
 
 from ..database import get_db
 from ..models import User, LoginCode, RefreshSession
+from .. import login_events
 from ..rate_limit import limiter
 from ..schemas import (
     Token,
@@ -282,16 +283,32 @@ async def verify_login_code(
     2s-interval polling.
     """
     deadline = time.monotonic() + min(max(code_request.wait or 0, 0), 10)
-    while True:
-        result = await _verify_login_code_once(request, code_request, db)
-        if result is not None:
-            return result
-        if time.monotonic() >= deadline:
-            return _pending_response()
-        # Release the pooled connection while sleeping — a held-open
-        # transaction per waiting TV would starve the pool (size 5).
-        await db.rollback()
-        await asyncio.sleep(0.3)
+    code = code_request.code.strip().upper()
+    wake = login_events.register(code)
+    try:
+        while True:
+            result = await _verify_login_code_once(request, code_request, db)
+            if result is not None:
+                return result
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return _pending_response()
+            if wake.is_set():
+                # The bot signalled this code but our check did not consume it,
+                # so another poller of the same code won the claim. Return now
+                # instead of spinning on an event that is already set.
+                return _pending_response()
+            # Release the pooled connection while waiting — a held-open
+            # transaction per waiting TV would starve the pool (size 5). The
+            # bot's commit wakes us in ~0 ms; the timeout is only a safety net
+            # for a signal that never arrives (bot in another process).
+            await db.rollback()
+            try:
+                await asyncio.wait_for(wake.wait(), timeout=min(remaining, 2.0))
+            except asyncio.TimeoutError:
+                pass
+    finally:
+        login_events.unregister(code, wake)
 
 
 async def _verify_login_code_once(
@@ -336,7 +353,10 @@ async def _verify_login_code_once(
         # Another poller of the same code consumed it between our SELECT and
         # DELETE — treat as still-pending for the loop.
         return None
-    await db.commit()
+
+    # No commit here: the claim, the user lookup and the refresh-session insert
+    # all travel in one transaction. With a remote database every extra commit
+    # is another ~400 ms round trip on the login's critical path.
 
     # Get user
     result = await db.execute(
