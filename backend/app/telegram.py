@@ -36,6 +36,16 @@ if not logger.handlers:
     logger.addHandler(_h)
     logger.propagate = False
 
+# Pyrogram stores one SQLite session file per client under SESSION_DIR and
+# calls sqlite3.connect() on that path directly. A fresh clone (or a container
+# without a pre-created mount point) has no such directory, and every client
+# then fails with sqlite3.OperationalError: unable to open database file —
+# sqlite3 will create the *file*, never the parent directory.
+try:
+    SESSION_DIR.mkdir(parents=True, exist_ok=True)
+except OSError as _exc:  # read-only mount / bad TELEGRAM_SESSION_DIR
+    logger.warning("Could not create session dir %s: %s", SESSION_DIR, _exc)
+
 # In-memory log collector (capped at 200 to prevent memory growth)
 _startup_logs: list[str] = []
 _MAX_DIAG_LOGS = 200
