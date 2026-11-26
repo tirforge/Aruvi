@@ -189,7 +189,13 @@ async def get_current_user_info(
 
 
 @router.post("/generate-code", response_model=LoginCodeResponse)
-@limiter.limit("10/minute")
+# 10/min was too tight: the key is the real client IP, so every device in a
+# household (phone + TV + browser, all behind one NAT) shares a single budget,
+# and each app open / reload / expired-code refresh mints one code. Logging in
+# on a second device could then 429 before it ever reached the bot. Minting a
+# code is not a brute-force surface (the code is server-generated and 6 chars
+# from a 36-char alphabet), so the limit only needs to stop row-spam.
+@limiter.limit("30/minute")
 async def generate_login_code(
     request: Request,
     db: AsyncSession = Depends(get_db),
