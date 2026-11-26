@@ -116,14 +116,23 @@ class SelectiveCompressionMiddleware:
             if message["type"] == "http.response.body":
                 if message.get("more_body"):
                     # Streamed response — flush the original start message
-                    # unmodified and forward chunks raw.
+                    # unmodified and forward chunks raw. Headers are on the
+                    # wire from here on, so the remaining chunks must never be
+                    # re-encoded: clear the flag, otherwise a final
+                    # more_body=False chunk carrying data tried to pop a
+                    # "start" that was already sent (KeyError: 'start').
                     if "start" in state:
                         await send(state.pop("start"))
+                    state["compress"] = False
                     await send(message)
                     return
 
                 body = message.get("body", b"")
-                if state.get("compress") and len(body) >= self.minimum_size:
+                if (
+                    state.get("compress")
+                    and "start" in state
+                    and len(body) >= self.minimum_size
+                ):
                     compressed = _compress(body, state["encoding"])
                     if len(compressed) < len(body):
                         start = state.pop("start")

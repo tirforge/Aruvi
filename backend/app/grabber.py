@@ -5,6 +5,8 @@ Phase 2: grab selected option -> forward, DB record, stream URL
 """
 
 import asyncio
+import base64
+import binascii
 import re
 import logging
 from dataclasses import dataclass, field
@@ -230,8 +232,27 @@ class _IvyPool:
 _ivy_pool = _IvyPool()
 
 
+_PYROGRAM_SESSION_SIZE = 271  # '>BI?256sQ?' — dc_id, api_id, test, auth_key, user_id, is_bot
+
+
+def _session_string_size(value: str) -> int | None:
+    """Decoded byte length of a base64 session string, or ``None`` if invalid."""
+    try:
+        return len(base64.urlsafe_b64decode(value + "=" * (-len(value) % 4)))
+    except (binascii.Error, ValueError):
+        return None
+
+
 def _collect_sessions() -> list[str]:
-    """Collect all available session strings (preferred first)."""
+    """Collect all available session strings (preferred first).
+
+    Only Pyrogram/Kurigram-format strings are returned. A Telethon string
+    session (what scripts/setup_helper.py prints) base64-decodes to a
+    different length and makes Pyrogram's SQLiteStorage.open() raise
+    ``struct.error: unpack requires a buffer of 271 bytes`` on every search —
+    which the router then reported as a rate-limit. Drop those up front and
+    say why, instead of failing on each query.
+    """
     sessions: list[str] = []
     try:
         s = get_settings()
@@ -246,9 +267,23 @@ def _collect_sessions() -> list[str]:
             sessions.extend(s.telegram_bot_session_strings)
     except Exception:
         pass
-    if sessions:
-        _log.info("grabber: collected %d session string(s)", len(sessions))
-    return sessions
+
+    valid: list[str] = []
+    for session in sessions:
+        if _session_string_size(session) == _PYROGRAM_SESSION_SIZE:
+            valid.append(session)
+        else:
+            _log.error(
+                "grabber: session string is not in Pyrogram format "
+                "(decoded %s bytes, expected %d) — this looks like a Telethon "
+                "string session, which the grabber cannot use. Regenerate it "
+                "with a Pyrogram/Kurigram client and update GRAB_SESSION_STRINGS.",
+                _session_string_size(session),
+                _PYROGRAM_SESSION_SIZE,
+            )
+    if valid:
+        _log.info("grabber: collected %d session string(s)", len(valid))
+    return valid
 
 
 async def _start_client(session_str: str) -> Client:

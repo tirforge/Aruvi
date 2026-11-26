@@ -122,7 +122,7 @@ async def grab_search(  # KJ
     if result is None:  # BZ
         raise HTTPException(
             status_code=502,
-            detail="Search failed - Telegram is rate-limiting the search account right now; wait a minute and try again",
+            detail="Search failed - the search account is rate-limited, or its session string is invalid. Check the backend log, then retry in a minute.",
         )  # TS
 
     response = SearchResponse(  # WM
