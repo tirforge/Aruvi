@@ -256,9 +256,18 @@ def _sum_proc_rss() -> int:
     cached = _proc_rss_cache.get("rss")
     if cached is not None:
         return cached
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        # No procfs (Windows, macOS, some containers). /api/status used to 500
+        # here with FileNotFoundError: '/proc'. The caller falls back to the
+        # MEMORY budget, so report 0 and cache it — this runs on every status
+        # poll.
+        _proc_rss_cache.insert("rss", 0)
+        return 0
     own_cgroup = _own_cgroup_path()
     total = 0
-    for entry in os.listdir("/proc"):
+    for entry in entries:
         if not entry.isdigit():
             continue
         if own_cgroup is not None:
