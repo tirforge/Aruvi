@@ -23,16 +23,55 @@ settings = get_settings()
 # Convert database URL for async drivers and handle query params
 url = make_url(settings.database_url)
 
+# Ports used by connection poolers that run in transaction mode (pgBouncer's
+# 6432, Supabase's 6543). They hand each transaction to a different backend
+# connection, so server-side prepared statements cannot survive between
+# statements.
+_POOLER_PORTS = {6432, 6543}
+
+
+def _is_pooled_postgres(pg_url) -> bool:
+    """True when the URL points at a transaction-mode pooler.
+
+    Detected by port, or explicitly via ``?pgbouncer=true`` for poolers on a
+    custom port.
+    """
+    flag = str(pg_url.query.get("pgbouncer", "")).strip().lower()
+    if flag in {"1", "true", "yes", "on"}:
+        return True
+    try:
+        return pg_url.port in _POOLER_PORTS
+    except (TypeError, ValueError):
+        return False
+
+
 if url.drivername == "postgresql":
     url = url.set(drivername="postgresql+asyncpg")
     # Extract non-asyncpg params from URL query
     query = dict(url.query)
     ssl_mode = query.pop("sslmode", None)
     query.pop("schema", None)
+    pooled = _is_pooled_postgres(url)
+    query.pop("pgbouncer", None)
     url = url.set(query=query)
     connect_args = {}
     if ssl_mode:
         connect_args["ssl"] = ssl_mode
+    if pooled:
+        # asyncpg names cached statements "__asyncpg_stmt_N__" per connection.
+        # Behind a transaction pooler a later transaction can land on a backend
+        # where that name is already taken, which fails the connection with
+        # DuplicatePreparedStatementError ("prepared statement
+        # __asyncpg_stmt_1__ already exists"). Disable both the SQLAlchemy-level
+        # cache (prepared_statement_cache_size) and asyncpg's own cache
+        # (statement_cache_size) for pooled URLs. Costs a re-Parse per query,
+        # which is what the pooler requires anyway.
+        connect_args["prepared_statement_cache_size"] = 0
+        connect_args["statement_cache_size"] = 0
+        logger.info(
+            "PostgreSQL pooler detected (port %s) — prepared statement caches disabled",
+            url.port,
+        )
     engine = create_async_engine(
         url,
         echo=False,
