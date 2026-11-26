@@ -24,14 +24,14 @@ android {
         create("tv") {
             dimension = "device"
             targetSdk = 36
-            versionCode = 16
-            versionName = "2.0.1"
+            versionCode = 17
+            versionName = "3.0.0"
         }
         create("mobile") {
             dimension = "device"
             targetSdk = 36
-            versionCode = 18
-            versionName = "2.0.1"
+            versionCode = 19
+            versionName = "3.0.0"
         }
     }
 
@@ -53,6 +53,13 @@ android {
             storePassword = System.getenv("RELEASE_STORE_PASSWORD") ?: localProperties.getProperty("RELEASE_STORE_PASSWORD", "")
             keyAlias = System.getenv("RELEASE_KEY_ALIAS") ?: localProperties.getProperty("RELEASE_KEY_ALIAS", "my-key-alias")
             keyPassword = System.getenv("RELEASE_KEY_PASSWORD") ?: localProperties.getProperty("RELEASE_KEY_PASSWORD", "")
+
+            // v3 signatures carry a key-rotation proof, so the signing key can be
+            // rotated later without changing the applicationId. minSdk 28 makes
+            // v1 (JAR) signing unnecessary.
+            enableV1Signing = false
+            enableV2Signing = true
+            enableV3Signing = true
         }
     }
 

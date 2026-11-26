@@ -39,26 +39,43 @@ jobs:
           cache-cleanup: on-success
 
       - name: Configure release keystore
-        if: ${{ env.KEYS != '' }}
+        # NOTE: a step cannot read its own `env:` from `if:`, so the old
+        # `if: env.KEYS != ''` was always false and the key was never restored
+        # (every "release" APK silently shipped DEBUG-signed). Do the check
+        # inside the script instead.
         env:
           KEYS: ${{ secrets.RELEASE_KEYSTORE_B64 }}
         run: |
-          echo "$KEYS" | base64 -d > android/my-release-key.jks
-          echo "Keystore restored from secret."
+          if [ -n "$KEYS" ]; then
+            printf '%s' "$KEYS" | base64 -d > android/my-release-key.jks
+            echo "Keystore restored from secret ($(stat -c%s android/my-release-key.jks) bytes)."
+          else
+            echo "::warning::RELEASE_KEYSTORE_B64 is not set - the APKs will be DEBUG-signed."
+          fi
 
-      - name: Bake default server URL (workflow_dispatch with server_url)
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.server_url != ''
+      - name: Bake default server URL (input > repo variable > secret)
+        env:
+          INPUT_URL: ${{ github.event.inputs.server_url }}
+          VAR_URL: ${{ vars.ARUVI_SERVER_URL }}
+          SECRET_URL: ${{ secrets.ARUVI_SERVER_URL }}
         working-directory: android
         run: |
-          echo "TELEGRAM_TV_SERVER_URL=${{ github.event.inputs.server_url }}" > local.properties
-          echo "Hardcoded DEFAULT_SERVER_URL -> ${{ github.event.inputs.server_url }}"
+          URL="${INPUT_URL:-${VAR_URL:-$SECRET_URL}}"
+          if [ -n "$URL" ]; then
+            echo "TELEGRAM_TV_SERVER_URL=$URL" > local.properties
+            echo "Hardcoded DEFAULT_SERVER_URL -> $URL"
+          else
+            echo "No server URL set (input / vars.ARUVI_SERVER_URL / secrets.ARUVI_SERVER_URL); using the Gradle default."
+          fi
 
-      - name: Build APKs (release, R8-minified, debug-signed when no release key)
+      - name: Build APKs (release, R8-minified, release-signed when the key is set)
         working-directory: android
         env:
-          RELEASE_STORE_FILE: ${{ secrets.RELEASE_STORE_FILE }}
+          # The keystore step above writes android/my-release-key.jks, which is
+          # also the Gradle default; the alias/passwords come from repo secrets.
+          RELEASE_STORE_FILE: ${{ secrets.RELEASE_STORE_FILE || '../my-release-key.jks' }}
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
-          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS || 'aarsha' }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
           ./gradlew --no-daemon --build-cache --parallel :app:assembleMobileRelease :app:assembleTvRelease
@@ -66,6 +83,24 @@ jobs:
           cp app/build/outputs/apk/mobile/release/app-mobile-release.apk dist/Aruvi-mobile.apk
           cp app/build/outputs/apk/tv/release/app-tv-release.apk dist/Aruvi-tv.apk
           ls -la dist
+
+      - name: Verify APK signing (v2 + v3)
+        working-directory: android
+        run: |
+          set -euo pipefail
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          echo "using $BT"
+          fail=0
+          for apk in dist/*.apk; do
+            echo "== $apk"
+            out=$("$BT/apksigner" verify --verbose --min-sdk-version 24 --print-certs "$apk")
+            echo "$out" | grep -E "Verified using v[23] scheme|Signer #1 certificate (DN|SHA-256)"
+            if echo "$out" | grep -q "CN=Android Debug"; then
+              echo "::error::$apk is DEBUG-signed - refusing to publish it."
+              fail=1
+            fi
+          done
+          exit $fail
 
       # Attach APKs to the release that triggered this run (release event)
       - name: Upload APKs to release (release event)
