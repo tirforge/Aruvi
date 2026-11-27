@@ -39,6 +39,12 @@ def _is_pooled_postgres(pg_url) -> bool:
     flag = str(pg_url.query.get("pgbouncer", "")).strip().lower()
     if flag in {"1", "true", "yes", "on"}:
         return True
+    # Neon's pooler is pgbouncer in transaction mode too, but it is named by
+    # host (ep-xxx-pooler.<region>.aws.neon.tech) and keeps port 5432, so the
+    # port check alone would miss it and every cached prepared statement would
+    # eventually fail with DuplicatePreparedStatementError.
+    if "-pooler" in (pg_url.host or "").lower():
+        return True
     try:
         return pg_url.port in _POOLER_PORTS
     except (TypeError, ValueError):
@@ -51,6 +57,10 @@ if url.drivername == "postgresql":
     query = dict(url.query)
     ssl_mode = query.pop("sslmode", None)
     query.pop("schema", None)
+    # libpq-only option (libpq does SCRAM channel binding). asyncpg negotiates
+    # channel binding itself and rejects the keyword outright, so a URL copied
+    # from the Neon/Supabase dashboard fails to connect until it is dropped.
+    query.pop("channel_binding", None)
     pooled = _is_pooled_postgres(url)
     query.pop("pgbouncer", None)
     url = url.set(query=query)
