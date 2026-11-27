@@ -75,7 +75,7 @@ jobs:
           # also the Gradle default; the alias/passwords come from repo secrets.
           RELEASE_STORE_FILE: ${{ secrets.RELEASE_STORE_FILE || '../my-release-key.jks' }}
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
-          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS || 'aarsha' }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
           ./gradlew --no-daemon --build-cache --parallel :app:assembleMobileRelease :app:assembleTvRelease
