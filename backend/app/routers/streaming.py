@@ -83,7 +83,7 @@ async def _user_from_download_token(request: Request, file_id: int, db: AsyncSes
 
 @router.get("/debug")
 async def streaming_debug(request: Request):
-    # Allow Bearer aarsha or valid admin JWT
+    # Allow the debug bearer token (DEBUG_PASSWORD) or a valid admin JWT.
     auth = request.headers.get("Authorization", "")
     if not bearer_token_matches(auth, settings.debug_password):
         try:
