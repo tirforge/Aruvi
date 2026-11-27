@@ -55,6 +55,13 @@ class LoginViewModel @Inject constructor(
     private var fetchJob: kotlinx.coroutines.Job? = null
     private var genJob: kotlinx.coroutines.Job? = null
 
+    private companion object {
+        // Server TTL is 10 minutes. Resume a saved code only while it can
+        // still be claimed; the server is the authority on real expiry.
+        const val CODE_TTL_MS = 10 * 60 * 1000L
+        const val CODE_TTL_MARGIN_MS = 15 * 1000L
+    }
+
     init {
         loadServerUrl()
     }
@@ -68,9 +75,41 @@ class LoginViewModel @Inject constructor(
 
             if (url.isNotEmpty()) {
                 fetchBotInfo()
-                generateLoginCode()
+                // Re-attach to the code this device was already showing. The
+                // user leaves for Telegram mid-login and Android recreates the
+                // screen on return; minting a fresh code here replaced the one
+                // they had just claimed in the bot, so the screen polled a code
+                // nobody would ever claim and login never completed.
+                if (!resumePendingCode()) {
+                    generateLoginCode()
+                }
             }
         }
+    }
+
+    /**
+     * Restore the pending code from disk and resume polling it.
+     * @return true when a still-valid code was restored.
+     */
+    private suspend fun resumePendingCode(): Boolean {
+        val pending = settingsRepository.getPendingLoginCode() ?: return false
+        if (System.currentTimeMillis() >= pending.expiresAtMs) {
+            settingsRepository.clearPendingLoginCode()
+            return false
+        }
+        val bot = _uiState.value.botUsername.ifBlank { "telegram" }
+        val link = "https://t.me/$bot?start=${pending.code}"
+        val qrBitmap = withContext(Dispatchers.Default) { generateQrCode(link, 600) }
+        _uiState.value = _uiState.value.copy(
+            loginCode = pending.code,
+            loginUrl = link,
+            qrCodeBitmap = qrBitmap,
+            expiresAt = pending.expiresAtIso,
+            isLoading = false,
+            debugLog = _uiState.value.debugLog + "Resumed code ${pending.code}\n"
+        )
+        startPolling(pending.code)
+        return true
     }
 
     fun updateServerUrl(url: String) {
@@ -177,6 +216,15 @@ class LoginViewModel @Inject constructor(
                             isLoading = false,
                             debugLog = _uiState.value.debugLog + "Success! Code: ${response.code}\n"
                         )
+                        // Persist before polling: if the user is already in
+                        // Telegram when the Activity is recreated, the new
+                        // ViewModel must find this code instead of minting one.
+                        settingsRepository.setPendingLoginCode(
+                            code = response.code,
+                            expiresAtMs = System.currentTimeMillis() +
+                                CODE_TTL_MS - CODE_TTL_MARGIN_MS,
+                            expiresAtIso = response.expiresAt
+                        )
                         startPolling(response.code)
                     },
                     onFailure = { e ->
@@ -210,8 +258,10 @@ class LoginViewModel @Inject constructor(
             // outlives the 10-minute code expiry.
             repeat(75) {
                 val result = authRepository.verifyLoginCode(code)
+                var waitMs = 500L
                 result.fold(
                     onSuccess = { _ ->
+                        settingsRepository.clearPendingLoginCode()
                         _uiState.value = _uiState.value.copy(
                             isPolling = false,
                             isLoggedIn = true
@@ -221,6 +271,7 @@ class LoginViewModel @Inject constructor(
             onFailure = { e ->
                 val msg = e.message.orEmpty()
                 if (msg.contains("expired") || msg.contains("already used") || msg.contains("no longer valid")) {
+                    settingsRepository.clearPendingLoginCode()
                     _uiState.value = _uiState.value.copy(
                         isPolling = false,
                         error = if (msg.contains("already used")) {
@@ -231,12 +282,18 @@ class LoginViewModel @Inject constructor(
                     )
                     return@launch
                 }
+                // 429: back off properly. Retrying every 500 ms while rate
+                // limited only extends the block, and on mobile data a carrier
+                // NATs many users behind one IP.
+                if (msg.contains("Too many requests", ignoreCase = true)) {
+                    waitMs = 5000L
+                }
             }
 
 
                 )
 
-                delay(500)
+                delay(waitMs)
             }
 
             _uiState.value = _uiState.value.copy(

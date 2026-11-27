@@ -192,6 +192,11 @@ class LoginCode(Base):
     telegram_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    # Set the first time the code is exchanged for tokens. Kept (instead of
+    # deleting the row) so a client that lost the response can retry for a
+    # short grace period — Android kills the in-flight request while the user
+    # is in Telegram, and the old delete-on-first-mint made that unrecoverable.
+    consumed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class RefreshSession(Base):

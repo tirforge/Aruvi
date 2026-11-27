@@ -9,7 +9,7 @@ from hashlib import sha256
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, update
+from sqlalchemy import select, delete, func, or_, update
 
 from ..database import get_db
 from ..models import User, LoginCode, RefreshSession
@@ -39,6 +39,12 @@ _bot_info_cache = {"data": None, "ts": 0}
 _BOT_INFO_TTL_SECONDS = 3600
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+# How long after the first successful mint the same code may be exchanged
+# again. Mobile clients lose the response often (Android tears down the
+# in-flight request while the user is in Telegram); this window lets their
+# retry succeed instead of finding the code already deleted.
+CONSUMED_GRACE = timedelta(seconds=90)
 
 
 async def get_bot_info() -> BotInfoResponse:
@@ -341,18 +347,39 @@ async def _verify_login_code_once(
     if not login_code.telegram_id:
         return None
 
-    # Atomically consume the code so two concurrent pollers can't both mint
-    # tokens (the SELECT above is shared by every poller of the same code).
+    # Consume the code — but only mark it, don't delete it.
+    #
+    # The row is kept for CONSUMED_GRACE so a client whose response was lost
+    # can retry and still log in. Android kills the in-flight long-poll while
+    # the user is in Telegram (process/Activity recreation, background socket
+    # teardown), so delete-on-first-mint left the device polling a code that
+    # no longer existed — the "returns from Telegram and never logs in" bug.
+    #
+    # Concurrency is still safe: this UPDATE takes the row lock, so two pollers
+    # of the same code serialise; the second one re-mints for the same user
+    # instead of hanging (both are the same device/account).
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     claim = await db.execute(
-        delete(LoginCode).where(
-            LoginCode.id == login_code.id,
-            LoginCode.telegram_id.is_not(None),
+        update(LoginCode)
+        .where(LoginCode.id == login_code.id)
+        .where(LoginCode.telegram_id.is_not(None))
+        .where(
+            or_(
+                LoginCode.consumed_at.is_(None),
+                LoginCode.consumed_at > now - CONSUMED_GRACE,
+            )
         )
+        .values(consumed_at=func.coalesce(LoginCode.consumed_at, now))
+        .returning(LoginCode.telegram_id)
     )
-    if claim.rowcount != 1:
-        # Another poller of the same code consumed it between our SELECT and
-        # DELETE — treat as still-pending for the loop.
-        return None
+    claimed_telegram_id = claim.scalar_one_or_none()
+    if claimed_telegram_id is None:
+        # Minted and the grace window has passed — terminal, so the client
+        # stops spinning and asks for a new code.
+        raise HTTPException(
+            status_code=410,
+            detail="This code was already used. Generate a new one.",
+        )
 
     # No commit here: the claim, the user lookup and the refresh-session insert
     # all travel in one transaction. With a remote database every extra commit
@@ -360,7 +387,7 @@ async def _verify_login_code_once(
 
     # Get user
     result = await db.execute(
-        select(User).where(User.telegram_id == login_code.telegram_id)
+        select(User).where(User.telegram_id == claimed_telegram_id)
     )
     user = result.scalar_one_or_none()
 

@@ -17,6 +17,13 @@ import javax.inject.Singleton
 
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
+/** A login code this device is polling, persisted across process death. */
+data class PendingLoginCode(
+    val code: String,
+    val expiresAtMs: Long,
+    val expiresAtIso: String?
+)
+
 /**
  * Repository for app settings.
  */
@@ -30,6 +37,7 @@ class SettingsRepository @Inject constructor(
         val BOT_NAME = stringPreferencesKey("bot_name")
         val AUTO_PLAY_NEXT = booleanPreferencesKey("auto_play_next")
         val PREFERRED_QUALITY = stringPreferencesKey("preferred_quality")
+        val PENDING_LOGIN_CODE = stringPreferencesKey("pending_login_code")
     }
 
     /**
@@ -158,6 +166,39 @@ class SettingsRepository @Inject constructor(
     suspend fun setPreferredQuality(quality: String) {
         context.settingsDataStore.edit { prefs ->
             prefs[PreferencesKeys.PREFERRED_QUALITY] = quality
+        }
+    }
+
+    /**
+     * The login code this device is currently polling, or null.
+     *
+     * Persisted because the login screen is destroyed and recreated whenever
+     * the user leaves for Telegram (Activity recreation / process death). The
+     * code used to live only in the ViewModel, so returning from Telegram
+     * minted a brand-new code and abandoned the one the user had just claimed
+     * in the bot — login then never completed.
+     */
+    suspend fun getPendingLoginCode(): PendingLoginCode? {
+        val raw = context.settingsDataStore.data.first()[PreferencesKeys.PENDING_LOGIN_CODE]
+            ?: return null
+        val parts = raw.split("|")
+        if (parts.size < 2) return null
+        val code = parts[0].trim()
+        val expiresAtMs = parts[1].toLongOrNull() ?: return null
+        if (code.isEmpty()) return null
+        return PendingLoginCode(code, expiresAtMs, parts.getOrNull(2)?.takeIf { it.isNotBlank() })
+    }
+
+    suspend fun setPendingLoginCode(code: String, expiresAtMs: Long, expiresAtIso: String?) {
+        context.settingsDataStore.edit { prefs ->
+            prefs[PreferencesKeys.PENDING_LOGIN_CODE] =
+                "$code|$expiresAtMs|${expiresAtIso.orEmpty()}"
+        }
+    }
+
+    suspend fun clearPendingLoginCode() {
+        context.settingsDataStore.edit { prefs ->
+            prefs.remove(PreferencesKeys.PENDING_LOGIN_CODE)
         }
     }
 }
