@@ -1,6 +1,10 @@
 # Secrets / runtime data — never commit
 .env
 **/.env
+# Backups of a live .env (e.g. .env.bak-supabase) hold the same credentials.
+# The template stays tracked.
+**/.env.*
+!**/.env.example
 *.session
 *.session-journal
 backend/session/
