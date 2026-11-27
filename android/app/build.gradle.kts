@@ -1,4 +1,4 @@
-import java.util.Properties
+﻿import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -24,14 +24,14 @@ android {
         create("tv") {
             dimension = "device"
             targetSdk = 36
-            versionCode = 17
-            versionName = "3.0.0"
+            versionCode = 21
+            versionName = "3.0.1"
         }
         create("mobile") {
             dimension = "device"
             targetSdk = 36
-            versionCode = 19
-            versionName = "3.0.0"
+            versionCode = 21
+            versionName = "3.0.1"
         }
     }
 
@@ -79,7 +79,7 @@ android {
                 signingConfigs.getByName("release")
             } else {
                 // Debug-signed APKs can't be updated over a release-signed
-                // install and are trivially re-signed by anyone — never ship
+                // install and are trivially re-signed by anyone â€” never ship
                 // one without noticing.
                 logger.warn(
                     "WARNING: release build is signed with the DEBUG keystore " +
